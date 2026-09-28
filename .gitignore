@@ -1,0 +1,42 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# C extensions
+*.obj
+*.dll
+*.lib
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.spec.bak
+
+# Unit test / coverage reports
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environments
+pyenv/
+venv/
+env/
+.venv/
+ENV/
+
+# Local audio test recordings & samples
+*.wav
+
+# Logs
+*.log
+
+# Editor & OS artifacts
+.vscode/
+.idea/
+*.swp
+*.swo
+Thumbs.db
+Desktop.ini

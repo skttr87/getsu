@@ -1,0 +1,183 @@
+"""
+Digital Signal Processing (DSP) Module for Getsu.
+Features:
+- Biquad High-Pass Filter (80Hz Butterworth rumble filter for cooling pads / desk bumps)
+- Adaptive Soft-Knee Noise Gate with Hangover (eliminates cooling pad fan hiss between words)
+- RMS / Peak level metering
+"""
+import math
+import numpy as np
+
+
+class HighPassFilter:
+    """
+    2nd-order IIR Butterworth High-Pass Filter (Biquad).
+    Cuts out sub-bass frequencies (< 80 Hz) like laptop cooling pad vibrations,
+    desk thumps, and electrical hum before it reaches the AI model.
+    """
+
+    def __init__(self, cutoff_hz: float = 80.0, sample_rate: float = 48000.0):
+        self.cutoff_hz = cutoff_hz
+        self.sample_rate = sample_rate
+        self.reset()
+        self._calculate_coefficients()
+
+    def _calculate_coefficients(self):
+        w0 = 2.0 * math.pi * self.cutoff_hz / self.sample_rate
+        cos_w0 = math.cos(w0)
+        sin_w0 = math.sin(w0)
+        q = 1.0 / math.sqrt(2.0)  # Butterworth Q = 0.7071
+        alpha = sin_w0 / (2.0 * q)
+
+        b0 = (1.0 + cos_w0) / 2.0
+        b1 = -(1.0 + cos_w0)
+        b2 = (1.0 + cos_w0) / 2.0
+        a0 = 1.0 + alpha
+        a1 = -2.0 * cos_w0
+        a2 = 1.0 - alpha
+
+        # Normalize by a0
+        self.b0 = b0 / a0
+        self.b1 = b1 / a0
+        self.b2 = b2 / a0
+        self.a1 = a1 / a0
+        self.a2 = a2 / a0
+
+    def reset(self):
+        self.x1 = 0.0
+        self.x2 = 0.0
+        self.y1 = 0.0
+        self.y2 = 0.0
+        self._out_buffer: np.ndarray | None = None
+
+    def process(self, frame: np.ndarray) -> np.ndarray:
+        """
+        Process a 1D float32 audio frame through the filter.
+        Uses Direct Form I for numerical stability with zero heap allocations.
+        """
+        n = len(frame)
+        if self._out_buffer is None or len(self._out_buffer) != n:
+            self._out_buffer = np.empty(n, dtype=np.float32)
+
+        out = self._out_buffer
+        b0, b1, b2 = self.b0, self.b1, self.b2
+        a1, a2 = self.a1, self.a2
+        x1, x2, y1, y2 = self.x1, self.x2, self.y1, self.y2
+
+        # Fast C-level list unpack avoids 480 numpy scalar wrapper allocations
+        frame_list = frame.tolist() if isinstance(frame, np.ndarray) else frame
+        for i in range(n):
+            x0 = frame_list[i]
+            y0 = b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+            out[i] = y0
+            x2 = x1
+            x1 = x0
+            y2 = y1
+            y1 = y0
+
+        self.x1, self.x2, self.y1, self.y2 = x1, x2, y1, y2
+        return out
+
+
+class AdaptiveNoiseGate:
+    """
+    Adaptive Dual-Threshold (Hysteresis) Soft-Knee Noise Gate.
+    Features:
+    - Open Threshold: Higher threshold (0.75) prevents cooling pad fan noise from opening mic.
+    - Close Threshold (Hysteresis): Lower threshold (0.45) keeps gate 100% open during soft
+      word endings and unvoiced consonants ('s', 't', 'p', 'th', 'd').
+    - Extended Hangover (180ms): Ensures vocal decay finishes naturally without fading early.
+    - Smooth Exponential Decay: Gently fades to absolute zero silence between sentences.
+    """
+
+    def __init__(
+        self,
+        threshold: float = 0.75,
+        close_threshold: float = 0.45,
+        hangover_ms: float = 180.0,
+        decay_ms: float = 40.0,
+        attack_ms: float = 15.0,
+        frame_ms: float = 10.0,
+    ):
+        self.threshold = threshold
+        self.close_threshold = close_threshold
+        self.hangover_frames = max(1, int(hangover_ms / frame_ms))
+        decay_factor = frame_ms / decay_ms
+        self.decay_rate = math.exp(-decay_factor)
+        attack_factor = frame_ms / attack_ms
+        self.attack_rate = 1.0 - math.exp(-attack_factor)
+
+        self.is_open = False
+        self.current_gain = 0.0
+        self.frames_since_speech = self.hangover_frames + 10
+        self._zero_buffer: np.ndarray | None = None
+
+    def process(self, frame: np.ndarray, speech_prob: float, in_place: bool = False) -> tuple[np.ndarray, float]:
+        """
+        Applies hysteresis soft-knee gating based on RNNoise speech probability.
+        Smooth exponential attack (15ms) eliminates onset clicks.
+        Returns the gated audio frame and current applied gain.
+        """
+        if not self.is_open:
+            # Mic is closed: require higher speech probability to open (rejects fans)
+            if speech_prob >= self.threshold:
+                self.is_open = True
+                self.frames_since_speech = 0
+                target_gain = 1.0
+            else:
+                target_gain = 0.0
+        else:
+            # Mic is active: stay open during trailing word endings (speech_prob >= close_threshold)
+            if speech_prob >= self.close_threshold:
+                self.frames_since_speech = 0
+                target_gain = 1.0
+            else:
+                self.frames_since_speech += 1
+                if self.frames_since_speech <= self.hangover_frames:
+                    # In hangover window: hold gate 100% open
+                    target_gain = 1.0
+                else:
+                    # Speech ended: close gate and begin fade to silence
+                    self.is_open = False
+                    target_gain = 0.0
+
+        # Smooth gain transition (exponential attack, exponential decay)
+        if target_gain > self.current_gain:
+            self.current_gain += (target_gain - self.current_gain) * self.attack_rate
+            if self.current_gain >= 0.999:
+                self.current_gain = 1.0
+        elif target_gain < self.current_gain:
+            self.current_gain = self.current_gain * self.decay_rate
+            if self.current_gain < 0.001:
+                self.current_gain = 0.0
+
+        if self.current_gain >= 0.999:
+            return frame, 1.0
+        elif self.current_gain <= 0.0001:
+            if in_place:
+                frame.fill(0.0)
+                return frame, 0.0
+            else:
+                if self._zero_buffer is None or len(self._zero_buffer) != len(frame):
+                    self._zero_buffer = np.zeros(len(frame), dtype=frame.dtype)
+                return self._zero_buffer.copy(), 0.0
+        else:
+            if in_place:
+                frame *= self.current_gain
+                return frame, self.current_gain
+            else:
+                return (frame * self.current_gain).astype(frame.dtype), self.current_gain
+
+
+def calculate_levels(frame: np.ndarray):
+    """Calculate Peak and RMS levels in dBFS using BLAS dot product."""
+    if len(frame) == 0:
+        return -100.0, -100.0
+    peak = float(np.max(np.abs(frame)))
+    rms = float(np.sqrt(np.dot(frame, frame) / len(frame)))
+    
+    # Convert to dBFS (reference 1.0 for normalized float32; 32767 only if PCM range > 100)
+    ref = 32767.0 if peak > 100.0 else 1.0
+    peak_db = 20.0 * math.log10(max(peak / ref, 1e-5))
+    rms_db = 20.0 * math.log10(max(rms / ref, 1e-5))
+    return peak_db, rms_db

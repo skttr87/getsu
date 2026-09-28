@@ -97,7 +97,7 @@ Commercial noise cancellation tools often force subscriptions, burn dedicated GP
 3. Run **`getsu.exe`**.
 4. In the app:
    - Select your **Microphone**.
-   - (First time only) Getsu will automatically detect and Install VB-Cable driver., click **Install Driver**.
+   - (First time only) Getsu will automatically detect and Install VB-Cable driver, click **Install Driver**.
    - Select microphone input and Click **START**.
 5. In Discord, Steam, or Zoom, set your **Input Device / Microphone** to:  
    👉 **`CABLE Output (VB-Audio Virtual Cable)`**

@@ -93,7 +93,7 @@ Commercial noise cancellation tools often force subscriptions, burn dedicated GP
 ## 📥 Quick Start (Ready-to-Run Executable)
 
 1. Download the latest release: **[`Getsu-v1.1.0-windows-x64.zip`](https://github.com/skttr87/getsu/releases/latest)**.
-2. Extract the zip folder anywhere on your PC (e.g., `D:\Tools\Getsu\`).
+2. Extract the zip folder anywhere on your PC (e.g., `D:\Getsu\`).
 3. Run **`getsu.exe`**.
 4. In the app:
    - (First time only) Getsu will automatically detect and Install VB-Cable driver, click **Install Driver**.

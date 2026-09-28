@@ -101,6 +101,7 @@ Commercial noise cancellation tools often force subscriptions, burn dedicated GP
    - Click **START**.
 5. In Discord, Steam, or Zoom, etc set your **Input Device / Microphone** to:  
    👉 **`CABLE Output (VB-Audio Virtual Cable)`**
+6. It is recommended to disable in app (Steam, Discord, Zoom, Teams, etc) noise cancellation because it is already handled by Getsu.
 
 ---
 

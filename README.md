@@ -156,6 +156,13 @@ Getsu automatically saves your settings in `config.json` next to the executable:
 - **[RNNoise](https://github.com/xiph/rnnoise)**: Recurrent neural network for audio noise reduction by Jean-Marc Valin (Xiph.Org / Mozilla).
 - **[VB-Audio](https://vb-audio.com/Cable/)**: High-fidelity virtual audio cable driver.
 - **[DearPyGui](https://github.com/hoffstadt/DearPyGui)**: Fast, GPU-accelerated immediate-mode Python GUI framework.
+- **[Icons8](https://icons8.com/)**: Application iconography and UI assets.
+
+---
+
+## ☕ Sponsored
+
+- **[Kopi Reman](https://www.instagram.com/kopireman/)**
 
 ---
 

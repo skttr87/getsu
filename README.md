@@ -64,18 +64,16 @@ Commercial noise cancellation tools often force subscriptions, burn dedicated GP
 
 ---
 
-## 📥 How to use
+## 🚀 Quick Start
 
-1. Download the latest release: **[`Getsu-v1.1.0-windows-x64.zip`](https://github.com/skttr87/getsu/releases/latest)**.
-2. Extract the zip folder anywhere on your PC (e.g., `D:\Getsu\`).
-3. Run **`getsu.exe`**.
-4. In the app:
-   - (First time only) Getsu will automatically detect and Install VB-Cable driver, click **Install Driver**.
-   - Select your input **Microphone**.
-   - Click **START**.
-5. In Discord, Steam, or Zoom, etc set your **Input Device / Microphone** to:  
-   👉 **`CABLE Output (VB-Audio Virtual Cable)`**
-6. It is recommended to disable in app (Steam, Discord, Zoom, Teams, etc) noise cancellation because it is already handled by Getsu.
+1. **Download & Extract**: Grab [`Getsu-v1.1.0-windows-x64.zip`](https://github.com/skttr87/getsu/releases/latest) and extract it anywhere.
+2. **Run `getsu.exe`**:
+   - If prompted, click **Install Driver** (one-time only VB-Cable setup).
+   - Choose your input **Microphone** and click **START**.
+3. **Route Your Voice**:
+   - In Discord, Steam, or Zoom, set your input device to:  
+     👉 **`CABLE Output (VB-Audio Virtual Cable)`**
+4. **Disable In-App Noise Filters**: Turn off Discord Krisp or Zoom background noise suppression to prevent double-filtering.
 
 ---
 

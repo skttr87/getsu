@@ -64,7 +64,7 @@ Commercial noise cancellation tools often force subscriptions, burn dedicated GP
 
 ---
 
-## 🚀 Quick Start
+## 📥 How to use
 
 1. **Download & Extract**: Grab [`Getsu-v1.1.0-windows-x64.zip`](https://github.com/skttr87/getsu/releases/latest) and extract it anywhere.
 2. **Run `getsu.exe`**:

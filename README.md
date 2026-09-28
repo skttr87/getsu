@@ -1,4 +1,4 @@
-# Getsu (月) — Real-Time AI Noise Cancellation
+# Getsu — Real-Time AI Noise Cancellation
 
 <p align="center">
   <img src="getsu-icon.png" alt="Getsu Icon" width="128" height="128" />
@@ -18,6 +18,9 @@
 </p>
 
 ---
+
+> [!NOTE]
+> **Getsu** is derived from two Acehnese words: **get**, which means *"good"*, and **su**, which means *"sound"*.
 
 ## ⚡ Why Getsu?
 

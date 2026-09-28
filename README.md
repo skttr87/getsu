@@ -66,7 +66,7 @@ Commercial noise cancellation tools often force subscriptions, burn dedicated GP
 
 ## 📥 How to use
 
-1. **Download & Extract**: Grab [`Getsu-v1.1.0-windows-x64.zip`](https://github.com/skttr87/getsu/releases/latest) and extract it anywhere.
+1. **Download & Extract**: Download [`Getsu-v1.1.0-windows-x64.zip`](https://github.com/skttr87/getsu/releases/latest) and extract it anywhere.
 2. **Run `getsu.exe`**:
    - If prompted, click **Install Driver** (one-time only VB-Cable setup).
    - Choose your input **Microphone** and click **START**.

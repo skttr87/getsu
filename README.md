@@ -22,6 +22,20 @@
 > [!NOTE]
 > **Getsu** is derived from two Acehnese words: **get**, which means *"good"*, and **su**, which means *"sound"*.
 
+---
+
+## ☕ Sponsored
+
+<p align="center">
+  <a href="https://www.instagram.com/kopireman/" target="_blank">
+    <img src="assets/kopi-reman.png" alt="Kopi Reman" width="160" />
+  </a>
+  <br>
+  <strong><a href="https://www.instagram.com/kopireman/" target="_blank">Kopi Reman</a></strong>
+</p>
+
+---
+
 ## ⚡ Why Getsu?
 
 Commercial noise cancellation tools often force subscriptions, burn dedicated GPU VRAM, or require always-on telemetry:
@@ -157,12 +171,6 @@ Getsu automatically saves your settings in `config.json` next to the executable:
 - **[VB-Audio](https://vb-audio.com/Cable/)**: High-fidelity virtual audio cable driver.
 - **[DearPyGui](https://github.com/hoffstadt/DearPyGui)**: Fast, GPU-accelerated immediate-mode Python GUI framework.
 - **[Icons8](https://icons8.com/)**: Application iconography and UI assets.
-
----
-
-## ☕ Sponsored
-
-- **[Kopi Reman](https://www.instagram.com/kopireman/)**
 
 ---
 

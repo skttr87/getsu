@@ -1,7 +1,7 @@
 # Getsu — Real-Time AI Noise Cancellation
 
 <p align="center">
-  <img src="assets/getsu-ui.png" alt="Getsu Interface" width="450" />
+  <img src="getsu-icon.png" alt="Getsu Icon" width="128" height="128" />
 </p>
 
 <p align="center">
@@ -66,14 +66,17 @@ Commercial noise cancellation tools often force subscriptions, burn dedicated GP
 
 ## 📥 How to use
 
-1. **Download & Extract**: Download [`Getsu-v1.1.0-windows-x64.zip`](https://github.com/skttr87/getsu/releases/latest) and extract it anywhere.
-2. **Run `getsu.exe`**:
-   - If prompted, click **Install Driver** (one-time only VB-Cable setup).
+1. **Download Installer**: Download **[`Getsu-v1.1.0-Setup.exe`](https://github.com/skttr87/getsu/releases/latest)**.
+2. **Run Setup**:
+   - Launch the installer and choose your destination folder (e.g., `C:\Program Files\Getsu` or `D:\Getsu`).
+   - The installer automatically detects and sets up the **VB-Audio Virtual Cable** driver in the background.
+3. **Launch Getsu**:
+   - Open **Getsu** from your Desktop or Start Menu.
    - Choose your input **Microphone** and click **START**.
-3. **Route Your Voice**:
+4. **Route Your Voice**:
    - In Discord, Steam, or Zoom, set your input device to:  
      👉 **`CABLE Output (VB-Audio Virtual Cable)`**
-4. **Disable In-App Noise Filters**: Turn off Discord Krisp or Zoom background noise suppression to prevent double-filtering.
+5. **Disable In-App Noise Filters**: Turn off Discord Krisp or Zoom background noise suppression to prevent double-filtering.
 
 ---
 

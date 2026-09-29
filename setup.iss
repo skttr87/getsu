@@ -29,6 +29,13 @@ WizardStyle=modern
 UninstallDisplayIcon={app}\getsu.exe
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+VersionInfoVersion=1.1.0.0
+VersionInfoCompany=Getsu AI
+VersionInfoDescription=Getsu - AI Real-Time Noise Cancellation Setup
+VersionInfoCopyright=Copyright (c) 2026 skttr87 (MIT License)
+VersionInfoProductName=Getsu AI Noise Cancellation
+VersionInfoProductVersion=1.1.0
+VersionInfoOriginalFileName=Getsu-v1.1.0-Setup.exe
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

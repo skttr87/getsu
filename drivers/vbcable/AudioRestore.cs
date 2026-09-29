@@ -1,6 +1,15 @@
 using System;
 using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
+
+[assembly: AssemblyTitle("Getsu Audio Endpoint Helper")]
+[assembly: AssemblyDescription("Preserves and restores physical speaker endpoints during driver installation.")]
+[assembly: AssemblyCompany("Getsu AI")]
+[assembly: AssemblyProduct("Getsu AI Noise Cancellation")]
+[assembly: AssemblyCopyright("Copyright (c) 2026 skttr87 (MIT License)")]
+[assembly: AssemblyVersion("1.1.0.0")]
+[assembly: AssemblyFileVersion("1.1.0.0")]
 
 namespace AudioRestoreTool
 {

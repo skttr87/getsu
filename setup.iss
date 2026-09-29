@@ -33,6 +33,9 @@ ArchitecturesInstallIn64BitMode=x64compatible
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
+[Messages]
+FinishedLabel=Setup has finished installing [name] on your computer.%n%nNotice: Keep your normal Speakers or Headphones selected for your Windows sound (taskbar volume icon). Set 'CABLE Output' only as your Microphone inside Discord, Steam, or Zoom.
+
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
@@ -54,9 +57,10 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilen
 // Detect if VB-Audio Virtual Cable is already installed
 function IsVBCableInstalled(): Boolean;
 begin
-  Result := RegKeyExists(HKLM, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\VB:VBCABLE') or
-            FileExists(ExpandConstant('{sys}\drivers\vbaudio_cable64_win7.sys')) or
-            FileExists(ExpandConstant('{sys}\drivers\vbaudio_cable64_vista.sys'));
+  // Check the Windows kernel service entry created by the VB-Audio driver
+  Result := RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\VBAudioVACMME') or
+            RegKeyExists(HKLM, 'SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\VB:VBCABLE') or
+            RegKeyExists(HKLM, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\VB:VBCABLE');
 end;
 
 var

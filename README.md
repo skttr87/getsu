@@ -78,6 +78,9 @@ Commercial noise cancellation tools often force subscriptions, burn dedicated GP
      👉 **`CABLE Output (VB-Audio Virtual Cable)`**
 5. **Disable In-App Noise Filters**: Turn off Discord Krisp or Zoom background noise suppression to prevent double-filtering.
 
+> [!IMPORTANT]
+> **Windows Audio Playback**: Keep your computer's main sound output set to your real **Speakers or Headphones** (the volume icon in your Windows taskbar). **`CABLE Output`** should only be selected as your **Microphone** inside voice apps (Discord, Steam, Zoom).
+
 ---
 
 ## 🎧 Audio Processing Pipeline

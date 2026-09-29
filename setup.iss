@@ -23,7 +23,6 @@ PrivilegesRequired=admin
 OutputDir=dist\installer
 OutputBaseFilename=Getsu-v1.1.0-Setup
 SetupIconFile=getsu.ico
-MinVersion=10.0.10240
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -52,8 +51,6 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "dist\getsu\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Bundled virtual audio cable driver
 Source: "drivers\vbcable\*"; DestDir: "{app}\drivers\vbcable"; Flags: ignoreversion recursesubdirs createallsubdirs
-; Helper tool to detect endpoints during installer initialization
-Source: "drivers\vbcable\AudioRestore.exe"; Flags: dontcopy
 ; Project assets & license
 Source: "LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
@@ -72,26 +69,6 @@ Type: dirifempty; Name: "{app}\_internal"
 Type: dirifempty; Name: "{app}"
 
 [Code]
-// Detect if VB-Audio Virtual Cable endpoint is actually active on this computer
-function IsVBCableInstalled(): Boolean;
-var
-  ResultCode: Integer;
-  AudioRestoreExe: String;
-begin
-  Result := False;
-  try
-    ExtractTemporaryFile('AudioRestore.exe');
-    AudioRestoreExe := ExpandConstant('{tmp}\AudioRestore.exe');
-    if FileExists(AudioRestoreExe) then
-    begin
-      Exec(AudioRestoreExe, '--check-vbcable', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-      Result := (ResultCode = 0);
-    end;
-  except
-    Result := False;
-  end;
-end;
-
 var
   RemoveVBCableRequested: Boolean;
 

@@ -1,7 +1,7 @@
 # Getsu — Real-Time AI Noise Cancellation
 
 <p align="center">
-  <img src="assets/getsu-ui.png" alt="Getsu Interface" width="450" />
+  <img src="https://raw.githubusercontent.com/skttr87/getsu/main/assets/getsu-ui.png" alt="Getsu Interface" width="450" />
 </p>
 
 <p align="center">
@@ -28,7 +28,7 @@
 
 <p align="center">
   <a href="https://www.instagram.com/kopireman/" target="_blank">
-    <img src="assets/kopi-reman.png" alt="Kopi Reman" width="160" />
+    <img src="https://raw.githubusercontent.com/skttr87/getsu/main/assets/kopi-reman.png" alt="Kopi Reman" width="160" />
   </a>
   <br>
   <strong><a href="https://www.instagram.com/kopireman/" target="_blank">Kopi Reman</a></strong>
@@ -69,7 +69,7 @@ Commercial noise cancellation tools often force subscriptions, burn dedicated GP
 1. **Download Installer**: Download **[`Getsu-v1.1.0-Setup.exe`](https://github.com/skttr87/getsu/releases/latest)**.
 2. **Run Setup**:
    - Launch the installer and choose your destination folder (e.g., `C:\Program Files\Getsu` or `D:\Getsu`).
-   - The installer automatically detects and sets up the **VB-Audio Virtual Cable** driver in the background.
+   - The installer automatically configures the **VB-Audio Virtual Cable** driver in the background and preserves your physical speakers/headphones as the default Windows sound device.
 3. **Launch Getsu**:
    - Open **Getsu** from your Desktop or Start Menu.
    - Choose your input **Microphone** and click **START**.

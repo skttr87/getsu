@@ -193,19 +193,51 @@ def auto_select_output_device() -> Tuple[Dict, str]:
     return outputs[0] if outputs else {'index': 0, 'name': 'Default Output'}, "Monitor Mode"
 
 
+def ensure_physical_default_playback():
+    """
+    Ensures that Windows default playback device is physical speakers/headphones, never CABLE Input.
+    """
+    try:
+        if getattr(sys, 'frozen', False):
+            tool_exe = os.path.join(getattr(sys, '_MEIPASS', ''), "drivers", "vbcable", "AudioRestore.exe")
+            if not os.path.exists(tool_exe):
+                tool_exe = os.path.join(os.path.dirname(sys.executable), "drivers", "vbcable", "AudioRestore.exe")
+        else:
+            tool_exe = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "drivers", "vbcable", "AudioRestore.exe"))
+
+        if os.path.exists(tool_exe):
+            subprocess.run([tool_exe, "--ensure-physical"], creationflags=0x08000000, timeout=5)
+    except Exception as e:
+        print(f"[WARN] Failed to verify default playback device: {e}")
+
+
 def install_vbcable_driver() -> bool:
     """
-    Triggers silent installation of bundled VB-Audio Virtual Cable with UAC elevation.
+    Triggers silent installation of bundled VB-Audio Virtual Cable with UAC elevation,
+    automatically preserving the user's physical speakers/headphones as default playback.
     """
     if getattr(sys, 'frozen', False):
-        setup_exe = os.path.join(getattr(sys, '_MEIPASS', ''), "drivers", "vbcable", "VBCABLE_Setup_x64.exe")
-        if not os.path.exists(setup_exe):
-            setup_exe = os.path.join(os.path.dirname(sys.executable), "drivers", "vbcable", "VBCABLE_Setup_x64.exe")
+        base_driver_dir = os.path.join(getattr(sys, '_MEIPASS', ''), "drivers", "vbcable")
+        if not os.path.exists(base_driver_dir):
+            base_driver_dir = os.path.join(os.path.dirname(sys.executable), "drivers", "vbcable")
     else:
-        setup_exe = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "drivers", "vbcable", "VBCABLE_Setup_x64.exe"))
+        base_driver_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "drivers", "vbcable"))
+
+    setup_exe = os.path.join(base_driver_dir, "VBCABLE_Setup_x64.exe")
+    restore_exe = os.path.join(base_driver_dir, "AudioRestore.exe")
+
     if not os.path.exists(setup_exe):
         print(f"[ERROR] Driver setup not found at: {setup_exe}")
         return False
+
+    backup_file = os.path.join(os.environ.get("TEMP", "C:\\Windows\\Temp"), "getsu_audio_backup.txt")
+
+    # 1. Pre-backup physical playback endpoint
+    if os.path.exists(restore_exe):
+        try:
+            subprocess.run([restore_exe, "--backup", backup_file], creationflags=0x08000000, timeout=5)
+        except Exception:
+            pass
 
     print(f"[INSTALL] Requesting UAC elevation to install VB-Audio Virtual Cable...")
     # Run via PowerShell with RunAs verb (escape single quotes for usernames with apostrophes)
@@ -217,6 +249,13 @@ def install_vbcable_driver() -> bool:
     ]
     try:
         res = subprocess.run(cmd, capture_output=True, text=True)
+        # 2. Post-restore physical playback endpoint
+        if os.path.exists(restore_exe):
+            try:
+                subprocess.run([restore_exe, "--restore", backup_file], creationflags=0x08000000, timeout=5)
+                subprocess.run([restore_exe, "--ensure-physical"], creationflags=0x08000000, timeout=5)
+            except Exception:
+                pass
         return res.returncode == 0
     except Exception as e:
         print(f"[ERROR] Failed to launch installer: {e}")

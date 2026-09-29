@@ -30,6 +30,7 @@ from src.devices import (
     auto_select_output_device,
     install_vbcable_driver,
     get_all_devices,
+    ensure_physical_default_playback,
 )
 from src.config import load_config, save_config
 from src.stream import AudioEngine, create_engine_from_config
@@ -186,6 +187,9 @@ class GetsuGUI:
 
         # Start stream health watchdog
         threading.Thread(target=self._watchdog_loop, daemon=True).start()
+
+        # Safeguard: Ensure Windows default playback device remains physical speakers/headphones
+        threading.Thread(target=ensure_physical_default_playback, daemon=True).start()
 
     def s(self, val: float) -> int:
         """Scale pixel value according to active monitor DPI."""

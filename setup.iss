@@ -115,11 +115,45 @@ begin
   end;
 end;
 
-[Run]
-; Silently install VB-Cable driver if NOT already present on this computer
-Filename: "{app}\drivers\vbcable\VBCABLE_Setup_x64.exe"; Parameters: "-i -h"; \
-  StatusMsg: "Detecting and configuring audio drivers..."; \
-  Check: not IsVBCableInstalled; Flags: runhidden waituntilterminated
+// Automatically install VB-Cable if needed, preserving physical speakers as default playback device
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+  DriverSetupExe: String;
+  AudioRestoreExe: String;
+  BackupFile: String;
+begin
+  if CurStep = ssPostInstall then
+  begin
+    if not IsVBCableInstalled() then
+    begin
+      AudioRestoreExe := ExpandConstant('{app}\drivers\vbcable\AudioRestore.exe');
+      DriverSetupExe := ExpandConstant('{app}\drivers\vbcable\VBCABLE_Setup_x64.exe');
+      BackupFile := ExpandConstant('{tmp}\default_audio_backup.txt');
 
+      // 1. Backup current default playback device (Speakers / Headphones)
+      if FileExists(AudioRestoreExe) then
+      begin
+        Exec(AudioRestoreExe, '--backup "' + BackupFile + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      end;
+
+      // 2. Silently install VB-Cable driver
+      if FileExists(DriverSetupExe) then
+      begin
+        Exec(DriverSetupExe, '-i -h', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+        Sleep(1200);
+      end;
+
+      // 3. Immediately restore original physical speakers/headphones as default Windows output
+      if FileExists(AudioRestoreExe) then
+      begin
+        Exec(AudioRestoreExe, '--restore "' + BackupFile + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+        Exec(AudioRestoreExe, '--ensure-physical', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      end;
+    end;
+  end;
+end;
+
+[Run]
 ; Post-install launch option
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent

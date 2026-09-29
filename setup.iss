@@ -44,6 +44,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "dist\getsu\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Bundled virtual audio cable driver
 Source: "drivers\vbcable\*"; DestDir: "{app}\drivers\vbcable"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Helper tool to detect endpoints during installer initialization
+Source: "drivers\vbcable\AudioRestore.exe"; Flags: dontcopy
 ; Project assets & license
 Source: "LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
@@ -54,13 +56,24 @@ Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFile
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\getsu.ico"; Tasks: desktopicon
 
 [Code]
-// Detect if VB-Audio Virtual Cable is already installed
+// Detect if VB-Audio Virtual Cable endpoint is actually active on this computer
 function IsVBCableInstalled(): Boolean;
+var
+  ResultCode: Integer;
+  AudioRestoreExe: String;
 begin
-  // Check the Windows kernel service entry created by the VB-Audio driver
-  Result := RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\VBAudioVACMME') or
-            RegKeyExists(HKLM, 'SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\VB:VBCABLE') or
-            RegKeyExists(HKLM, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\VB:VBCABLE');
+  Result := False;
+  try
+    ExtractTemporaryFile('AudioRestore.exe');
+    AudioRestoreExe := ExpandConstant('{tmp}\AudioRestore.exe');
+    if FileExists(AudioRestoreExe) then
+    begin
+      Exec(AudioRestoreExe, '--check-vbcable', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      Result := (ResultCode = 0);
+    end;
+  except
+    Result := False;
+  end;
 end;
 
 var
@@ -85,10 +98,23 @@ end;
 
 // Ask user during uninstall if they also want to remove VB-Cable
 function InitializeUninstall(): Boolean;
+var
+  ResultCode: Integer;
+  AudioRestoreExe: String;
+  IsInstalled: Boolean;
 begin
   Result := True;
   RemoveVBCableRequested := False;
-  if IsVBCableInstalled() then
+  IsInstalled := False;
+
+  AudioRestoreExe := ExpandConstant('{app}\drivers\vbcable\AudioRestore.exe');
+  if FileExists(AudioRestoreExe) then
+  begin
+    Exec(AudioRestoreExe, '--check-vbcable', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    IsInstalled := (ResultCode = 0);
+  end;
+
+  if IsInstalled then
   begin
     if MsgBox('Do you also want to remove the VB-Audio Virtual Cable driver from your system?' + #13#10 + #13#10 +
               '(Note: If other applications like OBS or Discord use this cable, select "No")',
@@ -122,15 +148,23 @@ var
   DriverSetupExe: String;
   AudioRestoreExe: String;
   BackupFile: String;
+  NeedsInstall: Boolean;
 begin
   if CurStep = ssPostInstall then
   begin
-    if not IsVBCableInstalled() then
-    begin
-      AudioRestoreExe := ExpandConstant('{app}\drivers\vbcable\AudioRestore.exe');
-      DriverSetupExe := ExpandConstant('{app}\drivers\vbcable\VBCABLE_Setup_x64.exe');
-      BackupFile := ExpandConstant('{tmp}\default_audio_backup.txt');
+    AudioRestoreExe := ExpandConstant('{app}\drivers\vbcable\AudioRestore.exe');
+    DriverSetupExe := ExpandConstant('{app}\drivers\vbcable\VBCABLE_Setup_x64.exe');
+    BackupFile := ExpandConstant('{tmp}\default_audio_backup.txt');
 
+    NeedsInstall := True;
+    if FileExists(AudioRestoreExe) then
+    begin
+      Exec(AudioRestoreExe, '--check-vbcable', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      NeedsInstall := (ResultCode <> 0);
+    end;
+
+    if NeedsInstall then
+    begin
       // 1. Backup current default playback device (Speakers / Headphones)
       if FileExists(AudioRestoreExe) then
       begin
@@ -141,13 +175,21 @@ begin
       if FileExists(DriverSetupExe) then
       begin
         Exec(DriverSetupExe, '-i -h', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-        Sleep(1200);
+        Sleep(1500);
       end;
 
       // 3. Immediately restore original physical speakers/headphones as default Windows output
       if FileExists(AudioRestoreExe) then
       begin
         Exec(AudioRestoreExe, '--restore "' + BackupFile + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+        Exec(AudioRestoreExe, '--ensure-physical', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      end;
+    end
+    else
+    begin
+      // If already installed, just ensure physical speakers remain default
+      if FileExists(AudioRestoreExe) then
+      begin
         Exec(AudioRestoreExe, '--ensure-physical', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
       end;
     end;

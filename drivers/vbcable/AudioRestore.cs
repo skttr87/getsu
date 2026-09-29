@@ -128,13 +128,38 @@ namespace AudioRestoreTool
         {
             if (args.Length == 0)
             {
-                Console.WriteLine("Usage: AudioRestore.exe [--backup <file> | --restore <file> | --ensure-physical]");
+                Console.WriteLine("Usage: AudioRestore.exe [--backup <file> | --restore <file> | --ensure-physical | --check-vbcable]");
                 return 1;
             }
 
             var enumerator = (IMMDeviceEnumerator)new MMDeviceEnumeratorComObject();
 
-            if (args[0] == "--backup" && args.Length > 1)
+            if (args[0] == "--check-vbcable")
+            {
+                // Returns 0 if active CABLE endpoint is found, 1 if not found
+                IMMDeviceCollection col;
+                if (enumerator.EnumAudioEndpoints(EDataFlow.eRender, 1 /* DEVICE_STATE_ACTIVE */, out col) == 0 && col != null)
+                {
+                    int count;
+                    col.GetCount(out count);
+                    for (int i = 0; i < count; i++)
+                    {
+                        IMMDevice dev;
+                        if (col.Item(i, out dev) == 0 && dev != null)
+                        {
+                            string name = GetFriendlyName(dev).ToLower();
+                            if (name.Contains("cable input") || (name.Contains("cable") && name.Contains("vb-audio")))
+                            {
+                                Console.WriteLine("VB-Cable is installed and active: " + name);
+                                return 0; // Found
+                            }
+                        }
+                    }
+                }
+                Console.WriteLine("VB-Cable is NOT installed");
+                return 1; // Not found
+            }
+            else if (args[0] == "--backup" && args.Length > 1)
             {
                 try
                 {

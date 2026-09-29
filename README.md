@@ -1,7 +1,7 @@
 # Getsu — Real-Time AI Noise Cancellation
 
 <p align="center">
-  <img src="getsu-icon.png" alt="Getsu Icon" width="128" height="128" />
+  <img src="assets/getsu-ui.png" alt="Getsu Interface" width="450" />
 </p>
 
 <p align="center">

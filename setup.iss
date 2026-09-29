@@ -60,6 +60,7 @@ Type: files; Name: "{app}\config.json"
 Type: files; Name: "{app}\*.log"
 Type: dirifempty; Name: "{app}\drivers\vbcable"
 Type: dirifempty; Name: "{app}\drivers"
+Type: dirifempty; Name: "{app}\_internal"
 Type: dirifempty; Name: "{app}"
 
 [Code]
@@ -151,15 +152,17 @@ begin
   if CurUninstallStep = usPostUninstall then
   begin
     AppDir := ExpandConstant('{app}');
-    // Delete runtime generated files
+    // Only delete Getsu's runtime config file
     if FileExists(AddBackslash(AppDir) + 'config.json') then
       DeleteFile(AddBackslash(AppDir) + 'config.json');
 
-    // If folder name is GETSU, ensure all leftover files and directory are cleanly removed
-    if (Uppercase(ExtractFileName(AppDir)) = 'GETSU') and DirExists(AppDir) then
-    begin
-      DelTree(AppDir, True, True, True);
-    end;
+    // Safely remove folders ONLY if completely empty (Win32 RemoveDirectory)
+    // This strictly protects user files: if the folder contains personal documents or is a user profile,
+    // Windows refuses to delete it!
+    RemoveDir(AddBackslash(AppDir) + 'drivers\vbcable');
+    RemoveDir(AddBackslash(AppDir) + 'drivers');
+    RemoveDir(AddBackslash(AppDir) + '_internal');
+    RemoveDir(AppDir);
   end;
 end;
 

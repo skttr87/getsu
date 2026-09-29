@@ -68,7 +68,7 @@ Commercial noise cancellation tools often force subscriptions, burn dedicated GP
 
 1. **Download Installer**: Download **[`Getsu-v1.1.0-Setup.exe`](https://github.com/skttr87/getsu/releases/latest)**.
 2. **Run Setup**:
-   - Launch the installer and choose your destination folder (e.g., `C:\Program Files\Getsu` or `D:\Getsu`).
+   - Launch the installer and choose your destination folder.
    - The installer automatically configures the **VB-Audio Virtual Cable** driver in the background and preserves your physical speakers/headphones as the default Windows sound device.
 3. **Launch Getsu**:
    - Open **Getsu** from your Desktop or Start Menu.

@@ -59,6 +59,9 @@ begin
             FileExists(ExpandConstant('{sys}\drivers\vbaudio_cable64_vista.sys'));
 end;
 
+var
+  RemoveVBCableRequested: Boolean;
+
 // Enforce that installation folder always has a dedicated \Getsu subfolder
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
@@ -72,6 +75,38 @@ begin
     if Uppercase(ExtractFileName(SelectedPath)) <> 'GETSU' then
     begin
       WizardForm.DirEdit.Text := AddBackslash(SelectedPath) + 'Getsu';
+    end;
+  end;
+end;
+
+// Ask user during uninstall if they also want to remove VB-Cable
+function InitializeUninstall(): Boolean;
+begin
+  Result := True;
+  RemoveVBCableRequested := False;
+  if IsVBCableInstalled() then
+  begin
+    if MsgBox('Do you also want to remove the VB-Audio Virtual Cable driver from your system?' + #13#10 + #13#10 +
+              '(Note: If other applications like OBS or Discord use this cable, select "No")',
+              mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
+    begin
+      RemoveVBCableRequested := True;
+    end;
+  end;
+end;
+
+// Execute driver uninstaller before Getsu application files are removed
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  ResultCode: Integer;
+  DriverSetupExe: String;
+begin
+  if (CurUninstallStep = usUninstall) and RemoveVBCableRequested then
+  begin
+    DriverSetupExe := ExpandConstant('{app}\drivers\vbcable\VBCABLE_Setup_x64.exe');
+    if FileExists(DriverSetupExe) then
+    begin
+      Exec(DriverSetupExe, '-u -h', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     end;
   end;
 end;

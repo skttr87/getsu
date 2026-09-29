@@ -55,6 +55,13 @@ Source: "getsu.ico"; DestDir: "{app}"; Flags: ignoreversion
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\getsu.ico"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\getsu.ico"; Tasks: desktopicon
 
+[UninstallDelete]
+Type: files; Name: "{app}\config.json"
+Type: files; Name: "{app}\*.log"
+Type: dirifempty; Name: "{app}\drivers\vbcable"
+Type: dirifempty; Name: "{app}\drivers"
+Type: dirifempty; Name: "{app}"
+
 [Code]
 // Detect if VB-Audio Virtual Cable endpoint is actually active on this computer
 function IsVBCableInstalled(): Boolean;
@@ -125,11 +132,12 @@ begin
   end;
 end;
 
-// Execute driver uninstaller before Getsu application files are removed
+// Execute driver uninstaller before Getsu files are removed, then clean up leftover files
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   ResultCode: Integer;
   DriverSetupExe: String;
+  AppDir: String;
 begin
   if (CurUninstallStep = usUninstall) and RemoveVBCableRequested then
   begin
@@ -137,6 +145,20 @@ begin
     if FileExists(DriverSetupExe) then
     begin
       Exec(DriverSetupExe, '-u -h', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    end;
+  end;
+
+  if CurUninstallStep = usPostUninstall then
+  begin
+    AppDir := ExpandConstant('{app}');
+    // Delete runtime generated files
+    if FileExists(AddBackslash(AppDir) + 'config.json') then
+      DeleteFile(AddBackslash(AppDir) + 'config.json');
+
+    // If folder name is GETSU, ensure all leftover files and directory are cleanly removed
+    if (Uppercase(ExtractFileName(AppDir)) = 'GETSU') and DirExists(AppDir) then
+    begin
+      DelTree(AppDir, True, True, True);
     end;
   end;
 end;

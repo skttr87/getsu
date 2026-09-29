@@ -1,7 +1,7 @@
 # Getsu — Real-Time AI Noise Cancellation
 
 <p align="center">
-  <img src="assets/getsu-ui.png" alt="Getsu Interface" width="450" />
+  <img src="getsu-icon.png" alt="Getsu Icon" width="128" height="128" />
 </p>
 
 <p align="center">
@@ -15,6 +15,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License" /></a>
   <img src="https://img.shields.io/badge/Platform-Windows_10%2F11-0078D6?style=for-the-badge&logo=windows" alt="Platform" />
   <img src="https://img.shields.io/badge/Inference-1.1ms%20%2F%2010ms-brightgreen?style=for-the-badge" alt="Latency" />
+  <a href="https://www.virustotal.com/gui/file/eeaa09a547a8440b81acafe8299438a6edb69be3d60dd8c0c0a5767a7d7b4a93"><img src="https://img.shields.io/badge/VirusTotal-Clean%20(0%2F70)-brightgreen?style=for-the-badge&logo=virustotal" alt="VirusTotal" /></a>
 </p>
 
 ---
@@ -74,6 +75,9 @@ Commercial noise cancellation tools often force subscriptions, burn dedicated GP
    - In Discord, Steam, or Zoom, set your input device to:  
      👉 **`CABLE Output (VB-Audio Virtual Cable)`**
 4. **Disable In-App Noise Filters**: Turn off Discord Krisp or Zoom background noise suppression to prevent double-filtering.
+
+> [!TIP]
+> **Windows SmartScreen**: Because Getsu is an independent open-source project without a paid enterprise certificate, Windows may show an *"Unknown Publisher"* prompt on first launch. Click **"More info" ➔ "Run anyway"** (verified 100% clean on [VirusTotal](https://www.virustotal.com/gui/file/eeaa09a547a8440b81acafe8299438a6edb69be3d60dd8c0c0a5767a7d7b4a93)).
 
 ---
 

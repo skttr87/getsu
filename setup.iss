@@ -44,6 +44,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 FinishedLabel=Setup has finished installing [name] on your computer.%n%nNotice: Keep your normal Speakers or Headphones selected for your Windows sound (taskbar volume icon). Set 'CABLE Output' only as your Microphone inside Discord, Steam, or Zoom.
 
 [Tasks]
+Name: "installvbcable"; Description: "Install VB-Audio Virtual Cable (Recommended: routes clean audio to Discord, Zoom, and Steam)"; GroupDescription: "Virtual Audio Components:"; Flags: checkedonce
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
@@ -173,7 +174,10 @@ begin
       NeedsInstall := (ResultCode <> 0);
     end;
 
-    if NeedsInstall then
+    // Only run driver setup in interactive mode if explicitly selected by the user.
+    // In silent/unattended mode (e.g. winget /VERYSILENT), driver install is skipped to avoid modal dialog hangs.
+    // Getsu will prompt cleanly in-app upon first launch if the driver is not yet present.
+    if NeedsInstall and (not WizardSilent) and WizardIsTaskSelected('installvbcable') then
     begin
       // 1. Backup current default playback device (Speakers / Headphones)
       if FileExists(AudioRestoreExe) then
@@ -181,7 +185,7 @@ begin
         Exec(AudioRestoreExe, '--backup "' + BackupFile + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
       end;
 
-      // 2. Silently install VB-Cable driver
+      // 2. Install VB-Cable driver
       if FileExists(DriverSetupExe) then
       begin
         Exec(DriverSetupExe, '-i -h', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);

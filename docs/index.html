@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Getsu — Free AI Noise Cancellation for Windows Microphones</title>
+  
+  <!-- Primary Meta Tags -->
+  <meta name="title" content="Getsu — Free AI Noise Cancellation for Windows Microphones">
+  <meta name="description" content="Free, open-source real-time AI noise cancellation for Windows. Silences mechanical keyboards, room fans, and background noise in Discord, Steam, Zoom, OBS, and PC games. No RTX GPU required.">
+  <meta name="keywords" content="noise cancellation, krisp alternative, rtx voice alternative, mic noise filter, discord noise suppressor, steam voice noise, rnnoise, windows audio, background noise removal, open source">
+  <meta name="author" content="Ihsan (@skttr87)">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://skttr87.github.io/getsu/">
+  <link rel="icon" type="image/x-icon" href="assets/favicon.ico">
+
+  <!-- Open Graph / Facebook / Discord -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://skttr87.github.io/getsu/">
+  <meta property="og:title" content="Getsu — Free AI Noise Cancellation for Windows Microphones">
+  <meta property="og:description" content="Silence mechanical keyboards, desk fans, and background noise in real-time. Works across Discord, Steam, Zoom, and all PC games. 100% Free & Offline.">
+  <meta property="og:image" content="https://raw.githubusercontent.com/skttr87/getsu/main/assets/getsu-ui.png">
+
+  <!-- Twitter -->
+  <meta property="twitter:card" content="summary_large_image">
+  <meta property="twitter:url" content="https://skttr87.github.io/getsu/">
+  <meta property="twitter:title" content="Getsu — Free AI Noise Cancellation for Windows Microphones">
+  <meta property="twitter:description" content="Silence mechanical keyboards, desk fans, and background noise in real-time. 100% Free, Offline, and CPU-only.">
+  <meta property="twitter:image" content="https://raw.githubusercontent.com/skttr87/getsu/main/assets/getsu-ui.png">
+
+  <!-- Google Structured Data (JSON-LD) -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "name": "Getsu",
+        "operatingSystem": "Windows 10, Windows 11",
+        "applicationCategory": "AudioApplication",
+        "softwareVersion": "1.2.0",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "license": "https://opensource.org/licenses/MIT",
+        "downloadUrl": "https://github.com/skttr87/getsu/releases/download/v1.2.0/Getsu-v1.2.0-Setup.exe",
+        "author": {
+          "@type": "Person",
+          "name": "Ihsan",
+          "url": "https://github.com/skttr87"
+        },
+        "description": "Free, open-source real-time AI noise cancellation for Windows microphones. Powered by Mozilla RNNoise with smart audio routing into Discord, Steam, Zoom, and games."
+      },
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "How does Getsu compare to Discord's built-in Krisp?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Discord's built-in Krisp only filters audio inside active Discord calls. Getsu operates system-wide at the Windows virtual driver level, meaning your noise-free microphone works across Steam voice chat, in-game voice (CS2, Valorant, Apex), Zoom, Google Meet, and OBS Studio with zero monthly minute limits."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Do I need an NVIDIA RTX graphics card to run Getsu?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. Unlike NVIDIA Broadcast or RTX Voice which require an expensive RTX GPU, Getsu runs on a lightweight recurrent neural network (RNNoise) optimized for standard CPUs. It consumes under 2% CPU and works on any Intel, AMD, or budget laptop processor."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can Getsu filter loud mechanical keyboards and desk fans?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. Getsu uses a multi-stage DSP pipeline: an 80Hz high-pass filter eliminates low-frequency fan and AC hum, while the RNNoise neural engine isolates your speech and silences mechanical keyboard clicks, mouse clicks, and room echo."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is Getsu safe, private, and offline?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "100% yes. Getsu is open-source under the MIT License. All audio processing runs entirely in-memory on your local PC. No audio recordings are ever saved, stored, or transmitted over the internet."
+            }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
+
+  <style>
+    :root {
+      --bg: #090D13;
+      --card-bg: #111722;
+      --card-border: #1E293B;
+      --text: #F1F5F9;
+      --text-muted: #94A3B8;
+      --primary: #10B981;
+      --primary-hover: #059669;
+      --primary-glow: rgba(16, 185, 129, 0.25);
+      --accent-blue: #38BDF8;
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      line-height: 1.6;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Container */
+    .container { max-width: 1140px; margin: 0 auto; padding: 0 24px; }
+
+    /* Header / Navbar */
+    header {
+      border-bottom: 1px solid var(--card-border);
+      background: rgba(9, 13, 19, 0.85);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      height: 70px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 700;
+      font-size: 1.3rem;
+      color: #fff;
+      text-decoration: none;
+    }
+    .brand img { width: 32px; height: 32px; }
+    .nav-links {
+      display: flex;
+      gap: 24px;
+      align-items: center;
+    }
+    .nav-links a {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 0.95rem;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: #fff; }
+    .btn-nav {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      padding: 8px 16px;
+      border-radius: 8px;
+      color: #fff !important;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn-nav:hover { border-color: var(--primary); }
+
+    /* Hero Section */
+    .hero {
+      padding: 80px 0 60px;
+      text-align: center;
+      position: relative;
+    }
+    .badge-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: var(--primary);
+      padding: 6px 14px;
+      border-radius: 999px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 24px;
+    }
+    .hero h1 {
+      font-size: 3.2rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.15;
+      margin-bottom: 20px;
+      max-width: 900px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .hero h1 span {
+      background: linear-gradient(135deg, #fff 40%, var(--accent-blue) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .hero p {
+      font-size: 1.2rem;
+      color: var(--text-muted);
+      max-width: 680px;
+      margin: 0 auto 36px;
+    }
+    .cta-group {
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 40px;
+    }
+    .btn-primary {
+      background: var(--primary);
+      color: #fff;
+      text-decoration: none;
+      padding: 14px 28px;
+      border-radius: 10px;
+      font-weight: 700;
+      font-size: 1.05rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      box-shadow: 0 4px 24px var(--primary-glow);
+      transition: all 0.2s;
+    }
+    .btn-primary:hover {
+      background: var(--primary-hover);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 32px var(--primary-glow);
+    }
+    .btn-secondary {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      color: #fff;
+      text-decoration: none;
+      padding: 14px 24px;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 1rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      transition: all 0.2s;
+    }
+    .btn-secondary:hover {
+      background: #1A2234;
+      border-color: #334155;
+    }
+    .trust-bullets {
+      display: flex;
+      justify-content: center;
+      gap: 24px;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      font-weight: 500;
+      flex-wrap: wrap;
+    }
+    .trust-bullets span { display: flex; align-items: center; gap: 6px; }
+    .trust-bullets span svg { color: var(--primary); }
+
+    /* App Preview Mockup */
+    .hero-mockup {
+      margin-top: 48px;
+      position: relative;
+      display: flex;
+      justify-content: center;
+    }
+    .mockup-img {
+      max-width: 100%;
+      width: 480px;
+      border-radius: 16px;
+      border: 1px solid var(--card-border);
+      box-shadow: 0 24px 64px rgba(0,0,0,0.6), 0 0 40px rgba(56, 189, 248, 0.15);
+    }
+
+    /* Section Styles */
+    section { padding: 80px 0; border-top: 1px solid var(--card-border); }
+    .section-header {
+      text-align: center;
+      max-width: 640px;
+      margin: 0 auto 48px;
+    }
+    .section-header h2 {
+      font-size: 2.2rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 12px;
+    }
+    .section-header p {
+      color: var(--text-muted);
+      font-size: 1.05rem;
+    }
+
+    /* Comparison Table */
+    .comparison-table-wrapper {
+      overflow-x: auto;
+      border-radius: 14px;
+      border: 1px solid var(--card-border);
+      background: var(--card-bg);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+    }
+    th, td {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--card-border);
+      font-size: 0.95rem;
+    }
+    th {
+      background: #0B101A;
+      color: var(--text-muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 0.8rem;
+      letter-spacing: 0.05em;
+    }
+    td.highlight {
+      color: var(--primary);
+      font-weight: 700;
+    }
+
+    /* Features Grid (Bento) */
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 24px;
+    }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 28px;
+      transition: transform 0.2s, border-color 0.2s;
+    }
+    .card:hover {
+      transform: translateY(-3px);
+      border-color: #334155;
+    }
+    .card-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      background: rgba(56, 189, 248, 0.1);
+      color: var(--accent-blue);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 18px;
+    }
+    .card-icon.green {
+      background: rgba(16, 185, 129, 0.1);
+      color: var(--primary);
+    }
+    .card h3 { font-size: 1.2rem; font-weight: 700; margin-bottom: 8px; }
+    .card p { color: var(--text-muted); font-size: 0.95rem; line-height: 1.55; }
+
+    /* How It Works Steps */
+    .steps-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 24px;
+    }
+    .step-box {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 28px;
+      position: relative;
+    }
+    .step-num {
+      width: 32px;
+      height: 32px;
+      border-radius: 999px;
+      background: var(--primary);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 0.9rem;
+      margin-bottom: 16px;
+    }
+
+    /* FAQ Accordion */
+    .faq-list {
+      max-width: 760px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .faq-item {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .faq-question {
+      padding: 20px 24px;
+      font-weight: 700;
+      font-size: 1.05rem;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      user-select: none;
+    }
+    .faq-answer {
+      padding: 0 24px 20px;
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      line-height: 1.6;
+      display: none;
+    }
+    .faq-item.active .faq-answer { display: block; }
+    .faq-item.active .faq-toggle { transform: rotate(45deg); }
+    .faq-toggle { font-size: 1.4rem; transition: transform 0.2s; color: var(--text-muted); }
+
+    /* Sponsor & Footer */
+    footer {
+      border-top: 1px solid var(--card-border);
+      padding: 60px 0 40px;
+      background: #06090E;
+      text-align: center;
+    }
+    .sponsor-block {
+      margin-bottom: 32px;
+    }
+    .sponsor-block img {
+      width: 140px;
+      border-radius: 8px;
+      margin-top: 8px;
+      transition: transform 0.2s;
+    }
+    .sponsor-block img:hover { transform: scale(1.05); }
+    .footer-links {
+      display: flex;
+      justify-content: center;
+      gap: 24px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+    .footer-links a { color: var(--text-muted); text-decoration: none; font-size: 0.9rem; }
+    .footer-links a:hover { color: #fff; }
+    .copyright { color: #64748B; font-size: 0.85rem; }
+
+    @media (max-width: 768px) {
+      .hero h1 { font-size: 2.2rem; }
+      .nav-links { display: none; }
+      .mockup-img { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Navigation -->
+  <header>
+    <div class="container nav">
+      <a href="#" class="brand">
+        <img src="assets/favicon.ico" alt="Getsu Logo">
+        Getsu
+      </a>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#compare">Comparison</a>
+        <a href="#how-it-works">How It Works</a>
+        <a href="#faq">FAQ</a>
+        <a href="https://github.com/skttr87/getsu" target="_blank" class="btn-nav">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          GitHub
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="hero">
+    <div class="container">
+      <div class="badge-pill">
+        <span>●</span> Getsu v1.2.0 Released • 100% Free Forever
+      </div>
+      <h1>
+        Crystal-Clear Voice for<br>
+        <span>Windows Microphones.</span>
+      </h1>
+      <p>
+        AI-powered real-time noise suppression that silences mechanical keyboards, room fans, and background chatter. Zero latency, works on any CPU, and routes directly into all your games and voice apps.
+      </p>
+      <div class="cta-group">
+        <a href="https://github.com/skttr87/getsu/releases/download/v1.2.0/Getsu-v1.2.0-Setup.exe" class="btn-primary">
+          <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+          Download for Windows (v1.2.0)
+        </a>
+        <a href="https://github.com/skttr87/getsu" target="_blank" class="btn-secondary">
+          View on GitHub
+        </a>
+      </div>
+      <div class="trust-bullets">
+        <span><svg width="16" height="16" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg> 100% Free Forever</span>
+        <span><svg width="16" height="16" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg> No RTX GPU Needed</span>
+        <span><svg width="16" height="16" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg> 100% Offline & Private</span>
+        <span><svg width="16" height="16" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg> Windows 10 & 11</span>
+      </div>
+
+      <!-- App Mockup Image -->
+      <div class="hero-mockup">
+        <img src="assets/getsu-ui.png" alt="Getsu Interface Mockup" class="mockup-img">
+      </div>
+    </div>
+  </section>
+
+  <!-- Comparison Section -->
+  <section id="compare">
+    <div class="container">
+      <div class="section-header">
+        <h2>Why Gamers & Streamers Switch to Getsu</h2>
+        <p>Commercial noise suppression apps charge subscriptions, lock you to expensive graphics cards, or track your calls.</p>
+      </div>
+
+      <div class="comparison-table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Feature</th>
+              <th>Getsu (Open Source)</th>
+              <th>Krisp</th>
+              <th>NVIDIA Broadcast</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Price</strong></td>
+              <td class="highlight">100% Free Forever</td>
+              <td>$96 / yr (or 60-min limit)</td>
+              <td>Free (Requires RTX GPU)</td>
+            </tr>
+            <tr>
+              <td><strong>Hardware Required</strong></td>
+              <td class="highlight">Any CPU (Intel, AMD, Laptops)</td>
+              <td>Any PC</td>
+              <td>Expensive RTX GPU</td>
+            </tr>
+            <tr>
+              <td><strong>Privacy & Offline</strong></td>
+              <td class="highlight">100% Offline (Zero Accounts)</td>
+              <td>Online Accounts Required</td>
+              <td>Telemetry Bundled</td>
+            </tr>
+            <tr>
+              <td><strong>Download Size</strong></td>
+              <td class="highlight">~37 MB</td>
+              <td>> 150 MB</td>
+              <td>> 1,000 MB (1 GB+)</td>
+            </tr>
+            <tr>
+              <td><strong>System-Wide Routing</strong></td>
+              <td class="highlight">Automatic (< 1ms COM switch)</td>
+              <td>Requires Virtual Mic Setup</td>
+              <td>Requires Virtual Mic Setup</td>
+            </tr>
+            <tr>
+              <td><strong>Gaming Performance</strong></td>
+              <td class="highlight">Zero FPS Impact (&lt;2% CPU)</td>
+              <td>Moderate CPU/RAM impact</td>
+              <td>Heavy GPU VRAM usage</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features Grid -->
+  <section id="features">
+    <div class="container">
+      <div class="section-header">
+        <h2>Built for Precision & Reliability</h2>
+        <p>Studio-grade DSP and machine learning working together seamlessly under your Windows desktop.</p>
+      </div>
+
+      <div class="grid-3">
+        <div class="card">
+          <div class="card-icon green">
+            <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
+          </div>
+          <h3>Mozilla RNNoise Neural Engine</h3>
+          <p>Trained recurrent neural network that isolates human voice frequencies while erasing mechanical keyboard clicks, desk thumps, and fan hiss.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">
+            <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+          </div>
+          <h3>Smart Auto-Routing</h3>
+          <p>Click START and Getsu instantly routes clean audio to Discord, Steam, Zoom, and games. Stop or close the app, and your mic safely restores automatically.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-icon green">
+            <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          </div>
+          <h3>Ultra-Low Latency (< 1.2ms)</h3>
+          <p>Processes audio frame-by-frame (480 samples @ 48kHz) in under 1.2 milliseconds. Zero noticeable lag in high-stakes competitive esports.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">
+            <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 100-6 3 3 0 000 6z"/></svg>
+          </div>
+          <h3>11-Second Voice Preview</h3>
+          <p>Test your microphone directly inside Getsu with an in-memory 11-second playback test. Speakers are muted during recording to eliminate feedback shrieks.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-icon green">
+            <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+          </div>
+          <h3>100% Offline & Private</h3>
+          <p>Zero telemetry, zero audio packets uploaded to the cloud, and no account required. All processing happens locally on your computer.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">
+            <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+          </div>
+          <h3>Adaptive DPI Scaling</h3>
+          <p>Sharp, responsive interface that dynamically adapts its layout and fonts across mixed-DPI multi-monitor setups and 4K displays.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- How It Works -->
+  <section id="how-it-works">
+    <div class="container">
+      <div class="section-header">
+        <h2>Up and Running in 60 Seconds</h2>
+        <p>No complicated virtual audio cables to configure manually.</p>
+      </div>
+
+      <div class="steps-row">
+        <div class="step-box">
+          <div class="step-num">1</div>
+          <h3>Download & Install</h3>
+          <p>Run <code>Getsu-v1.2.0-Setup.exe</code>. The installer sets up everything including the virtual audio driver in seconds.</p>
+        </div>
+
+        <div class="step-box">
+          <div class="step-num">2</div>
+          <h3>Select Microphone</h3>
+          <p>Launch Getsu from your desktop and pick your physical headset or USB microphone from the dropdown.</p>
+        </div>
+
+        <div class="step-box">
+          <div class="step-num">3</div>
+          <h3>Click START</h3>
+          <p>Hit START. Getsu automatically swaps your default microphone so Discord, Steam, Zoom, and games immediately hear clean audio.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ Section -->
+  <section id="faq">
+    <div class="container">
+      <div class="section-header">
+        <h2>Frequently Asked Questions</h2>
+        <p>Everything you need to know about Getsu's noise cancellation engine.</p>
+      </div>
+
+      <div class="faq-list">
+        <div class="faq-item">
+          <div class="faq-question">
+            How does Getsu compare to Discord's built-in Krisp?
+            <span class="faq-toggle">+</span>
+          </div>
+          <div class="faq-answer">
+            Discord's built-in Krisp only works inside active Discord voice calls. Getsu operates system-wide at the Windows virtual driver level, meaning your noise-free microphone works across Steam voice chat, in-game voice (CS2, Valorant, Apex), Zoom, Google Meet, OBS Studio, and recording apps with zero monthly minute limits.
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <div class="faq-question">
+            Do I need an NVIDIA RTX graphics card to run Getsu?
+            <span class="faq-toggle">+</span>
+          </div>
+          <div class="faq-answer">
+            No! Unlike NVIDIA Broadcast or RTX Voice which require a costly RTX GPU, Getsu runs on a lightweight recurrent neural network (Mozilla RNNoise) optimized for standard CPUs. It consumes under 2% CPU and works on any Intel, AMD, or budget laptop processor.
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <div class="faq-question">
+            Can Getsu filter loud mechanical keyboards and desk fans?
+            <span class="faq-toggle">+</span>
+          </div>
+          <div class="faq-answer">
+            Yes. Getsu uses a multi-stage DSP pipeline: an 80Hz high-pass filter eliminates low-frequency fan and AC hum, while the RNNoise neural engine isolates your speech and silences mechanical keyboard clicks, mouse clicks, and room echo.
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <div class="faq-question">
+            Will Getsu cause audio delay or drop my game FPS?
+            <span class="faq-toggle">+</span>
+          </div>
+          <div class="faq-answer">
+            No. Getsu processes audio in real-time with an ultra-low latency of under 1.2ms (well below the human threshold of perception). Because it runs on CPU with zero GPU VRAM overhead, it will not reduce your in-game frame rates.
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <div class="faq-question">
+            Is Getsu safe, private, and offline?
+            <span class="faq-toggle">+</span>
+          </div>
+          <div class="faq-answer">
+            100% yes. Getsu is open-source under the MIT License. All audio processing runs entirely in-memory on your local PC. No audio recordings are ever saved, stored, or transmitted over the internet. No user account or login is required.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container">
+      <div class="sponsor-block">
+        <p style="color: var(--text-muted); font-size: 0.9rem;">Proudly Sponsored by</p>
+        <a href="https://www.instagram.com/kopireman/" target="_blank">
+          <img src="assets/kopi-reman.png" alt="Kopi Reman Sponsor">
+        </a>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/skttr87/getsu" target="_blank">GitHub Repository</a>
+        <a href="https://github.com/skttr87/getsu/releases" target="_blank">Releases</a>
+        <a href="https://github.com/skttr87/getsu/blob/main/LICENSE" target="_blank">MIT License</a>
+        <a href="https://github.com/skttr87/getsu/issues" target="_blank">Report Issue</a>
+      </div>
+      <p class="copyright">
+        Getsu © 2026 Ihsan (@skttr87). Open source under the MIT License.
+      </p>
+    </div>
+  </footer>
+
+  <!-- Simple FAQ Accordion Script -->
+  <script>
+    document.querySelectorAll('.faq-question').forEach(item => {
+      item.addEventListener('click', () => {
+        const parent = item.parentElement;
+        parent.classList.toggle('active');
+      });
+    });
+  </script>
+</body>
+</html>

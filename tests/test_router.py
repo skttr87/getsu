@@ -15,7 +15,7 @@ from src.stream import AudioEngine
 class TestSmartMicRouter(unittest.TestCase):
     def setUp(self):
         self.config = {
-            "version": "1.2.0",
+            "version": "1.2.1",
             "is_swapped": False,
             "original_mic_id": None,
         }
@@ -143,7 +143,7 @@ class TestAtomicConfig(unittest.TestCase):
         cfg = load_config()
         self.assertIsInstance(cfg, dict)
         self.assertIn("version", cfg)
-        self.assertEqual(cfg["version"], "1.2.0")
+        self.assertEqual(cfg["version"], "1.2.1")
 
         # Test atomic save
         cfg["test_key"] = "test_val_123"

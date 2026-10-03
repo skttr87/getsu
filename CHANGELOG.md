@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.1] - 2026-10-04
+
+### Fixed
+- **Realtek & Intel Driver Kernel Streaming Error (`GLE 0x492`)**: Filtered out obsolete and buggy `Windows WDM-KS` (Kernel Streaming) devices from audio device enumeration. Modern Realtek High Definition and DCH drivers reject low-level WDM-KS pin property IOCTLs, causing `PaErrorCode -9999 (WdmSyncIoctl DeviceIoControl GLE = 0x00000492)`.
+- **Host API Duplex Pairing Enforcement**: Enforced strict Host API matching between input and output devices (`find_matching_cable_input()`), ensuring that WASAPI microphones are paired exclusively with the WASAPI endpoint of VB-Cable (`CABLE Input`). Prevents PortAudio's `Illegal combination of I/O devices [PaErrorCode -9993]`.
+- **Stream Initialization Resilience**: Added pre-flight Host API alignment and automatic fallback recovery in `AudioEngine.start()` to seamlessly realign audio endpoints if an unexpected driver error occurs.
+
+---
+
 ## [1.2.0] - 2026-10-01
 
 ### Added

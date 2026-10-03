@@ -1,6 +1,6 @@
 {
     "app_name": "Getsu",
-    "version": "1.2.0",
+    "version": "1.2.1",
     "input_device_id": 9,
     "input_device_name": "Microphone (Realtek(R) Audio)",
     "output_device_id": null,

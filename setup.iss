@@ -2,7 +2,7 @@
 ; ==============================================================
 
 #define MyAppName "Getsu"
-#define MyAppVersion "1.2.0"
+#define MyAppVersion "1.2.1"
 #define MyAppPublisher "skttr87"
 #define MyAppURL "https://github.com/skttr87/getsu"
 #define MyAppExeName "getsu.exe"
@@ -21,7 +21,7 @@ DisableDirPage=no
 DisableProgramGroupPage=yes
 PrivilegesRequired=admin
 OutputDir=dist\installer
-OutputBaseFilename=Getsu-v1.2.0-Setup
+OutputBaseFilename=Getsu-v1.2.1-Setup
 SetupIconFile=getsu.ico
 Compression=lzma2/max
 SolidCompression=yes
@@ -31,13 +31,13 @@ CloseApplications=force
 RestartApplications=no
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-VersionInfoVersion=1.2.0.0
+VersionInfoVersion=1.2.1.0
 VersionInfoCompany=skttr87
 VersionInfoDescription=Getsu - AI Real-Time Noise Cancellation Setup
 VersionInfoCopyright=Copyright (c) 2026 Ihsan (@skttr87)
 VersionInfoProductName=Getsu AI Noise Cancellation
-VersionInfoProductVersion=1.2.0
-VersionInfoOriginalFileName=Getsu-v1.2.0-Setup.exe
+VersionInfoProductVersion=1.2.1
+VersionInfoOriginalFileName=Getsu-v1.2.1-Setup.exe
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

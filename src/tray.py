@@ -171,7 +171,7 @@ class TrayApp:
             )
 
         menu_entries = [
-            item("Getsu AI Noise Cancellation v1.2.0", None, enabled=False),
+            item("Getsu AI Noise Cancellation v1.2.1", None, enabled=False),
             item(
                 lambda text: f"Status: {self._get_status_str().upper()}",
                 None,

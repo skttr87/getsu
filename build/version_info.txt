@@ -19,11 +19,11 @@ VSVersionInfo(
         StringTable(
           '040904B0',
           [
-            StringStruct('CompanyName', 'Ihsan'),
+            StringStruct('CompanyName', 'skttr87'),
             StringStruct('FileDescription', 'Getsu - Real-Time AI Noise Cancellation'),
             StringStruct('FileVersion', '1.2.0.0'),
             StringStruct('InternalName', 'getsu'),
-            StringStruct('LegalCopyright', 'Copyright (c) 2026 Ihsan (MIT License)'),
+            StringStruct('LegalCopyright', 'Copyright (c) 2026 Ihsan (@skttr87)'),
             StringStruct('OriginalFilename', 'getsu.exe'),
             StringStruct('ProductName', 'Getsu AI Noise Cancellation'),
             StringStruct('ProductVersion', '1.2.0')

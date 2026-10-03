@@ -7,7 +7,7 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyDescription("Preserves and restores physical speaker endpoints during driver installation.")]
 [assembly: AssemblyCompany("Getsu AI")]
 [assembly: AssemblyProduct("Getsu AI Noise Cancellation")]
-[assembly: AssemblyCopyright("Copyright (c) 2026 skttr87 (MIT License)")]
+[assembly: AssemblyCopyright("Copyright (c) 2026 Ihsan (@skttr87)")]
 [assembly: AssemblyVersion("1.2.0.0")]
 [assembly: AssemblyFileVersion("1.2.0.0")]
 

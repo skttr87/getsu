@@ -79,29 +79,53 @@ Type: dirifempty; Name: "{app}\_internal"
 Type: dirifempty; Name: "{app}"
 
 [Code]
+const
+  HWND_TOPMOST = -1;
+  HWND_NOTOPMOST = -2;
+  SWP_NOSIZE = $0001;
+  SWP_NOMOVE = $0002;
+  SWP_SHOWWINDOW = $0040;
+
 var
   RemoveVBCableRequested: Boolean;
+  FirstPageFocused: Boolean;
 
+function SetWindowPos(hWnd: HWND; hWndInsertAfter: Integer; X, Y, cx, cy: Integer; uFlags: Cardinal): Boolean;
+  external 'SetWindowPos@user32.dll stdcall';
 function SetForegroundWindow(hWnd: HWND): Boolean;
   external 'SetForegroundWindow@user32.dll stdcall';
 function BringWindowToTop(hWnd: HWND): Boolean;
   external 'BringWindowToTop@user32.dll stdcall';
 
 // Bring installer window to front and grant foreground focus upon launch
+procedure ForceForegroundWindow(hWnd: HWND);
+begin
+  if hWnd = 0 then Exit;
+
+  // 1. Z-Order: Pop window physically in front of all background apps
+  SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE or SWP_NOSIZE or SWP_SHOWWINDOW);
+
+  // 2. Active Focus: Grab foreground activation while topmost
+  BringWindowToTop(hWnd);
+  SetForegroundWindow(hWnd);
+
+  // 3. Clear topmost flag so it behaves like a standard window if user switches away
+  SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE or SWP_NOSIZE or SWP_SHOWWINDOW);
+end;
+
 procedure InitializeWizard();
 begin
   WizardForm.BringToFront();
-  BringWindowToTop(WizardForm.Handle);
-  SetForegroundWindow(WizardForm.Handle);
+  ForceForegroundWindow(WizardForm.Handle);
 end;
 
-// Ensure first wizard page maintains active window focus after UAC elevation
+// Ensure first rendered wizard page maintains active window focus after UAC elevation
 procedure CurPageChanged(CurPageID: Integer);
 begin
-  if CurPageID = wpWelcome then
+  if not FirstPageFocused then
   begin
-    BringWindowToTop(WizardForm.Handle);
-    SetForegroundWindow(WizardForm.Handle);
+    FirstPageFocused := True;
+    ForceForegroundWindow(WizardForm.Handle);
   end;
 end;
 

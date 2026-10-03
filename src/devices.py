@@ -23,7 +23,17 @@ def get_all_devices(force_rescan: bool = False) -> List[Dict]:
         host_apis = sd.query_hostapis()
         result = []
         for i, d in enumerate(devices):
-            host_name = host_apis[d['hostapi']]['name']
+            try:
+                host_api_idx = d['hostapi']
+                host_name = host_apis[host_api_idx]['name'] if isinstance(host_apis, (list, tuple)) else str(host_apis.get(host_api_idx, 'WASAPI'))
+            except Exception:
+                host_name = 'WASAPI'
+
+            # Exclude raw Windows WDM-KS devices: WDM-KS uses legacy kernel IOCTLs
+            # that fail with GLE 0x00000492 on modern Realtek/Intel HD audio drivers
+            if 'WDM-KS' in host_name:
+                continue
+
             result.append({
                 'index': i,
                 'name': d['name'],
@@ -155,6 +165,44 @@ def check_vbcable_status(force_rescan: bool = False) -> Tuple[bool, Optional[Dic
 
     is_installed = (cable_input is not None) and (cable_output is not None)
     return is_installed, cable_input, cable_output
+
+
+def find_matching_cable_input(input_device_id: Optional[int]) -> Optional[Dict]:
+    """
+    Finds the CABLE Input playback device matching the EXACT Host API of the given input device.
+    PortAudio requires input and output in a duplex stream to share the same Host API (e.g. WASAPI <-> WASAPI).
+    """
+    if input_device_id is None:
+        return None
+    try:
+        all_devs = get_all_devices()
+        in_dev = next((d for d in all_devs if d['index'] == input_device_id), None)
+        target_hostapi = in_dev['hostapi'] if in_dev else None
+
+        # 1. First priority: CABLE Input with exact matching Host API
+        if target_hostapi:
+            for d in all_devs:
+                if d['outputs'] > 0 and d['hostapi'] == target_hostapi:
+                    name_lower = d['name'].lower()
+                    if 'cable input' in name_lower or 'vb-cable' in name_lower or ('vb-audio' in name_lower and any(k in name_lower for k in ['cable', 'point', 'input'])):
+                        return d
+
+        # 2. Second priority: WASAPI CABLE Input
+        for d in all_devs:
+            if d['outputs'] > 0 and 'WASAPI' in d['hostapi']:
+                name_lower = d['name'].lower()
+                if 'cable input' in name_lower or 'vb-cable' in name_lower or ('vb-audio' in name_lower and any(k in name_lower for k in ['cable', 'point', 'input'])):
+                    return d
+
+        # 3. Third priority: Any non-WDM-KS CABLE Input
+        for d in all_devs:
+            if d['outputs'] > 0:
+                name_lower = d['name'].lower()
+                if 'cable input' in name_lower or 'vb-cable' in name_lower or ('vb-audio' in name_lower and any(k in name_lower for k in ['cable', 'point', 'input'])):
+                    return d
+    except Exception:
+        pass
+    return None
 
 
 HEADSET_KEYWORDS = [

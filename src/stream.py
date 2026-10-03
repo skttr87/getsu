@@ -191,6 +191,27 @@ class AudioEngine:
             self.in_channels = min(2, max(1, in_dev_info['max_input_channels']))
             self.out_channels = min(2, max(1, out_dev_info['max_output_channels']))
 
+            # Host API Alignment Guard:
+            # PortAudio requires input and output in a duplex stream to share the exact same Host API.
+            # If mismatched or if WDM-KS is detected, realign output to matching CABLE Input.
+            try:
+                apis = sd.query_hostapis()
+                in_api_idx = in_dev_info.get('hostapi') if isinstance(in_dev_info, dict) else None
+                out_api_idx = out_dev_info.get('hostapi') if isinstance(out_dev_info, dict) else None
+                in_host = apis[in_api_idx]['name'] if (in_api_idx is not None and isinstance(apis, (list, tuple)) and in_api_idx < len(apis)) else ''
+                out_host = apis[out_api_idx]['name'] if (out_api_idx is not None and isinstance(apis, (list, tuple)) and out_api_idx < len(apis)) else ''
+                
+                if (in_host and out_host and in_host != out_host) or 'WDM-KS' in in_host or 'WDM-KS' in out_host:
+                    from src.devices import find_matching_cable_input
+                    matched = find_matching_cable_input(self.input_device)
+                    if matched and matched['index'] != self.output_device:
+                        print(f"[STREAM] Realigning output device from [{self.output_device}] to [{matched['index']}] {matched['name']} to match Host API ({in_host})")
+                        self.output_device = matched['index']
+                        out_dev_info = sd.query_devices(self.output_device)
+                        self.out_channels = min(2, max(1, out_dev_info['max_output_channels']))
+            except Exception as e:
+                print(f"[STREAM] Host API alignment check skipped: {e}")
+
             print(f"[STREAM] Starting low-latency stream...")
             print(f"         Input  : [{self.input_device}] {in_dev_info['name']} ({self.in_channels} ch)")
             print(f"         Output : [{self.output_device}] {out_dev_info['name']} ({self.out_channels} ch)")
@@ -218,6 +239,20 @@ class AudioEngine:
                         except Exception:
                             pass
                         self._stream = None
+
+                    # If WDM-KS or Host mismatch failed, attempt emergency realign on retry
+                    if attempt < 2 and any(k in str(e) for k in ["WdmSyncIoctl", "Illegal combination", "PaErrorCode -9999", "PaErrorCode -9993"]):
+                        try:
+                            from src.devices import find_matching_cable_input
+                            matched = find_matching_cable_input(self.input_device)
+                            if matched and matched['index'] != self.output_device:
+                                print(f"[STREAM] Emergency realigning output device to [{matched['index']}] {matched['name']}")
+                                self.output_device = matched['index']
+                                out_dev_info = sd.query_devices(self.output_device)
+                                self.out_channels = min(2, max(1, out_dev_info['max_output_channels']))
+                        except Exception:
+                            pass
+
                     if attempt == 2:
                         raise last_err
                     print(f"[STREAM] Transient stream opening error (attempt {attempt + 1}/3): {e}. Retrying...")

@@ -35,6 +35,7 @@ from src.devices import (
     install_vbcable_driver,
     get_all_devices,
     ensure_physical_default_playback,
+    find_matching_cable_input,
 )
 from src.config import load_config, save_config
 from src.stream import AudioEngine, create_engine_from_config
@@ -417,7 +418,11 @@ class GetsuGUI:
             save_config(self.config)
 
         self.is_vbcable_installed, cable_in, _ = check_vbcable_status(force_rescan=reinit_portaudio)
-        if self.is_vbcable_installed and cable_in:
+        matching_cable = find_matching_cable_input(self.selected_input_idx)
+        if self.is_vbcable_installed and matching_cable:
+            self.selected_output_idx = matching_cable['index']
+            self.selected_output_name = matching_cable['name']
+        elif self.is_vbcable_installed and cable_in:
             self.selected_output_idx = cable_in['index']
             self.selected_output_name = cable_in['name']
         else:
@@ -574,7 +579,11 @@ class GetsuGUI:
                 new_idx = self.device_map[app_data]
                 self.selected_input_idx = new_idx
                 self.selected_input_name = app_data
-                print(f"[GUI] Switched microphone to: [{new_idx}] {app_data}")
+                matching_cable = find_matching_cable_input(new_idx)
+                if self.is_vbcable_installed and matching_cable:
+                    self.selected_output_idx = matching_cable['index']
+                    self.selected_output_name = matching_cable['name']
+                print(f"[GUI] Switched microphone to: [{new_idx}] {app_data} (output: [{self.selected_output_idx}] {self.selected_output_name})")
                 self.config["input_device_name"] = app_data
                 self.config["input_device_id"] = new_idx
                 save_config(self.config)

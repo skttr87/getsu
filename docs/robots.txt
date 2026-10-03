@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://skttr87.github.io/getsu/sitemap.xml

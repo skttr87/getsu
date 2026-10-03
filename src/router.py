@@ -87,7 +87,8 @@ class PROPVARIANT(ctypes.Structure):
         ('wReserved1', wintypes.WORD),
         ('wReserved2', wintypes.WORD),
         ('wReserved3', wintypes.WORD),
-        ('pwszVal', wintypes.LPWSTR)
+        ('pwszVal', wintypes.LPWSTR),
+        ('_pad', ctypes.c_uint64),  # Pad to full 24-byte canonical Windows PROPVARIANT
     ]
 
 
@@ -359,6 +360,16 @@ def native_set_default_endpoint(dev_id: str) -> bool:
         logger.warning(f"Rejected invalid CoreAudio endpoint GUID format: {dev_id}")
         return False
 
+    # Guard: Only use vtable[13] on Windows 10 1903+ (build 18362+) and Windows 11
+    # On legacy Windows builds, vtable layout differs; fallback cleanly to AudioRestore.exe
+    try:
+        win_ver = sys.getwindowsversion()
+        if win_ver.major < 10 or win_ver.build < 18362:
+            logger.info(f"Windows build {win_ver.build} < 18362; falling back to AudioRestore helper.")
+            return False
+    except Exception:
+        pass
+
     pPolicy = None
     try:
         _safe_co_initialize()
@@ -374,6 +385,8 @@ def native_set_default_endpoint(dev_id: str) -> bool:
             return False
 
         vtable = ctypes.cast(ctypes.cast(pPolicy, ctypes.POINTER(ctypes.c_void_p)).contents, ctypes.POINTER(ctypes.c_void_p))
+        if not vtable or not vtable[13]:
+            return False
         SetDefaultEndpoint = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, wintypes.LPCWSTR, ctypes.c_uint)(vtable[13])
 
         # ERole: eConsole=0, eMultimedia=1, eCommunications=2
@@ -387,7 +400,7 @@ def native_set_default_endpoint(dev_id: str) -> bool:
         else:
             logger.warning(f"Native COM SetDefaultEndpoint failed for '{dev_id}' (roles 0,1,2: {hex(hr0 & 0xffffffff)}, {hex(hr1 & 0xffffffff)}, {hex(hr2 & 0xffffffff)})")
         return success
-    except Exception as e:
+    except (Exception, OSError, ctypes.ArgumentError) as e:
         logger.warning(f"Native COM SetDefaultEndpoint error: {e}")
         return False
     finally:

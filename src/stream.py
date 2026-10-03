@@ -102,74 +102,82 @@ class AudioEngine:
 
     def _audio_callback(self, indata, outdata, frames, time_info, status):
         """10ms real-time audio processing callback."""
-        with self._watchdog_lock:
-            self._last_callback_time = time.monotonic()
-        if status:
-            if status.input_overflow:
-                self.overflow_count += 1
-            if status.output_underflow:
-                self.underflow_count += 1
+        try:
+            with self._watchdog_lock:
+                self._last_callback_time = time.monotonic()
+            if status:
+                if status.input_overflow:
+                    self.overflow_count += 1
+                if status.output_underflow:
+                    self.underflow_count += 1
 
-        self.total_frames += 1
+            self.total_frames += 1
 
-        # Check mute
-        if self.is_muted:
-            outdata.fill(0)
-            self._metrics = (0.0, -100.0, -100.0, -100.0)
-            return
+            # Check mute
+            if self.is_muted:
+                outdata.fill(0)
+                self._metrics = (0.0, -100.0, -100.0, -100.0)
+                return
 
-        # 1. Stereo Downmixing with safe multi-channel array guard
-        if indata.ndim > 1 and indata.shape[1] >= 2:
-            frame_mono = (indata[:, 0] + indata[:, 1]) * 0.5
-        elif indata.ndim > 1:
-            frame_mono = indata[:, 0].copy()
-        else:
-            frame_mono = indata.copy()
+            # 1. Stereo Downmixing with safe multi-channel array guard
+            if indata.ndim > 1 and indata.shape[1] >= 2:
+                frame_mono = (indata[:, 0] + indata[:, 1]) * 0.5
+            elif indata.ndim > 1:
+                frame_mono = indata[:, 0].copy()
+            else:
+                frame_mono = indata.copy()
 
-        # 2. Apply mic gain & clamp normalized input before RNNoise
-        if self.mic_gain != 1.0:
-            frame_mono *= self.mic_gain
-        np.clip(frame_mono, -1.0, 1.0, out=frame_mono)
+            # 2. Apply mic gain & clamp normalized input before RNNoise
+            if self.mic_gain != 1.0:
+                frame_mono *= self.mic_gain
+            np.clip(frame_mono, -1.0, 1.0, out=frame_mono)
 
-        # 3. DSP Stage 1: High-Pass Filter (80Hz rumble cut for cooling pads)
-        if self.high_pass_enabled:
-            frame_mono = self.hpf.process(frame_mono)
+            # 3. DSP Stage 1: High-Pass Filter (80Hz rumble cut for cooling pads)
+            if self.high_pass_enabled:
+                frame_mono = self.hpf.process(frame_mono)
 
-        # Dual-Stage Metering: Pre-gate input level (audible voice level without fan rumble inflation)
-        input_peak_db, input_rms_db = calculate_levels(frame_mono)
+            # Dual-Stage Metering: Pre-gate input level (audible voice level without fan rumble inflation)
+            input_peak_db, input_rms_db = calculate_levels(frame_mono)
 
-        speech_prob = 0.0
-        # 4. DSP Stage 2 & 3: RNNoise Neural Suppression + Soft-Knee Adaptive Gate
-        if self.denoise_enabled and getattr(self, 'denoise_available', True) and self.rnnoise is not None:
-            # Scale to 16-bit float range expected by RNNoise
-            frame_rn = frame_mono * 32767.0
-            frame_rn, speech_prob = self.rnnoise.process_frame(frame_rn)
-            frame_mono = frame_rn / 32767.0
+            speech_prob = 0.0
+            # 4. DSP Stage 2 & 3: RNNoise Neural Suppression + Soft-Knee Adaptive Gate
+            rn = self.rnnoise
+            if self.denoise_enabled and getattr(self, 'denoise_available', True) and rn is not None:
+                # Scale to 16-bit float range expected by RNNoise
+                frame_rn = frame_mono * 32767.0
+                frame_rn, speech_prob = rn.process_frame(frame_rn)
+                frame_mono = frame_rn / 32767.0
 
-            # Post-RNNoise make-up gain (+0.7 dB) to restore natural speech body
-            if self.output_gain != 1.0:
-                frame_mono *= self.output_gain
+                # Post-RNNoise make-up gain (+0.7 dB) to restore natural speech body
+                if self.output_gain != 1.0:
+                    frame_mono *= self.output_gain
 
-            # Soft-knee gate for cooling pad silence floor (in-place zeroing for zero heap allocation)
-            frame_mono, _ = self.gate.process(frame_mono, speech_prob, in_place=True)
-        else:
-            # Bypass Mode: derive speech probability from RMS energy to silence background hiss
-            speech_prob = min(1.0, max(0.0, (input_rms_db + 45.0) / 20.0))
-            frame_mono, _ = self.gate.process(frame_mono, speech_prob, in_place=True)
+                # Soft-knee gate for cooling pad silence floor (in-place zeroing for zero heap allocation)
+                frame_mono, _ = self.gate.process(frame_mono, speech_prob, in_place=True)
+            else:
+                # Bypass Mode: derive speech probability from RMS energy to silence background hiss
+                speech_prob = min(1.0, max(0.0, (input_rms_db + 45.0) / 20.0))
+                frame_mono, _ = self.gate.process(frame_mono, speech_prob, in_place=True)
 
-        # Calculate post-gate output metrics and atomically swap metrics tuple
-        peak_db, rms_db = calculate_levels(frame_mono)
-        self._metrics = (speech_prob, peak_db, rms_db, input_peak_db)
+            # Calculate post-gate output metrics and atomically swap metrics tuple
+            peak_db, rms_db = calculate_levels(frame_mono)
+            self._metrics = (speech_prob, peak_db, rms_db, input_peak_db)
 
-        # Final clip to prevent DAC wrap distortion
-        np.clip(frame_mono, -1.0, 1.0, out=frame_mono)
+            # Final clip to prevent DAC wrap distortion
+            np.clip(frame_mono, -1.0, 1.0, out=frame_mono)
 
-        # Route to output device (mono or stereo)
-        if self.out_channels == 1:
-            outdata[:] = frame_mono.reshape(-1, 1)
-        else:
-            outdata[:, 0] = frame_mono
-            outdata[:, 1] = frame_mono
+            # Route to output device (mono or stereo)
+            if self.out_channels == 1:
+                outdata[:] = frame_mono.reshape(-1, 1)
+            else:
+                outdata[:, 0] = frame_mono
+                outdata[:, 1] = frame_mono
+        except Exception:
+            # Fault barrier: output silence rather than letting PortAudio abort stream
+            try:
+                outdata.fill(0)
+            except Exception:
+                pass
 
     def start(self):
         """Starts the real-time duplex stream with transient error retry."""
@@ -310,8 +318,10 @@ class AudioEngine:
 
     def close(self):
         self.stop()
-        if self.rnnoise is not None:
-            self.rnnoise.close()
+        rn = self.rnnoise
+        self.rnnoise = None
+        if rn is not None:
+            rn.close()
 
 
 def create_engine_from_config(

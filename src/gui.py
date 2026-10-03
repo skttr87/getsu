@@ -524,9 +524,28 @@ class GetsuGUI:
                 self._update_cable_banner()
 
                 # Seamlessly restart stream if it was running before
-                if was_running:
+                if was_running and self._app_running:
                     print(f"[HARDWARE] Resuming stream on [{self.selected_input_idx}] {self.selected_input_name} -> [{self.selected_output_idx}] {self.selected_output_name}")
-                    self.toggle_stream()
+                    try:
+                        self.engine = create_engine_from_config(
+                            self.config,
+                            self.selected_input_idx,
+                            self.selected_output_idx,
+                            router=self.router,
+                        )
+                        self.engine.start()
+                        self.is_running = True
+                        dpg.set_value("status_badge_text", "[ ACTIVE ]")
+                        dpg.configure_item("status_badge_text", color=[45, 215, 115])
+                        dpg.configure_item("btn_toggle", label="STOP", enabled=True)
+                        dpg.bind_item_theme("btn_toggle", self.theme_stop_btn)
+                        self.set_status_pill("● AI Filter Active • Clean Voice Routed", [45, 215, 115])
+                        self._update_tray_icon()
+                        self._set_voice_test_button_state(False)
+                    except Exception as e:
+                        print(f"[HARDWARE] Failed to restart stream after rescan: {e}")
+                        self.is_running = False
+                        self.set_status_pill(f"▲ Failed to restart: {e}", [235, 75, 75])
 
             except Exception as e:
                 print(f"[HARDWARE] Error during hardware rescan: {e}")
@@ -637,6 +656,9 @@ class GetsuGUI:
         Single toggle button handling Start and Stop with symmetric 3-second state lock.
         Spam-proof with thread locks and smooth status feedback.
         """
+        if not self._app_running:
+            return
+
         if self._is_testing_voice:
             self.set_status_pill("▲ Microphone voice test in progress. Please wait.", [240, 180, 50])
             return
@@ -800,6 +822,7 @@ class GetsuGUI:
         Phase 2: Play back 11s processed audio through primary physical playback device.
         Phase 3: Immediate RAM purge (buffer deleted, zero disk files).
         """
+        rn = None
         try:
             if self.selected_input_idx is None or self.selected_input_idx < 0:
                 self.set_status_pill("▲ No microphone selected for voice test.", [235, 75, 75])
@@ -872,8 +895,6 @@ class GetsuGUI:
                         self.set_status_pill(f"◌ Voice Test: Recording to RAM... ({sec_left}s left)", [80, 195, 240])
                         dpg.configure_item("btn_voice_test", label=f"Recording... ({sec_left}s)")
 
-            rn.close()
-
             if not self._app_running or self._cancel_voice_test or not processed_chunks:
                 return
 
@@ -918,6 +939,11 @@ class GetsuGUI:
             print(f"[VOICE TEST] Error during voice preview: {e}")
             self.set_status_pill(f"▲ Voice test error: {e}", [235, 75, 75])
         finally:
+            if rn is not None:
+                try:
+                    rn.close()
+                except Exception:
+                    pass
             self._is_testing_voice = False
             self._set_voice_test_button_state(True)
             if dpg.does_item_exist("btn_toggle"):

@@ -435,13 +435,19 @@ def print_device_report():
     print("-" * 70)
     # Selected Input
     selected_in = auto_select_input_device()
-    print(f" [INPUT]  Selected Microphone   : [{selected_in['index']}] {selected_in['name']}")
-    print(f"          Host API              : {selected_in.get('hostapi', 'Unknown')}")
+    if selected_in:
+        print(f" [INPUT]  Selected Microphone   : [{selected_in['index']}] {selected_in['name']}")
+        print(f"          Host API              : {selected_in.get('hostapi', 'Unknown')}")
+    else:
+        print(" [INPUT]  No microphone detected.")
 
     # Selected Output
     selected_out, mode = auto_select_output_device()
-    print(f" [OUTPUT] Selected Destination  : [{selected_out['index']}] {selected_out['name']}")
-    print(f"          Operating Mode        : {mode}")
+    if selected_out:
+        print(f" [OUTPUT] Selected Destination  : [{selected_out['index']}] {selected_out['name']}")
+        print(f"          Operating Mode        : {mode}")
+    else:
+        print(" [OUTPUT] No audio output device detected.")
     print("=" * 70)
     return is_vbcable, selected_in, selected_out
 

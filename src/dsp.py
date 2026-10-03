@@ -69,6 +69,9 @@ class HighPassFilter:
         for i in range(n):
             x0 = frame_list[i]
             y0 = b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+            # Anti-denormal flush: prevent CPU microcode stalling on exponential decay silence
+            if -1e-15 < y0 < 1e-15:
+                y0 = 0.0
             out[i] = y0
             x2 = x1
             x1 = x0

@@ -95,34 +95,42 @@ def load_config() -> Dict[str, Any]:
         return copy.deepcopy(DEFAULT_CONFIG)
 
 
+import threading
+
+_config_lock = threading.Lock()
+
+
 def save_config(config_data: Dict[str, Any]) -> bool:
     """
     Atomically saves configuration data to config.json using temp-file swap
     with exponential backoff for transient Windows Defender / antivirus file inspection locks.
+    Thread-safe against concurrent saves and in-flight dictionary mutations.
     """
-    try:
-        config_dir = os.path.dirname(CONFIG_FILE)
-        temp_fd, temp_path = tempfile.mkstemp(dir=config_dir, suffix=".tmp")
+    with _config_lock:
+        data_copy = copy.deepcopy(config_data)
         try:
-            with os.fdopen(temp_fd, "w", encoding="utf-8") as f:
-                json.dump(config_data, f, indent=4)
-
-            # 3-attempt exponential backoff retry for transient antivirus file locks (WinError 32)
-            for attempt in range(3):
-                try:
-                    os.replace(temp_path, CONFIG_FILE)
-                    return True
-                except PermissionError:
-                    if attempt == 2:
-                        raise
-                    time.sleep(0.05 * (attempt + 1))
-        except Exception:
+            config_dir = os.path.dirname(CONFIG_FILE)
+            temp_fd, temp_path = tempfile.mkstemp(dir=config_dir, suffix=".tmp")
             try:
-                if os.path.exists(temp_path):
-                    os.unlink(temp_path)
+                with os.fdopen(temp_fd, "w", encoding="utf-8") as f:
+                    json.dump(data_copy, f, indent=4)
+
+                # 3-attempt exponential backoff retry for transient antivirus file locks (WinError 32)
+                for attempt in range(3):
+                    try:
+                        os.replace(temp_path, CONFIG_FILE)
+                        return True
+                    except PermissionError:
+                        if attempt == 2:
+                            raise
+                        time.sleep(0.05 * (attempt + 1))
             except Exception:
-                pass
-            raise
-    except Exception as e:
-        print(f"[ERROR] Failed to save config.json: {e}")
-        return False
+                try:
+                    if os.path.exists(temp_path):
+                        os.unlink(temp_path)
+                except Exception:
+                    pass
+                raise
+        except Exception as e:
+            print(f"[ERROR] Failed to save config.json: {e}")
+            return False

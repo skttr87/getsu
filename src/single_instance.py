@@ -79,7 +79,12 @@ def activate_existing_instance(mutex_name: str = MUTEX_NAME) -> bool:
             return True
 
         # Mutex existed but no window was found (stale mutex from killed/crashed instance).
-        # Allow this process to continue and take over.
+        # Close stale handle and create a fresh mutex to claim exclusive ownership cleanly.
+        try:
+            kernel32.CloseHandle(_app_mutex)
+        except Exception:
+            pass
+        _app_mutex = kernel32.CreateMutexW(None, False, mutex_name)
         return False
 
     return False

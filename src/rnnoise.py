@@ -66,14 +66,22 @@ class RNNoise:
         if not frame_float32.flags.c_contiguous or frame_float32.dtype != np.float32:
             frame_float32 = np.ascontiguousarray(frame_float32, dtype=np.float32)
 
+        st = self._state
+        if not st:
+            return frame_float32, 0.0
+
         ptr = frame_float32.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
-        speech_prob = _lib.rnnoise_process_frame(self._state, ptr, ptr)
+        speech_prob = _lib.rnnoise_process_frame(st, ptr, ptr)
         return frame_float32, float(speech_prob)
 
     def close(self):
-        if self._state:
-            _lib.rnnoise_destroy(self._state)
-            self._state = None
+        st = self._state
+        self._state = None
+        if st:
+            try:
+                _lib.rnnoise_destroy(st)
+            except Exception:
+                pass
 
     def __del__(self):
         self.close()

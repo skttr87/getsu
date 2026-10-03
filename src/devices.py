@@ -3,14 +3,22 @@ Audio Device Enumeration and VB-Audio Virtual Cable Management for Getsu.
 """
 import os
 import sys
+import time
 import subprocess
 from typing import List, Dict, Optional, Tuple
 import sounddevice as sd
 
 
-def get_all_devices() -> List[Dict]:
+def get_all_devices(force_rescan: bool = False) -> List[Dict]:
     """Retrieve all sound devices with HostAPI details."""
     try:
+        if force_rescan:
+            try:
+                if hasattr(sd, '_terminate') and hasattr(sd, '_initialize'):
+                    sd._terminate()
+                    sd._initialize()
+            except Exception as e:
+                print(f"[WARN] Failed to reinitialize PortAudio: {e}")
         devices = sd.query_devices()
         host_apis = sd.query_hostapis()
         result = []
@@ -28,6 +36,24 @@ def get_all_devices() -> List[Dict]:
     except Exception as e:
         print(f"[ERROR] Failed to query audio devices: {e}")
         return []
+
+
+def check_vbcable_via_audiorestore() -> bool:
+    """Invokes bundled native AudioRestore.exe to check if VB-Cable is active in Windows MMDevice API."""
+    try:
+        if getattr(sys, 'frozen', False):
+            tool_exe = os.path.join(getattr(sys, '_MEIPASS', ''), "drivers", "vbcable", "AudioRestore.exe")
+            if not os.path.exists(tool_exe):
+                tool_exe = os.path.join(os.path.dirname(sys.executable), "drivers", "vbcable", "AudioRestore.exe")
+        else:
+            tool_exe = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "drivers", "vbcable", "AudioRestore.exe"))
+
+        if os.path.exists(tool_exe):
+            res = subprocess.run([tool_exe, "--check-vbcable"], creationflags=0x08000000, timeout=3)
+            return res.returncode == 0
+        return False
+    except Exception:
+        return False
 
 
 VIRTUAL_INPUT_BLACKLIST = [
@@ -77,7 +103,7 @@ def get_output_devices() -> List[Dict]:
     return wasapi_outputs if wasapi_outputs else outputs
 
 
-def check_vbcable_status() -> Tuple[bool, Optional[Dict], Optional[Dict]]:
+def check_vbcable_status(force_rescan: bool = False) -> Tuple[bool, Optional[Dict], Optional[Dict]]:
     """
     Checks if VB-Audio Virtual Cable is installed and available.
     Returns: (is_installed, cable_input_playback, cable_output_recording)
@@ -85,20 +111,47 @@ def check_vbcable_status() -> Tuple[bool, Optional[Dict], Optional[Dict]]:
       - 'CABLE Input' is a PLAYBACK device where Getsu sends denoised audio.
       - 'CABLE Output' is a RECORDING device where Steam/Zoom listens.
     """
-    devices = get_all_devices()
+    devices = get_all_devices(force_rescan=force_rescan)
     cable_input = None
     cable_output = None
 
     for d in devices:
-        name = d['name']
+        name_lower = d['name'].lower()
         # Playback endpoint: CABLE Input
-        if 'cable input' in name.lower() and d['outputs'] > 0:
-            if not cable_input or 'WASAPI' in d['hostapi']:
-                cable_input = d
+        if d['outputs'] > 0:
+            if 'cable input' in name_lower or 'vb-cable' in name_lower or ('vb-audio' in name_lower and any(k in name_lower for k in ['cable', 'point', 'input'])):
+                if not cable_input or 'WASAPI' in d['hostapi']:
+                    cable_input = d
         # Recording endpoint: CABLE Output
-        if 'cable output' in name.lower() and d['inputs'] > 0:
-            if not cable_output or 'WASAPI' in d['hostapi']:
-                cable_output = d
+        if d['inputs'] > 0:
+            if 'cable output' in name_lower or 'vb-cable' in name_lower or ('vb-audio' in name_lower and any(k in name_lower for k in ['cable', 'point', 'output'])):
+                if not cable_output or 'WASAPI' in d['hostapi']:
+                    cable_output = d
+
+    # Both endpoints found in PortAudio: fully confirmed
+    if cable_input is not None and cable_output is not None:
+        return True, cable_input, cable_output
+
+    # Check Windows MMDevice directly if PortAudio missed either endpoint
+    has_win_cable = False
+    try:
+        from src.router import native_get_cable_capture_guid
+        if native_get_cable_capture_guid() is not None:
+            has_win_cable = True
+    except Exception:
+        pass
+
+    if not has_win_cable:
+        has_win_cable = check_vbcable_via_audiorestore()
+
+    # If Windows CoreAudio sees VB-Cable but PortAudio hasn't rescanned yet, re-query PortAudio
+    if has_win_cable and not force_rescan:
+        return check_vbcable_status(force_rescan=True)
+
+    # If PortAudio sees cable_input (where Getsu sends audio) and Windows has the driver:
+    if cable_input is not None and has_win_cable:
+        fallback_output = cable_output or {'index': -1, 'name': 'CABLE Output (Windows Audio)'}
+        return True, cable_input, fallback_output
 
     is_installed = (cable_input is not None) and (cable_output is not None)
     return is_installed, cable_input, cable_output
@@ -344,11 +397,15 @@ def install_vbcable_driver() -> bool:
         else:
             return False
 
-        # 2. Post-restore physical playback endpoint
+        # Allow Windows AudioEndpointBuilder 1.5 seconds to register audio nodes
+        time.sleep(1.5)
+
+        # 2. Post-restore physical playback and capture endpoints
         if os.path.exists(restore_exe):
             try:
                 subprocess.run([restore_exe, "--restore", backup_file], creationflags=0x08000000, timeout=5)
                 subprocess.run([restore_exe, "--ensure-physical"], creationflags=0x08000000, timeout=5)
+                subprocess.run([restore_exe, "--ensure-physical-capture"], creationflags=0x08000000, timeout=5)
             except Exception:
                 pass
         return True

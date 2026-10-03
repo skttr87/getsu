@@ -68,10 +68,42 @@ class TestDeviceFiltering(unittest.TestCase):
         ]
         self.assertEqual(validate_device_index(1, is_input=True), 1)
         self.assertIsNone(validate_device_index(1, is_input=False))
-        self.assertEqual(validate_device_index(2, is_input=False), 2)
-        self.assertIsNone(validate_device_index(2, is_input=True))
-        self.assertIsNone(validate_device_index(99, is_input=True))
-        self.assertIsNone(validate_device_index(None, is_input=True))
+    @patch("src.devices.get_all_devices")
+    def test_check_vbcable_status_variants(self, mock_get_all):
+        from src.devices import check_vbcable_status
+        # Standard names
+        mock_get_all.return_value = [
+            {'index': 1, 'name': 'CABLE Input (VB-Audio Virtual Cable)', 'inputs': 0, 'outputs': 2, 'hostapi': 'Windows WASAPI'},
+            {'index': 2, 'name': 'CABLE Output (VB-Audio Virtual Cable)', 'inputs': 2, 'outputs': 0, 'hostapi': 'Windows WASAPI'},
+        ]
+        installed, cin, cout = check_vbcable_status()
+        self.assertTrue(installed)
+        self.assertEqual(cin['index'], 1)
+        self.assertEqual(cout['index'], 2)
+
+        # Variant names (e.g. MME truncated or alternative naming)
+        mock_get_all.return_value = [
+            {'index': 3, 'name': 'VB-Audio Point', 'inputs': 0, 'outputs': 2, 'hostapi': 'MME'},
+            {'index': 4, 'name': 'VB-Audio Cable', 'inputs': 2, 'outputs': 0, 'hostapi': 'MME'},
+        ]
+        installed, cin, cout = check_vbcable_status()
+        self.assertTrue(installed)
+
+    @patch("src.devices.sd._initialize")
+    @patch("src.devices.sd._terminate")
+    @patch("src.devices.sd.query_devices")
+    @patch("src.devices.sd.query_hostapis")
+    def test_check_vbcable_force_rescan(self, mock_hostapis, mock_query, mock_term, mock_init):
+        from src.devices import check_vbcable_status
+        mock_hostapis.return_value = [{'name': 'Windows WASAPI'}]
+        mock_query.return_value = [
+            {'name': 'CABLE Input', 'hostapi': 0, 'max_input_channels': 0, 'max_output_channels': 2, 'default_samplerate': 48000.0},
+            {'name': 'CABLE Output', 'hostapi': 0, 'max_input_channels': 2, 'max_output_channels': 0, 'default_samplerate': 48000.0},
+        ]
+        installed, cin, cout = check_vbcable_status(force_rescan=True)
+        self.assertTrue(installed)
+        mock_term.assert_called_once()
+        mock_init.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -416,7 +416,7 @@ class GetsuGUI:
             self.config["input_device_id"] = self.selected_input_idx
             save_config(self.config)
 
-        self.is_vbcable_installed, cable_in, _ = check_vbcable_status()
+        self.is_vbcable_installed, cable_in, _ = check_vbcable_status(force_rescan=reinit_portaudio)
         if self.is_vbcable_installed and cable_in:
             self.selected_output_idx = cable_in['index']
             self.selected_output_name = cable_in['name']
@@ -657,10 +657,13 @@ class GetsuGUI:
                 return
 
             if not self.is_vbcable_installed:
-                self.show_install_modal()
-                self.set_status_pill("▲ Virtual Cable required to route clean voice.", [235, 75, 75])
-                self._release_state_lock()
-                return
+                # Dynamically re-verify before showing modal in case driver was just installed
+                self._refresh_devices(reinit_portaudio=True)
+                if not self.is_vbcable_installed:
+                    self.show_install_modal()
+                    self.set_status_pill("▲ Virtual Cable required to route clean voice.", [235, 75, 75])
+                    self._release_state_lock()
+                    return
 
             # Lock UI immediately into Starting state (Crimson Red button)
             dpg.configure_item("btn_toggle", label="Starting...", enabled=False)
@@ -950,8 +953,14 @@ class GetsuGUI:
 
         def worker():
             success = install_vbcable_driver()
-            time.sleep(2.5)
-            self._refresh_devices()
+
+            # Robust polling loop: Wait for Windows AudioEndpointBuilder and Audiosrv to register endpoints
+            # Check every 1.0s up to 10 seconds
+            for _ in range(10):
+                time.sleep(1.0)
+                self._refresh_devices(reinit_portaudio=True)
+                if self.is_vbcable_installed:
+                    break
 
             dpg.hide_item("install_spinner")
             dpg.hide_item("modal_buttons_row")
@@ -964,6 +973,7 @@ class GetsuGUI:
                     "No restart required. Clean, denoised audio is now\n"
                     "ready for all your games and voice apps."
                 )
+                self._update_cable_banner()
             elif success:
                 dpg.set_value(
                     "install_status_text",
@@ -971,6 +981,7 @@ class GetsuGUI:
                     "If the device does not appear immediately,\n"
                     "a quick Windows restart will finalize it."
                 )
+                self._update_cable_banner()
             else:
                 dpg.set_value(
                     "install_status_text",
@@ -982,15 +993,18 @@ class GetsuGUI:
 
     def on_install_done_click(self, sender, app_data):
         dpg.hide_item("modal_vbcable")
-        self._refresh_devices()
+        self._refresh_devices(reinit_portaudio=True)
         self._update_cable_banner()
 
     def on_install_skip_click(self, sender, app_data):
         dpg.hide_item("modal_vbcable")
+        self._refresh_devices(reinit_portaudio=True)
         self._update_cable_banner()
 
     def show_install_modal(self, sender=None, app_data=None):
+        self._refresh_devices(reinit_portaudio=True)
         if self.is_vbcable_installed:
+            self._update_cable_banner()
             return
         dpg.show_item("modal_buttons_row")
         dpg.configure_item("btn_install_confirm", enabled=True)

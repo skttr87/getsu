@@ -94,22 +94,40 @@ class TrayApp:
     def _select_input_device(self, dev_id: int):
         def _handler(icon, item):
             print(f"[UI] Switching microphone to: [{dev_id}]")
-            self.engine.stop()
+            prev_id = self.engine.input_device
+            self.engine.prepare_for_stop()
             self.engine.input_device = dev_id
-            self.config['input_device_id'] = dev_id
-            save_config(self.config)
-            self.engine.start()
+            try:
+                self.engine.start()
+                self.config['input_device_id'] = dev_id
+                save_config(self.config)
+            except Exception as e:
+                print(f"[UI] Failed to switch microphone to [{dev_id}]: {e}. Rolling back to [{prev_id}].")
+                self.engine.input_device = prev_id
+                try:
+                    self.engine.start()
+                except Exception:
+                    pass
             self._icon.update_menu()
         return _handler
 
     def _select_output_device(self, dev_id: int):
         def _handler(icon, item):
             print(f"[UI] Switching output destination to: [{dev_id}]")
-            self.engine.stop()
+            prev_id = self.engine.output_device
+            self.engine.prepare_for_stop()
             self.engine.output_device = dev_id
-            self.config['output_device_id'] = dev_id
-            save_config(self.config)
-            self.engine.start()
+            try:
+                self.engine.start()
+                self.config['output_device_id'] = dev_id
+                save_config(self.config)
+            except Exception as e:
+                print(f"[UI] Failed to switch output destination to [{dev_id}]: {e}. Rolling back to [{prev_id}].")
+                self.engine.output_device = prev_id
+                try:
+                    self.engine.start()
+                except Exception:
+                    pass
             self._icon.update_menu()
         return _handler
 
@@ -122,8 +140,10 @@ class TrayApp:
 
     def _on_exit(self, icon, item):
         print("[UI] Exiting Getsu...")
-        self.engine.stop()
-        icon.stop()
+        try:
+            self.engine.prepare_for_stop()
+        finally:
+            icon.stop()
 
     def _build_menu(self) -> Menu:
         is_vbcable, _, _ = check_vbcable_status()
@@ -151,7 +171,7 @@ class TrayApp:
             )
 
         menu_entries = [
-            item("Getsu AI Noise Cancellation v1.0", None, enabled=False),
+            item("Getsu AI Noise Cancellation v1.2.0", None, enabled=False),
             item(
                 lambda text: f"Status: {self._get_status_str().upper()}",
                 None,
@@ -193,8 +213,3 @@ class TrayApp:
         initial_img = create_tray_image(self._get_status_str())
         self._icon = pystray.Icon("getsu", initial_img, "Getsu Real-Time Noise Suppression", self._build_menu())
         self._icon.run()
-
-    def run_detached(self):
-        """Runs the tray icon in a dedicated background thread."""
-        self._thread = threading.Thread(target=self.run, daemon=True)
-        self._thread.start()

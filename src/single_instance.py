@@ -8,6 +8,7 @@ without loading heavy libraries (no audio, no UI, no neural model).
 import sys
 import time
 import ctypes
+import atexit
 
 MUTEX_NAME = "Local\\Getsu_SingleInstance_Mutex_8F9A"
 WINDOW_TITLE = "Getsu - AI Noise Cancellation"
@@ -74,10 +75,12 @@ def activate_existing_instance(mutex_name: str = MUTEX_NAME) -> bool:
                     user32.BringWindowToTop(hwnd)
                     user32.SetForegroundWindow(hwnd)
             except Exception:
-                user32.BringWindowToTop(hwnd)
                 user32.SetForegroundWindow(hwnd)
+            return True
 
-        return True
+        # Mutex existed but no window was found (stale mutex from killed/crashed instance).
+        # Allow this process to continue and take over.
+        return False
 
     return False
 
@@ -93,5 +96,4 @@ def release_instance():
         _app_mutex = None
 
 
-import atexit
 atexit.register(release_instance)

@@ -40,12 +40,18 @@ def parse_args():
 
 def run_tray_mode():
     from src.tray import TrayApp
+    from src.router import SmartMicRouter
     config = load_config()
     _, def_in, def_out = print_device_report()
-    input_device_id = config.get("input_device_id", def_in['index'])
-    output_device_id = config.get("output_device_id", def_out['index'])
+    input_device_id = config.get("input_device_id", def_in['index'] if def_in else None)
+    output_device_id = config.get("output_device_id", def_out['index'] if def_out else None)
 
-    engine = create_engine_from_config(config, input_device_id, output_device_id)
+    if input_device_id is None:
+        print("[ERROR] No audio input device (microphone) detected. Exiting tray mode.")
+        return
+
+    router = SmartMicRouter(config)
+    engine = create_engine_from_config(config, input_device_id, output_device_id, router=router)
     engine.start()
 
     print("\n[GETSU] Starting Windows System Tray...")
@@ -54,17 +60,23 @@ def run_tray_mode():
 
 
 def run_cli_mode():
+    from src.router import SmartMicRouter
     config = load_config()
     _, def_in, def_out = print_device_report()
-    input_device_id = config.get("input_device_id", def_in['index'])
-    output_device_id = config.get("output_device_id", def_out['index'])
+    input_device_id = config.get("input_device_id", def_in['index'] if def_in else None)
+    output_device_id = config.get("output_device_id", def_out['index'] if def_out else None)
 
-    engine = create_engine_from_config(config, input_device_id, output_device_id)
+    if input_device_id is None:
+        print("[ERROR] No audio input device (microphone) detected. Exiting CLI mode.")
+        return
+
+    router = SmartMicRouter(config)
+    engine = create_engine_from_config(config, input_device_id, output_device_id, router=router)
     engine.start()
 
     def shutdown(sig=None, frame=None):
         print("\n[GETSU] Stopping audio engine...")
-        engine.stop()
+        engine.prepare_for_stop()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, shutdown)
@@ -86,6 +98,15 @@ def run_cli_mode():
 
 def main():
     args = parse_args()
+
+    # Startup Audit: Auto-recover Windows default mic if previous session ended in unclean shutdown
+    try:
+        from src.router import SmartMicRouter
+        initial_config = load_config()
+        recovery_router = SmartMicRouter(initial_config)
+        recovery_router.audit_crash_recovery()
+    except Exception as e:
+        print(f"[RECOVERY] Warning: Startup audio audit encountered error: {e}")
 
     if args.check_devices:
         print_device_report()

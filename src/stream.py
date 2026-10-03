@@ -4,7 +4,7 @@ Synchronous WASAPI duplex streaming with in-flight DSP and RNNoise neural filter
 """
 import time
 import threading
-from typing import Optional, Callable
+from typing import Optional, Callable, Any
 import numpy as np
 import sounddevice as sd
 
@@ -30,6 +30,7 @@ class AudioEngine:
         mic_gain: float = 1.0,
         output_gain: float = 1.08,
         hpf_cutoff_hz: float = 80.0,
+        router: Optional[Any] = None,
     ):
         self.input_device = input_device
         self.output_device = output_device
@@ -41,10 +42,22 @@ class AudioEngine:
         self.mic_gain = mic_gain
         self.output_gain = output_gain
         self.hpf_cutoff_hz = hpf_cutoff_hz
+        self.router = router
+        self.router_swap_success: bool = True
         self.is_muted = False
+        self._lock = threading.RLock()
+        self._watchdog_lock = threading.Lock()
 
         # DSP Components
-        self.rnnoise = RNNoise()
+        self.denoise_available = True
+        try:
+            self.rnnoise = RNNoise()
+        except Exception as e:
+            print(f"[ENGINE] Warning: Failed to initialize RNNoise neural engine ({e}). Operating in DSP bypass mode.")
+            self.rnnoise = None
+            self.denoise_available = False
+            self.denoise_enabled = False
+
         self.hpf = HighPassFilter(cutoff_hz=self.hpf_cutoff_hz, sample_rate=float(SAMPLE_RATE))
         self.gate = AdaptiveNoiseGate(
             threshold=self.vad_threshold,
@@ -63,7 +76,6 @@ class AudioEngine:
 
         self._stream: Optional[sd.Stream] = None
         self._running = False
-        self._lock = threading.Lock()
 
         # Live Metrics for UI (Thread-Safe Atomic Tuple: speech_prob, peak_db, rms_db, input_peak_db)
         self._metrics = (0.0, -100.0, -100.0, -100.0)
@@ -90,7 +102,8 @@ class AudioEngine:
 
     def _audio_callback(self, indata, outdata, frames, time_info, status):
         """10ms real-time audio processing callback."""
-        self._last_callback_time = time.monotonic()
+        with self._watchdog_lock:
+            self._last_callback_time = time.monotonic()
         if status:
             if status.input_overflow:
                 self.overflow_count += 1
@@ -127,7 +140,7 @@ class AudioEngine:
 
         speech_prob = 0.0
         # 4. DSP Stage 2 & 3: RNNoise Neural Suppression + Soft-Knee Adaptive Gate
-        if self.denoise_enabled:
+        if self.denoise_enabled and getattr(self, 'denoise_available', True) and self.rnnoise is not None:
             # Scale to 16-bit float range expected by RNNoise
             frame_rn = frame_mono * 32767.0
             frame_rn, speech_prob = self.rnnoise.process_frame(frame_rn)
@@ -159,7 +172,7 @@ class AudioEngine:
             outdata[:, 1] = frame_mono
 
     def start(self):
-        """Starts the real-time duplex stream."""
+        """Starts the real-time duplex stream with transient error retry."""
         with self._lock:
             if self._running:
                 return
@@ -175,19 +188,46 @@ class AudioEngine:
             print(f"         Output : [{self.output_device}] {out_dev_info['name']} ({self.out_channels} ch)")
             print(f"         Latency: 10ms (480 samples @ 48kHz)")
             
-            self._stream = sd.Stream(
-                samplerate=SAMPLE_RATE,
-                blocksize=FRAME_SIZE,
-                device=(self.input_device, self.output_device),
-                channels=(self.in_channels, self.out_channels),
-                dtype='float32',
-                latency='low',
-                callback=self._audio_callback
-            )
-            self._stream.start()
+            last_err = None
+            for attempt in range(3):
+                try:
+                    self._stream = sd.Stream(
+                        samplerate=SAMPLE_RATE,
+                        blocksize=FRAME_SIZE,
+                        device=(self.input_device, self.output_device),
+                        channels=(self.in_channels, self.out_channels),
+                        dtype='float32',
+                        latency='low',
+                        callback=self._audio_callback
+                    )
+                    self._stream.start()
+                    break
+                except Exception as e:
+                    last_err = e
+                    if self._stream:
+                        try:
+                            self._stream.close()
+                        except Exception:
+                            pass
+                        self._stream = None
+                    if attempt == 2:
+                        raise last_err
+                    print(f"[STREAM] Transient stream opening error (attempt {attempt + 1}/3): {e}. Retrying...")
+                    time.sleep(0.10 * (2 ** attempt))
+
             self._running = True
             self._last_callback_time = time.monotonic()
             print(f"[STREAM] Active! DSP + RNNoise running in background.")
+            if self.router and getattr(self.router, 'config', {}).get("auto_route", True):
+                try:
+                    self.router_swap_success = bool(self.router.swap_to_cable())
+                    if not self.router_swap_success:
+                        print("[ENGINE] Warning: auto_route swap_to_cable() reported failure.")
+                except Exception as e:
+                    self.router_swap_success = False
+                    print(f"[ENGINE] Failed to swap default microphone: {e}")
+            else:
+                self.router_swap_success = True
 
     def stop(self):
         """Stops the real-time stream cleanly."""
@@ -199,7 +239,35 @@ class AudioEngine:
                 self._stream.stop()
                 self._stream.close()
                 self._stream = None
-            print("[STREAM] Audio stream stopped.")
+            if self.overflow_count > 0 or self.underflow_count > 0:
+                print(f"[STREAM] Stopped. Buffer diagnostics: {self.overflow_count} overflows, {self.underflow_count} underflows over {self.total_frames} frames.")
+            else:
+                print("[STREAM] Audio stream stopped.")
+
+    def prepare_for_stop(self):
+        """
+        Unified cleanup method called by all 5 exit vectors:
+        1. GUI Stop button
+        2. System tray exit
+        3. Window close (WM_NCDESTROY)
+        4. Orderly Windows shutdown (atexit / WM_ENDSESSION)
+        5. Watchdog emergency auto-restore
+        """
+        with self._lock:
+            try:
+                if self.router:
+                    try:
+                        self.router.restore_original()
+                    except Exception as e:
+                        print(f"[ENGINE] Failed to restore physical microphone: {e}")
+            finally:
+                self.stop()
+
+    def set_vad_threshold(self, threshold: float):
+        """Live thread-safe adjustment of VAD sensitivity without restarting stream."""
+        self.vad_threshold = float(threshold)
+        self.gate.threshold = float(threshold)
+        print(f"[ENGINE] VAD threshold updated to: {self.vad_threshold:.2f}")
 
     def toggle_denoise(self) -> bool:
         """Toggles RNNoise on/off."""
@@ -234,13 +302,16 @@ class AudioEngine:
                 return False
         except Exception:
             return False
-        if (time.monotonic() - self._last_callback_time) > 2.0:
+        with self._watchdog_lock:
+            elapsed = time.monotonic() - self._last_callback_time
+        if elapsed > 2.0:
             return False
         return True
 
     def close(self):
         self.stop()
-        self.rnnoise.close()
+        if self.rnnoise is not None:
+            self.rnnoise.close()
 
 
 def create_engine_from_config(
@@ -248,15 +319,36 @@ def create_engine_from_config(
     input_device_id: int,
     output_device_id: int,
     is_laptop_mic: Optional[bool] = None,
+    router: Optional[Any] = None,
 ) -> AudioEngine:
     """
     Constructs an AudioEngine instance configured with unified, optimized defaults.
-    Automatically detects built-in laptop microphones to apply wider hysteresis.
+    Automatically validates device indices against active hardware with graceful fallback,
+    and detects built-in laptop microphones to apply wider hysteresis.
     """
+    from src.devices import validate_device_index, auto_select_input_device, auto_select_output_device, is_laptop_microphone
+
+    # Validate input device against active hardware
+    valid_in = validate_device_index(input_device_id, is_input=True)
+    if valid_in is None:
+        fallback_in = auto_select_input_device()
+        if fallback_in and isinstance(fallback_in, dict):
+            print(f"[STREAM] Warning: Configured input device [{input_device_id}] invalid or disconnected. Falling back to [{fallback_in['index']}] {fallback_in['name']}")
+            input_device_id = fallback_in['index']
+
+    # Validate output device against active hardware
+    valid_out = validate_device_index(output_device_id, is_input=False)
+    if valid_out is None:
+        fallback_out_res = auto_select_output_device()
+        fallback_out = fallback_out_res[0] if isinstance(fallback_out_res, tuple) else fallback_out_res
+        if fallback_out and isinstance(fallback_out, dict):
+            print(f"[STREAM] Warning: Configured output device [{output_device_id}] invalid or disconnected. Falling back to [{fallback_out['index']}] {fallback_out['name']}")
+            output_device_id = fallback_out['index']
+
     if is_laptop_mic is None:
         try:
-            dev_name = sd.query_devices(input_device_id)['name'].lower()
-            is_laptop_mic = any(k in dev_name for k in ["realtek", "array", "built-in", "internal"])
+            dev_name = sd.query_devices(input_device_id)['name']
+            is_laptop_mic = is_laptop_microphone(dev_name)
         except Exception:
             is_laptop_mic = False
 
@@ -270,10 +362,14 @@ def create_engine_from_config(
         base_gain = 1.0
 
     cfg_th = config.get("vad_threshold")
-    vad_threshold = default_th if (cfg_th is None or cfg_th == 0.75) else cfg_th
+    is_vad_customized = config.get("vad_customized", False)
+    if is_vad_customized and cfg_th is not None:
+        vad_threshold = cfg_th
+    else:
+        vad_threshold = default_th if (cfg_th is None or cfg_th == 0.75) else cfg_th
 
     cfg_hangover = config.get("vad_hangover_ms")
-    vad_hangover_ms = default_hangover if (cfg_hangover is None or cfg_hangover == 180.0) else cfg_hangover
+    vad_hangover_ms = default_hangover if (cfg_hangover is None or (not is_vad_customized and cfg_hangover == 180.0)) else cfg_hangover
 
     boost_db = config.get("mic_boost_db", 0)
     boost_mult = 10.0 ** (boost_db / 20.0)
@@ -290,4 +386,5 @@ def create_engine_from_config(
         mic_gain=mic_gain,
         output_gain=config.get("output_gain", 1.08),
         hpf_cutoff_hz=config.get("hpf_cutoff_hz", 80.0),
+        router=router,
     )

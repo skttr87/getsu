@@ -160,7 +160,7 @@ class AdaptiveNoiseGate:
             else:
                 if self._zero_buffer is None or len(self._zero_buffer) != len(frame):
                     self._zero_buffer = np.zeros(len(frame), dtype=frame.dtype)
-                return self._zero_buffer.copy(), 0.0
+                return self._zero_buffer, 0.0
         else:
             if in_place:
                 frame *= self.current_gain

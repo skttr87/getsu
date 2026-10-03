@@ -34,9 +34,15 @@ VIRTUAL_INPUT_BLACKLIST = [
     "cable output",
     "cable input",
     "vb-audio",
+    "vb-cable",
     "virtual audio",
     "virtual cable",
     "voicemeeter",
+    "rtx voice",
+    "nvidia broadcast",
+    "krisp",
+    "elgato wave link",
+    "soundflower",
 ]
 
 
@@ -110,6 +116,32 @@ OUTPUT_HEADPHONE_KEYWORDS = [
     'corsair', 'hyperx', 'steelseries', 'jbl', 'sennheiser', 'epos',
     'audio-technica', 'realtek', 'soundcore', 'anker'
 ]
+
+
+def is_laptop_microphone(device_name: str) -> bool:
+    """Detects whether a microphone is an integrated laptop array/realtek mic requiring gain compensation."""
+    name_lower = device_name.lower()
+    return any(k in name_lower for k in ["realtek", "array", "built-in", "internal"])
+
+
+def validate_device_index(device_id: Optional[int], is_input: bool = True) -> Optional[int]:
+    """
+    Validates that a device index currently exists and has the requested capability.
+    Returns the validated index if valid, or None if invalid/disconnected.
+    """
+    if device_id is None:
+        return None
+    try:
+        devices = get_all_devices()
+        for d in devices:
+            if d['index'] == device_id:
+                if is_input and d['inputs'] > 0:
+                    return device_id
+                elif not is_input and d['outputs'] > 0:
+                    return device_id
+        return None
+    except Exception:
+        return None
 
 
 def auto_select_input_device() -> Dict:
@@ -193,7 +225,27 @@ def auto_select_output_device() -> Tuple[Dict, str]:
     return outputs[0] if outputs else {'index': 0, 'name': 'Default Output'}, "Monitor Mode"
 
 
-def ensure_physical_default_playback():
+def get_physical_output_device() -> Optional[Dict]:
+    """
+    Returns the user's primary physical playback device (headphones/speakers),
+    strictly excluding virtual cables (CABLE Input, VoiceMeeter, etc.).
+    """
+    outputs = get_output_devices()
+    physical_outputs = [d for d in outputs if not is_virtual_input_device(d['name'])]
+    if not physical_outputs:
+        return None
+    default_out_idx = sd.default.device[1]
+    for d in physical_outputs:
+        if d['index'] == default_out_idx:
+            return d
+    for d in physical_outputs:
+        name_lower = d['name'].lower()
+        if any(k in name_lower for k in OUTPUT_HEADPHONE_KEYWORDS):
+            return d
+    return physical_outputs[0]
+
+
+def ensure_physical_default_playback() -> bool:
     """
     Ensures that Windows default playback device is physical speakers/headphones, never CABLE Input.
     """
@@ -206,9 +258,12 @@ def ensure_physical_default_playback():
             tool_exe = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "drivers", "vbcable", "AudioRestore.exe"))
 
         if os.path.exists(tool_exe):
-            subprocess.run([tool_exe, "--ensure-physical"], creationflags=0x08000000, timeout=5)
+            res = subprocess.run([tool_exe, "--ensure-physical"], creationflags=0x08000000, timeout=5)
+            return res.returncode == 0
+        return False
     except Exception as e:
         print(f"[WARN] Failed to verify default playback device: {e}")
+        return False
 
 
 def install_vbcable_driver() -> bool:
@@ -240,15 +295,55 @@ def install_vbcable_driver() -> bool:
             pass
 
     print(f"[INSTALL] Requesting UAC elevation to install VB-Audio Virtual Cable...")
-    # Run via PowerShell with RunAs verb (escape single quotes for usernames with apostrophes)
-    safe_setup_exe = setup_exe.replace("'", "''")
-    cmd = [
-        "powershell",
-        "-Command",
-        f"Start-Process -FilePath '{safe_setup_exe}' -ArgumentList '-i -h' -Verb RunAs -Wait"
-    ]
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True)
+        if sys.platform == 'win32':
+            import ctypes
+            from ctypes import wintypes
+
+            class SHELLEXECUTEINFOW(ctypes.Structure):
+                _fields_ = [
+                    ('cbSize', wintypes.DWORD),
+                    ('fMask', wintypes.ULONG),
+                    ('hwnd', wintypes.HWND),
+                    ('lpVerb', wintypes.LPCWSTR),
+                    ('lpFile', wintypes.LPCWSTR),
+                    ('lpParameters', wintypes.LPCWSTR),
+                    ('lpDirectory', wintypes.LPCWSTR),
+                    ('nShow', ctypes.c_int),
+                    ('hInstApp', wintypes.HINSTANCE),
+                    ('lpIDList', wintypes.LPVOID),
+                    ('lpClass', wintypes.LPCWSTR),
+                    ('hkeyClass', wintypes.HKEY),
+                    ('dwHotKey', wintypes.DWORD),
+                    ('hIconOrMonitor', wintypes.HANDLE),
+                    ('hProcess', wintypes.HANDLE)
+                ]
+
+            SEE_MASK_NOCLOSEPROCESS = 0x00000040
+            sei = SHELLEXECUTEINFOW()
+            sei.cbSize = ctypes.sizeof(SHELLEXECUTEINFOW)
+            sei.fMask = SEE_MASK_NOCLOSEPROCESS
+            sei.hwnd = None
+            sei.lpVerb = "runas"
+            sei.lpFile = setup_exe
+            sei.lpParameters = "-i -h"
+            sei.lpDirectory = os.path.dirname(setup_exe)
+            sei.nShow = 1  # SW_SHOWNORMAL
+
+            success = ctypes.windll.shell32.ShellExecuteExW(ctypes.byref(sei))
+            if not success:
+                print("[ERROR] ShellExecuteExW failed or UAC was declined.")
+                return False
+
+            if sei.hProcess:
+                try:
+                    # Wait up to 120 seconds for driver installer to finish
+                    ctypes.windll.kernel32.WaitForSingleObject(sei.hProcess, 120000)
+                finally:
+                    ctypes.windll.kernel32.CloseHandle(sei.hProcess)
+        else:
+            return False
+
         # 2. Post-restore physical playback endpoint
         if os.path.exists(restore_exe):
             try:
@@ -256,7 +351,7 @@ def install_vbcable_driver() -> bool:
                 subprocess.run([restore_exe, "--ensure-physical"], creationflags=0x08000000, timeout=5)
             except Exception:
                 pass
-        return res.returncode == 0
+        return True
     except Exception as e:
         print(f"[ERROR] Failed to launch installer: {e}")
         return False

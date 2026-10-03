@@ -26,6 +26,8 @@ hiddenimports = [
     "pystray",
     "PIL",
     "cffi",
+    "src.router",
+    "logging.handlers",
 ]
 
 excludes = [

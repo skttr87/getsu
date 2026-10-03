@@ -8,8 +8,8 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyCompany("Getsu AI")]
 [assembly: AssemblyProduct("Getsu AI Noise Cancellation")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 skttr87 (MIT License)")]
-[assembly: AssemblyVersion("1.1.0.0")]
-[assembly: AssemblyFileVersion("1.1.0.0")]
+[assembly: AssemblyVersion("1.2.0.0")]
+[assembly: AssemblyFileVersion("1.2.0.0")]
 
 namespace AudioRestoreTool
 {
@@ -69,18 +69,18 @@ namespace AudioRestoreTool
     [Guid("f8679f50-850a-41cf-9c72-430f290290c8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     internal interface IPolicyConfigWin10
     {
-        int GetMixFormat(string pszDeviceName, out IntPtr ppFormat);
-        int GetDeviceFormat(string pszDeviceName, bool bDefault, out IntPtr ppFormat);
-        int ResetDeviceFormat(string pszDeviceName);
-        int SetDeviceFormat(string pszDeviceName, IntPtr pEndpointMode, IntPtr pFormat);
-        int GetProcessingPeriod(string pszDeviceName, bool bDefault, out long pmftDefault, out long pmftMinimum);
-        int SetProcessingPeriod(string pszDeviceName, long pmftPeriod);
-        int GetShareMode(string pszDeviceName, out int pMode);
-        int SetShareMode(string pszDeviceName, int mode);
-        int GetPropertyValue(string pszDeviceName, IntPtr pKey, out IntPtr pPropVariant);
-        int SetPropertyValue(string pszDeviceName, IntPtr pKey, IntPtr pPropVariant);
-        int SetDefaultEndpoint(string pszDeviceName, ERole role);
-        int SetEndpointVisibility(string pszDeviceName, bool bVisible);
+        [PreserveSig] int GetMixFormat(string pszDeviceName, IntPtr ppFormat);
+        [PreserveSig] int GetDeviceFormat(string pszDeviceName, bool bDefault, IntPtr ppFormat);
+        [PreserveSig] int ResetDeviceFormat(string pszDeviceName);
+        [PreserveSig] int SetDeviceFormat(string pszDeviceName, IntPtr pEndpointMode, IntPtr pFormat);
+        [PreserveSig] int GetProcessingPeriod(string pszDeviceName, bool bDefault, IntPtr pmftDefault, IntPtr pmftMinimum);
+        [PreserveSig] int SetProcessingPeriod(string pszDeviceName, IntPtr pmftPeriod);
+        [PreserveSig] int GetShareMode(string pszDeviceName, IntPtr pMode);
+        [PreserveSig] int SetShareMode(string pszDeviceName, IntPtr mode);
+        [PreserveSig] int GetPropertyValue(string pszDeviceName, bool bFxStore, IntPtr pKey, IntPtr pPropVariant);
+        [PreserveSig] int SetPropertyValue(string pszDeviceName, bool bFxStore, IntPtr pKey, IntPtr pPropVariant);
+        [PreserveSig] int SetDefaultEndpoint(string pszDeviceName, ERole role);
+        [PreserveSig] int SetEndpointVisibility(string pszDeviceName, bool bVisible);
     }
 
     [ComImport, Guid("870af99c-171d-4f9e-af0d-e63df40c2bc9")]
@@ -121,10 +121,13 @@ namespace AudioRestoreTool
             try
             {
                 var policy = (IPolicyConfigWin10)new PolicyConfigClientWin10();
-                policy.SetDefaultEndpoint(devId, ERole.eConsole);
-                policy.SetDefaultEndpoint(devId, ERole.eMultimedia);
-                policy.SetDefaultEndpoint(devId, ERole.eCommunications);
-                return true;
+                int hr1 = policy.SetDefaultEndpoint(devId, ERole.eConsole);
+                int hr2 = policy.SetDefaultEndpoint(devId, ERole.eMultimedia);
+                int hr3 = policy.SetDefaultEndpoint(devId, ERole.eCommunications);
+                if (hr1 == 0 || hr2 == 0 || hr3 == 0)
+                    return true;
+                Console.WriteLine(string.Format("SetDefaultEndpoint HR: 0x{0:X8}, 0x{1:X8}, 0x{2:X8}", hr1, hr2, hr3));
+                return false;
             }
             catch (Exception ex)
             {
@@ -137,13 +140,128 @@ namespace AudioRestoreTool
         {
             if (args.Length == 0)
             {
-                Console.WriteLine("Usage: AudioRestore.exe [--backup <file> | --restore <file> | --ensure-physical | --check-vbcable]");
+                Console.WriteLine("Usage: AudioRestore.exe [--backup <file> | --restore <file> | --ensure-physical | --check-vbcable | --get-default-capture | --get-cable-capture | --set-default-capture <id> | --restore-capture <id|file> | --ensure-physical-capture]");
                 return 1;
             }
 
             var enumerator = (IMMDeviceEnumerator)new MMDeviceEnumeratorComObject();
 
-            if (args[0] == "--check-vbcable")
+            if (args[0] == "--get-default-capture")
+            {
+                try
+                {
+                    IMMDevice dev = null;
+                    if (enumerator.GetDefaultAudioEndpoint(EDataFlow.eCapture, ERole.eConsole, out dev) != 0 || dev == null)
+                    {
+                        enumerator.GetDefaultAudioEndpoint(EDataFlow.eCapture, ERole.eCommunications, out dev);
+                    }
+                    if (dev != null)
+                    {
+                        string id;
+                        dev.GetId(out id);
+                        string name = GetFriendlyName(dev);
+                        Console.WriteLine(id + "|" + name);
+                        return 0;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("GetDefaultCapture error: " + ex.Message);
+                    return 1;
+                }
+                return 1;
+            }
+            else if (args[0] == "--get-cable-capture")
+            {
+                try
+                {
+                    IMMDeviceCollection col;
+                    if (enumerator.EnumAudioEndpoints(EDataFlow.eCapture, 1 /* DEVICE_STATE_ACTIVE */, out col) == 0 && col != null)
+                    {
+                        int count;
+                        col.GetCount(out count);
+                        for (int i = 0; i < count; i++)
+                        {
+                            IMMDevice dev;
+                            if (col.Item(i, out dev) == 0 && dev != null)
+                            {
+                                string name = GetFriendlyName(dev).ToLower();
+                                if (name.Contains("cable output") || (name.Contains("cable") && name.Contains("vb-audio")))
+                                {
+                                    string id;
+                                    dev.GetId(out id);
+                                    Console.WriteLine(id);
+                                    return 0;
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("GetCableCapture error: " + ex.Message);
+                    return 1;
+                }
+                return 1;
+            }
+            else if (args[0] == "--set-default-capture" && args.Length > 1)
+            {
+                try
+                {
+                    string targetId = args[1].Trim();
+                    if (!string.IsNullOrEmpty(targetId))
+                    {
+                        if (SetAsDefault(targetId))
+                        {
+                            Console.WriteLine("Successfully set default capture endpoint to: " + targetId);
+                            return 0;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("SetDefaultCapture error: " + ex.Message);
+                    return 1;
+                }
+                return 1;
+            }
+            else if (args[0] == "--restore-capture" && args.Length > 1)
+            {
+                try
+                {
+                    string id = null;
+                    string arg = args[1].Trim();
+                    if (File.Exists(arg))
+                    {
+                        id = File.ReadAllText(arg).Trim();
+                    }
+                    else
+                    {
+                        id = arg;
+                    }
+
+                    if (!string.IsNullOrEmpty(id))
+                    {
+                        IMMDevice testDev;
+                        if (enumerator.GetDevice(id, out testDev) == 0 && testDev != null)
+                        {
+                            if (SetAsDefault(id))
+                            {
+                                Console.WriteLine("Successfully restored default capture endpoint to: " + id);
+                                return 0;
+                            }
+                        }
+                    }
+                }
+                catch { }
+
+                return EnsurePhysicalCapture(enumerator);
+            }
+            else if (args[0] == "--ensure-physical-capture")
+            {
+                return EnsurePhysicalCapture(enumerator);
+            }
+            else if (args[0] == "--check-vbcable")
             {
                 // Returns 0 if active CABLE endpoint is found, 1 if not found
                 IMMDeviceCollection col;
@@ -216,6 +334,59 @@ namespace AudioRestoreTool
                 return EnsurePhysical(enumerator);
             }
 
+            return 0;
+        }
+
+        static int EnsurePhysicalCapture(IMMDeviceEnumerator enumerator)
+        {
+            try
+            {
+                IMMDevice curDev = null;
+                if (enumerator.GetDefaultAudioEndpoint(EDataFlow.eCapture, ERole.eConsole, out curDev) != 0 || curDev == null)
+                {
+                    enumerator.GetDefaultAudioEndpoint(EDataFlow.eCapture, ERole.eCommunications, out curDev);
+                }
+                if (curDev != null)
+                {
+                    string curName = GetFriendlyName(curDev).ToLower();
+                    if (!curName.Contains("cable") && !curName.Contains("vb-audio"))
+                    {
+                        Console.WriteLine("Current default capture is already physical: " + curName);
+                        return 0;
+                    }
+                }
+
+                IMMDeviceCollection col;
+                if (enumerator.EnumAudioEndpoints(EDataFlow.eCapture, 1 /* DEVICE_STATE_ACTIVE */, out col) == 0 && col != null)
+                {
+                    int count;
+                    col.GetCount(out count);
+                    for (int i = 0; i < count; i++)
+                    {
+                        IMMDevice dev;
+                        if (col.Item(i, out dev) == 0 && dev != null)
+                        {
+                            string name = GetFriendlyName(dev);
+                            string nameLower = name.ToLower();
+                            if (!nameLower.Contains("cable") && !nameLower.Contains("vb-audio"))
+                            {
+                                string id;
+                                dev.GetId(out id);
+                                if (SetAsDefault(id))
+                                {
+                                    Console.WriteLine("Set default capture to physical device: " + name);
+                                    return 0;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("EnsurePhysicalCapture error: " + ex.Message);
+                return 1;
+            }
             return 0;
         }
 

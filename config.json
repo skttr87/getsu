@@ -1,8 +1,8 @@
 {
     "app_name": "Getsu",
-    "version": "1.1.0",
-    "input_device_id": null,
-    "input_device_name": null,
+    "version": "1.2.0",
+    "input_device_id": 9,
+    "input_device_name": "Microphone (Realtek(R) Audio)",
     "output_device_id": null,
     "output_device_name": null,
     "denoise_enabled": true,
@@ -14,5 +14,8 @@
     "output_gain": 1.08,
     "mic_gain": 1.0,
     "mic_boost_db": 0,
-    "mute": false
+    "mute": false,
+    "is_swapped": false,
+    "original_mic_id": null,
+    "auto_route": true
 }

@@ -13,6 +13,7 @@ import sys
 import re
 import threading
 import time
+import signal
 import ctypes
 from ctypes import wintypes
 from typing import List, Dict, Optional
@@ -24,16 +25,22 @@ import pystray
 from pystray import MenuItem as item, Menu
 import webbrowser
 
+import numpy as np
+
 from src.devices import (
     get_input_devices,
     check_vbcable_status,
     auto_select_output_device,
+    get_physical_output_device,
     install_vbcable_driver,
     get_all_devices,
     ensure_physical_default_playback,
 )
 from src.config import load_config, save_config
 from src.stream import AudioEngine, create_engine_from_config
+from src.router import SmartMicRouter
+from src.rnnoise import RNNoise, FRAME_SIZE, SAMPLE_RATE
+from src.dsp import HighPassFilter, AdaptiveNoiseGate
 
 # Win32 Constants for System Tray Minimize/Close hook
 user32 = ctypes.windll.user32
@@ -88,6 +95,65 @@ def init_dpi_awareness() -> tuple[int, float]:
         return 96, 1.0
 
 
+def force_foreground_window(hwnd: int):
+    """
+    Bypasses Windows Foreground Lock Timeout (Anti-Focus-Stealing) via AttachThreadInput.
+    Ensures the window is restored, brought to top, and granted foreground input focus.
+    """
+    if not hwnd or sys.platform != "win32":
+        return
+    try:
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+        fore_hwnd = user32.GetForegroundWindow()
+        fore_thread = user32.GetWindowThreadProcessId(fore_hwnd, None)
+        cur_thread = kernel32.GetCurrentThreadId()
+
+        user32.ShowWindow(hwnd, SW_RESTORE)
+        if fore_thread and cur_thread and fore_thread != cur_thread:
+            user32.AttachThreadInput(cur_thread, fore_thread, True)
+            user32.BringWindowToTop(hwnd)
+            user32.SetForegroundWindow(hwnd)
+            user32.AttachThreadInput(cur_thread, fore_thread, False)
+        else:
+            user32.BringWindowToTop(hwnd)
+            user32.SetForegroundWindow(hwnd)
+    except Exception:
+        try:
+            user32.SetForegroundWindow(hwnd)
+        except Exception:
+            pass
+
+
+def apply_dwm_title_bar(hwnd: int):
+    """
+    Applies Windows 10/11 Immersive Dark Mode and custom title bar colors
+    to match the application's unified dark aesthetic.
+    """
+    if not hwnd or sys.platform != "win32":
+        return
+    try:
+        dwmapi = ctypes.windll.dwmapi
+        true_val = ctypes.c_int(1)
+        # DWMWA_USE_IMMERSIVE_DARK_MODE: 20 (Win11 / Win10 20H1+), 19 (Win10 1809-1909)
+        if dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(true_val), ctypes.sizeof(true_val)) != 0:
+            dwmapi.DwmSetWindowAttribute(hwnd, 19, ctypes.byref(true_val), ctypes.sizeof(true_val))
+
+        # DWMWA_CAPTION_COLOR: 35 (Win11 COLORREF 0x00BBGGRR -> RGB(16, 20, 26) is 0x001A1410)
+        caption_color = ctypes.c_int(0x001A1410)
+        dwmapi.DwmSetWindowAttribute(hwnd, 35, ctypes.byref(caption_color), ctypes.sizeof(caption_color))
+
+        # DWMWA_TEXT_COLOR: 36 (Win11 COLORREF pure white 0x00FFFFFF)
+        text_color = ctypes.c_int(0x00FFFFFF)
+        dwmapi.DwmSetWindowAttribute(hwnd, 36, ctypes.byref(text_color), ctypes.sizeof(text_color))
+
+        # DWMWA_BORDER_COLOR: 34 (Win11 COLORREF RGB(40, 52, 70) is 0x00463428)
+        border_color = ctypes.c_int(0x00463428)
+        dwmapi.DwmSetWindowAttribute(hwnd, 34, ctypes.byref(border_color), ctypes.sizeof(border_color))
+    except Exception as e:
+        print(f"[WARN] Failed to apply DWM title bar styling: {e}")
+
+
 def clean_device_label(name: str) -> str:
     """Format raw audio device name into a clean, human-friendly label."""
     cleaned = name
@@ -95,7 +161,10 @@ def clean_device_label(name: str) -> str:
         cleaned = cleaned.replace(tag, "")
     # Clean up prefixes like '2- ' or '1- '
     cleaned = re.sub(r'\(\s*\d+-\s*', '(', cleaned)
-    return cleaned.strip()
+    cleaned = cleaned.strip()
+    if len(cleaned) > 52:
+        cleaned = cleaned[:49] + "..."
+    return cleaned
 
 
 if getattr(sys, 'frozen', False):
@@ -160,9 +229,15 @@ class GetsuGUI:
         print(f"[GUI] Active Monitor DPI: {self.dpi} (DPI Scale: {self.dpi_scale:.2f}x)")
 
         self.config = load_config()
+        self.router = SmartMicRouter(self.config)
         self.mic_boost_db = int(self.config.get("mic_boost_db", 0))
         self.engine: Optional[AudioEngine] = None
         self.is_running = False
+        self._is_testing_voice = False
+        self._state_lock = threading.Lock()
+        self._vad_timer_lock = threading.Lock()
+        self._vad_save_timer: Optional[threading.Timer] = None
+        self._cancel_voice_test = False
 
         self.input_devices: List[Dict] = []
         self.device_map: Dict[str, int] = {}
@@ -189,11 +264,45 @@ class GetsuGUI:
         threading.Thread(target=self._watchdog_loop, daemon=True).start()
 
         # Safeguard: Ensure Windows default playback device remains physical speakers/headphones
-        threading.Thread(target=ensure_physical_default_playback, daemon=True).start()
+        def _check_playback_guard():
+            ok = ensure_physical_default_playback()
+            if ok:
+                print("[INIT] Verified default Windows playback device is physical.")
+
+        threading.Thread(target=_check_playback_guard, daemon=True).start()
 
     def s(self, val: float) -> int:
         """Scale pixel value according to active monitor DPI."""
         return max(1, int(round(val * self.dpi_scale)))
+
+    def _release_state_lock(self):
+        """Idempotently releases _state_lock without raising if already unlocked."""
+        try:
+            self._state_lock.release()
+        except RuntimeError:
+            pass
+
+    def _teardown_engine_and_timers(self):
+        """Unified teardown: halts background workers, cancels timers, and restores audio routing."""
+        self._app_running = False
+        self._cancel_voice_test = True
+        for timer in (self._device_change_timer, self._vad_save_timer):
+            if timer and timer.is_alive():
+                try:
+                    timer.cancel()
+                except Exception:
+                    pass
+        if self.engine:
+            try:
+                self.engine.prepare_for_stop()
+            except Exception:
+                pass
+            self.engine = None
+        elif self.router and self.router.is_swapped:
+            try:
+                self.router.restore_original()
+            except Exception:
+                pass
 
     def _compute_current_gain(self) -> float:
         dev_name = ""
@@ -257,11 +366,19 @@ class GetsuGUI:
         return self.input_devices[0]['index'] if self.input_devices else default_in
 
     def _watchdog_loop(self):
-        """Monitors stream health every 1.0s and triggers debounced hotplug recovery if audio stalls."""
+        """Monitors stream health every 1.0s and triggers emergency mic restoration and debounced hotplug recovery if audio stalls."""
         while self._app_running:
             time.sleep(1.0)
             if self.is_running and self.engine and not self._is_rescanning:
                 if not self.engine.is_stream_alive():
+                    # Emergency Restore Vector (Watchdog): If stream dead while swapped, restore physical mic immediately
+                    if self.router and self.router.is_swapped:
+                        print("[WATCHDOG] Audio stream stalled while microphone swapped. Emergency restoring default capture...")
+                        try:
+                            self.router.restore_original()
+                            self.set_status_pill("▲ Audio stream stalled • Restored physical mic", [240, 180, 50])
+                        except Exception as e:
+                            print(f"[WATCHDOG] Emergency restore error: {e}")
                     with self._device_change_lock:
                         if not self._device_change_timer or not self._device_change_timer.is_alive():
                             print("[WATCHDOG] Audio stream stalled or disconnected. Triggering rescan...")
@@ -362,6 +479,16 @@ class GetsuGUI:
                             save_config(self.config)
                             print(f"[HARDWARE] Auto-selected new microphone: {label}")
                             break
+                    else:
+                        # Edge Case 1.6: User plugs new USB headset while active mid-call.
+                        # Update original_mic_id to the new headset, keeping CABLE Output default so call isn't interrupted.
+                        if self.router and self.router.is_swapped:
+                            guid, name = self.router.get_current_default_mic()
+                            if guid and "cable" not in name.lower():
+                                self.router.original_mic_id = guid
+                                self.config["original_mic_id"] = guid
+                                save_config(self.config)
+                                print(f"[HARDWARE] Updated original_mic_id to new headset: {name}")
 
                 if removed:
                     print(f"[HARDWARE] Microphone removed: {', '.join(removed)}")
@@ -413,83 +540,391 @@ class GetsuGUI:
         return list(self.device_map.keys())[0] if self.device_map else "No Microphone Detected"
 
     def on_input_changed(self, sender, app_data):
-        """Handles user selecting a different microphone from dropdown."""
-        if app_data in self.device_map:
-            new_idx = self.device_map[app_data]
-            self.selected_input_idx = new_idx
-            self.selected_input_name = app_data
-            self.config["input_device_name"] = app_data
-            self.config["input_device_id"] = new_idx
+        """Handles user selecting a different microphone from dropdown (Option B: locked while active)."""
+        if self.is_running or self._is_testing_voice or not self._state_lock.acquire(blocking=False):
+            # Option B: Lock microphone switching while active/testing.
+            # Revert dropdown value back to currently active microphone and warn user.
+            current_label = self._get_selected_input_label()
+            if dpg.does_item_exist("input_combo"):
+                dpg.set_value("input_combo", current_label)
+            self.set_status_pill("▲ Stop noise cancellation first to switch microphone.", [240, 180, 50])
+            return
+
+        try:
+            if app_data in self.device_map:
+                new_idx = self.device_map[app_data]
+                self.selected_input_idx = new_idx
+                self.selected_input_name = app_data
+                print(f"[GUI] Switched microphone to: [{new_idx}] {app_data}")
+                self.config["input_device_name"] = app_data
+                self.config["input_device_id"] = new_idx
+                save_config(self.config)
+                self.set_status_pill(f"● Microphone selected: {clean_device_label(app_data)}", [65, 205, 130])
+        finally:
+            self._release_state_lock()
+
+    def _get_idle_status(self) -> str:
+        """Returns the single-line idle status string based on driver and auto_route configuration."""
+        if not self.is_vbcable_installed:
+            return "▲ Virtual Cable required • Please install driver"
+        if self.config.get("auto_route", True):
+            return "● Ready • Default Mic Routing ON"
+        return "● Ready • Manual Routing Mode"
+
+    def _get_idle_color(self) -> List[int]:
+        """Returns the color for the idle status pill."""
+        if not self.is_vbcable_installed:
+            return [235, 180, 55]  # Warning Amber
+        return [140, 155, 175]  # Muted Slate
+
+    def set_status_pill(self, text: str, color: Optional[List[int]] = None):
+        """Updates the compact single-line status pill with text and optional color."""
+        if not self._ui_built or not dpg.does_item_exist("active_notice"):
+            return
+        dpg.set_value("active_notice", text)
+        if color:
+            dpg.configure_item("active_notice", color=color)
+
+    def _set_voice_test_button_state(self, enabled: bool):
+        """Sets the voice test button enabled/disabled state, contextual label, and theme."""
+        if not self._ui_built or not dpg.does_item_exist("btn_voice_test"):
+            return
+        if enabled and not self.is_vbcable_installed:
+            enabled = False
+        if enabled:
+            dpg.configure_item("btn_voice_test", enabled=True, label="Hear Myself (11s Voice Test)")
+            dpg.bind_item_theme("btn_voice_test", self.theme_voice_btn)
+        else:
+            dpg.configure_item("btn_voice_test", enabled=False, label="Voice Test Unavailable")
+            dpg.bind_item_theme("btn_voice_test", self.theme_voice_btn_disabled)
+
+    def on_auto_route_toggled(self, sender, app_data):
+        """Handles user toggling default microphone switch setting (Option B: locked while active)."""
+        if self.is_running or self._is_testing_voice or not self._state_lock.acquire(blocking=False):
+            # Option B: Lock auto-route preference while active/testing.
+            # Revert checkbox value back to saved config setting and warn user.
+            current_setting = self.config.get("auto_route", True)
+            if dpg.does_item_exist("chk_auto_route"):
+                dpg.set_value("chk_auto_route", current_setting)
+            self.set_status_pill("▲ Stop noise cancellation first to change routing preference.", [240, 180, 50])
+            return
+
+        try:
+            self.config["auto_route"] = bool(app_data)
             save_config(self.config)
-            print(f"[GUI] Switched microphone to: [{new_idx}] {app_data}")
-            if self.is_running and self.engine:
-                self.engine.stop()
-                self.engine = None
-                self.is_running = False
-                self.toggle_stream()
+            print(f"[GUI] Set as Default Microphone while active: {app_data}")
+            if not self.is_running:
+                self.set_status_pill(self._get_idle_status(), self._get_idle_color())
+        finally:
+            self._release_state_lock()
+
+    def on_vad_slider_changed(self, sender, app_data):
+        """Live thread-safe adjustment of VAD sensitivity without restarting stream."""
+        new_val = round(float(app_data), 2)
+        self.config["vad_threshold"] = new_val
+        self.config["vad_customized"] = True
+        if self.engine:
+            self.engine.set_vad_threshold(new_val)
+        with self._vad_timer_lock:
+            if self._vad_save_timer and self._vad_save_timer.is_alive():
+                self._vad_save_timer.cancel()
+            self._vad_save_timer = threading.Timer(0.5, lambda: save_config(self.config))
+            self._vad_save_timer.daemon = True
+            self._vad_save_timer.start()
 
     def toggle_stream(self, sender=None, app_data=None):
-        """Single toggle button handling Start and Stop."""
+        """
+        Single toggle button handling Start and Stop with symmetric 3-second state lock.
+        Spam-proof with thread locks and smooth status feedback.
+        """
+        if self._is_testing_voice:
+            self.set_status_pill("▲ Microphone voice test in progress. Please wait.", [240, 180, 50])
+            return
+
+        if not self._state_lock.acquire(blocking=False):
+            # Already transitioning (locked) - ignore spam clicks
+            return
+
         if not self.is_running:
-            # START
+            # START FLOW
             if self.selected_input_idx is None or self.selected_input_idx < 0:
-                dpg.set_value("active_notice", "No microphone detected. Please connect a microphone.")
+                self.set_status_pill("▲ No microphone detected. Please connect a mic.", [235, 75, 75])
+                self._release_state_lock()
                 return
             if self.selected_output_idx is None or self.selected_output_idx < 0:
-                dpg.set_value("active_notice", "No audio output device detected.")
+                self.set_status_pill("▲ No audio output device detected.", [235, 75, 75])
+                self._release_state_lock()
                 return
-            try:
-                self.engine = create_engine_from_config(
-                    self.config,
-                    self.selected_input_idx,
-                    self.selected_output_idx,
-                )
-                self.engine.start()
-                self.is_running = True
 
-                self.config["input_device_id"] = self.selected_input_idx
-                self.config["input_device_name"] = self.selected_input_name
-                self.config["output_device_id"] = self.selected_output_idx
-                self.config["output_device_name"] = self.selected_output_name
-                save_config(self.config)
+            if not self.is_vbcable_installed:
+                self.show_install_modal()
+                self.set_status_pill("▲ Virtual Cable required to route clean voice.", [235, 75, 75])
+                self._release_state_lock()
+                return
 
-                # Update UI to active state
-                dpg.set_value("status_badge_text", "[ ACTIVE ]")
-                dpg.configure_item("status_badge_text", color=[45, 215, 115])
-                dpg.configure_item("btn_toggle", label="STOP")
-                dpg.bind_item_theme("btn_toggle", self.theme_stop_btn)
-                dpg.set_value("active_notice", "AI Filter Active • Clean voice is streaming to your calls.\nYou can now minimize Getsu to the system tray.")
-                self._update_tray_icon()
-            except Exception as e:
-                print(f"[ERROR] Failed to start stream: {e}")
-                if self.engine:
-                    try:
-                        self.engine.close()
-                    except Exception:
-                        pass
-                    self.engine = None
-                self.is_running = False
-                dpg.set_value("active_notice", f"Error: {e}")
+            # Lock UI immediately into Starting state (Crimson Red button)
+            dpg.configure_item("btn_toggle", label="Starting...", enabled=False)
+            dpg.bind_item_theme("btn_toggle", self.theme_stop_btn)
+            dpg.set_value("status_badge_text", "[ STARTING... ]")
+            dpg.configure_item("status_badge_text", color=[240, 180, 50])
+            self._set_voice_test_button_state(False)
+            self.set_status_pill("◌ Starting AI Filter • Routing to CABLE Output...", [240, 180, 50])
+
+            def _start_worker():
+                start_time = time.monotonic()
+                success = False
+                try:
+                    self.engine = create_engine_from_config(
+                        self.config,
+                        self.selected_input_idx,
+                        self.selected_output_idx,
+                        router=self.router,
+                    )
+                    self.engine.start()
+                    self.is_running = True
+                    success = True
+
+                    self.config["input_device_id"] = self.selected_input_idx
+                    self.config["input_device_name"] = self.selected_input_name
+                    self.config["output_device_id"] = self.selected_output_idx
+                    self.config["output_device_name"] = self.selected_output_name
+                    save_config(self.config)
+                    self._update_tray_icon()
+                except Exception as e:
+                    print(f"[ERROR] Failed to start stream: {e}")
+                    if self.engine:
+                        try:
+                            self.engine.prepare_for_stop()
+                        except Exception:
+                            pass
+                        self.engine = None
+                    self.is_running = False
+                    self.set_status_pill(f"▲ Audio device failed to start: {e}", [235, 75, 75])
+                finally:
+                    # Enforce symmetric 3-second state lock
+                    elapsed = time.monotonic() - start_time
+                    remaining = max(0.0, 3.0 - elapsed)
+                    if remaining > 0:
+                        time.sleep(remaining)
+
+                    if success and self.is_running:
+                        dpg.set_value("status_badge_text", "[ ACTIVE ]")
+                        dpg.configure_item("status_badge_text", color=[45, 215, 115])
+                        dpg.configure_item("btn_toggle", label="STOP", enabled=True)
+                        dpg.bind_item_theme("btn_toggle", self.theme_stop_btn)
+                        if self.config.get("auto_route", True):
+                            if getattr(self.engine, 'router_swap_success', True):
+                                self.set_status_pill("● AI Filter Active • Clean Voice Routed", [45, 215, 115])
+                            else:
+                                self.set_status_pill("▲ AI Filter Active • Auto-Route Failed (Select CABLE in Apps)", [240, 180, 50])
+                        else:
+                            self.set_status_pill("● AI Filter Active • Manual Output Mode", [45, 215, 115])
+                        self._set_voice_test_button_state(False)
+                    else:
+                        dpg.set_value("status_badge_text", "[ STOPPED ]")
+                        dpg.configure_item("status_badge_text", color=[210, 75, 75])
+                        dpg.configure_item("btn_toggle", label="START", enabled=True)
+                        dpg.bind_item_theme("btn_toggle", self.theme_start_btn)
+                        self._set_voice_test_button_state(True)
+
+                    self._release_state_lock()
+
+            threading.Thread(target=_start_worker, daemon=True).start()
+
         else:
-            # STOP
-            if self.engine:
-                self.engine.stop()
-                self.engine = None
-            self.is_running = False
+            # STOP FLOW
+            # Lock UI immediately into Stopping state
+            dpg.configure_item("btn_toggle", label="Stopping...", enabled=False)
+            dpg.set_value("status_badge_text", "[ STOPPING... ]")
+            dpg.configure_item("status_badge_text", color=[240, 180, 50])
+            self.set_status_pill("◌ Restoring physical microphone...", [240, 180, 50])
 
-            # Update UI to stopped state
-            dpg.set_value("status_badge_text", "[ STOPPED ]")
-            dpg.configure_item("status_badge_text", color=[210, 75, 75])
-            dpg.configure_item("btn_toggle", label="START")
-            dpg.bind_item_theme("btn_toggle", self.theme_start_btn)
-            dpg.set_value("active_notice", "Click START, then select CABLE Output (VB-Audio Virtual Cable) as mic in Steam, Zoom, or Discord.")
-            self._update_tray_icon()
+            def _stop_worker():
+                start_time = time.monotonic()
+                try:
+                    if self.engine:
+                        self.engine.prepare_for_stop()
+                        self.engine = None
+                    elif self.router and self.router.is_swapped:
+                        self.router.restore_original()
+                    self.is_running = False
+                    self._update_tray_icon()
+                except Exception as e:
+                    print(f"[ERROR] Failed to stop stream cleanly: {e}")
+                finally:
+                    # Enforce symmetric 3-second state lock
+                    elapsed = time.monotonic() - start_time
+                    remaining = max(0.0, 3.0 - elapsed)
+                    if remaining > 0:
+                        time.sleep(remaining)
+
+                    dpg.set_value("status_badge_text", "[ STOPPED ]")
+                    dpg.configure_item("status_badge_text", color=[210, 75, 75])
+                    dpg.configure_item("btn_toggle", label="START", enabled=True)
+                    dpg.bind_item_theme("btn_toggle", self.theme_start_btn)
+                    self._set_voice_test_button_state(True)
+                    self.set_status_pill(self._get_idle_status(), self._get_idle_color())
+                    self._release_state_lock()
+
+            threading.Thread(target=_stop_worker, daemon=True).start()
+
+    def start_voice_test(self, sender=None, app_data=None):
+        """Starts the 11-second in-memory voice preview test."""
+        if not self.is_vbcable_installed:
+            self.set_status_pill("▲ Virtual Cable required • Please install driver", [235, 180, 55])
+            return
+        if self.is_running:
+            self.set_status_pill("▲ Stop noise cancellation first to run voice test.", [240, 180, 50])
+            return
+        if self._is_testing_voice:
+            return
+        if not self._state_lock.acquire(blocking=False):
+            return
+
+        self._is_testing_voice = True
+        self._cancel_voice_test = False
+        dpg.configure_item("btn_voice_test", enabled=False, label="Testing...")
+        dpg.configure_item("btn_toggle", enabled=False)
+
+        threading.Thread(target=self._run_voice_test_worker, daemon=True).start()
+
+    def _run_voice_test_worker(self):
+        """
+        Executes the 3-phase Voice Test:
+        Phase 1: Record 11s from physical microphone (speakers MUTED, zero acoustic feedback).
+                 Processed in-flight through HighPassFilter, RNNoise, AdaptiveNoiseGate, and mic_gain.
+                 Stored strictly in RAM (numpy float32 buffer).
+        Phase 2: Play back 11s processed audio through primary physical playback device.
+        Phase 3: Immediate RAM purge (buffer deleted, zero disk files).
+        """
+        try:
+            if self.selected_input_idx is None or self.selected_input_idx < 0:
+                self.set_status_pill("▲ No microphone selected for voice test.", [235, 75, 75])
+                return
+
+            in_info = sd.query_devices(self.selected_input_idx)
+            in_channels = min(2, max(1, in_info['max_input_channels']))
+
+            # Instantiate DSP chain matching current settings
+            boost_db = self.config.get("mic_boost_db", 0)
+            boost_mult = 10.0 ** (boost_db / 20.0)
+            dev_name = in_info['name'].lower()
+            is_laptop = any(k in dev_name for k in ["realtek", "array", "built-in", "internal"])
+            base_gain = 1.2 if is_laptop else 1.0
+            test_gain = self.config.get("mic_gain", 1.0) * base_gain * boost_mult
+            vad_th = float(self.config.get("vad_threshold", 0.75))
+
+            rn = RNNoise()
+            hpf = HighPassFilter(cutoff_hz=80.0, sample_rate=float(SAMPLE_RATE))
+            gate = AdaptiveNoiseGate(
+                threshold=vad_th,
+                close_threshold=0.45,
+                hangover_ms=self.config.get("vad_hangover_ms", 180.0),
+                decay_ms=40.0,
+                attack_ms=15.0,
+                frame_ms=10.0,
+            )
+
+            # Phase 1: Record 11 seconds (speakers MUTED, RAM only)
+            total_chunks = 1100
+            chunk_size = FRAME_SIZE
+            processed_chunks = []
+
+            print(f"[VOICE TEST] Phase 1: Recording 11s from [{self.selected_input_idx}] {in_info['name']}...")
+            with sd.InputStream(
+                samplerate=SAMPLE_RATE,
+                blocksize=chunk_size,
+                device=self.selected_input_idx,
+                channels=in_channels,
+                dtype='float32'
+            ) as stream:
+                for chunk_idx in range(total_chunks):
+                    if not self._app_running or self._cancel_voice_test:
+                        break
+                    indata, _ = stream.read(chunk_size)
+                    # Mono mix
+                    if indata.ndim > 1 and indata.shape[1] >= 2:
+                        mono = (indata[:, 0] + indata[:, 1]) * 0.5
+                    elif indata.ndim > 1:
+                        mono = indata[:, 0].copy()
+                    else:
+                        mono = indata.copy()
+
+                    # Apply gain & clamp
+                    if test_gain != 1.0:
+                        mono *= test_gain
+                    np.clip(mono, -1.0, 1.0, out=mono)
+
+                    # DSP
+                    mono = hpf.process(mono)
+                    frame_rn = mono * 32767.0
+                    frame_rn, sp = rn.process_frame(frame_rn)
+                    mono = (frame_rn / 32767.0) * 1.08
+                    mono, _ = gate.process(mono, sp, in_place=True)
+                    processed_chunks.append(mono)
+
+                    # Update countdown UI once every 100 chunks (~1.0s)
+                    if chunk_idx % 100 == 0:
+                        sec_left = 11 - (chunk_idx // 100)
+                        self.set_status_pill(f"◌ Voice Test: Recording to RAM... ({sec_left}s left)", [80, 195, 240])
+                        dpg.configure_item("btn_voice_test", label=f"Recording... ({sec_left}s)")
+
+            rn.close()
+
+            if not self._app_running or self._cancel_voice_test or not processed_chunks:
+                return
+
+            # Combine processed chunks strictly in RAM
+            full_audio = np.concatenate(processed_chunks, axis=0)
+
+            # Phase 2: Playback 11s through primary physical speakers/headphones
+            out_dev = get_physical_output_device()
+            out_idx = out_dev['index'] if out_dev else sd.default.device[1]
+            out_info = sd.query_devices(out_idx)
+            out_channels = min(2, max(1, out_info['max_output_channels']))
+
+            print(f"[VOICE TEST] Phase 2: Playing back 11s to [{out_idx}] {out_info['name']}...")
+            if out_channels == 2:
+                playback_data = np.column_stack((full_audio, full_audio))
+            else:
+                playback_data = full_audio
+
+            sd.play(playback_data, samplerate=SAMPLE_RATE, device=out_idx)
+
+            # Countdown playback (11s)
+            for sec in range(11, 0, -1):
+                if not self._app_running or self._cancel_voice_test:
+                    sd.stop()
+                    break
+                self.set_status_pill(f"◌ Voice Test: Playing back clean voice... ({sec}s left)", [80, 195, 240])
+                dpg.configure_item("btn_voice_test", label=f"Playing back... ({sec}s)")
+                time.sleep(1.0)
+            sd.stop()
+
+            # Phase 3: Immediate Purge
+            del full_audio
+            del playback_data
+            del processed_chunks
+            print("[VOICE TEST] Phase 3: RAM buffer purged. Zero disk clutter.")
+            self.set_status_pill("● Voice test complete • Clean audio verified", [45, 215, 115])
+
+        except sd.PortAudioError as pae:
+            print(f"[VOICE TEST] Microphone access error: {pae}")
+            self.set_status_pill("▲ Microphone busy or disconnected.", [235, 75, 75])
+        except Exception as e:
+            print(f"[VOICE TEST] Error during voice preview: {e}")
+            self.set_status_pill(f"▲ Voice test error: {e}", [235, 75, 75])
+        finally:
+            self._is_testing_voice = False
+            self._set_voice_test_button_state(True)
+            if dpg.does_item_exist("btn_toggle"):
+                dpg.configure_item("btn_toggle", enabled=True)
+            self._release_state_lock()
 
     def restore_window(self):
-        """Restores window from notification area / system tray."""
+        """Restores window from notification area / system tray and forces foreground focus."""
         if self._hwnd:
-            user32.ShowWindow(self._hwnd, SW_RESTORE)
-            user32.SetForegroundWindow(self._hwnd)
+            force_foreground_window(self._hwnd)
 
     def hide_to_tray(self):
         """Hides window to Windows notification area."""
@@ -525,9 +960,9 @@ class GetsuGUI:
             if self.is_vbcable_installed:
                 dpg.set_value(
                     "install_status_text",
-                    "VB-Audio Virtual Cable Installed & Ready!\n\n"
-                    "No restart required. Denoised audio is now ready\n"
-                    "for Steam, Zoom, and Discord."
+                    "Virtual Audio Driver Installed & Ready!\n\n"
+                    "No restart required. Clean, denoised audio is now\n"
+                    "ready for all your games and voice apps."
                 )
             elif success:
                 dpg.set_value(
@@ -564,24 +999,58 @@ class GetsuGUI:
         dpg.hide_item("install_spinner")
         dpg.set_value(
             "install_status_text",
-            "To send clean, noise-free audio into Steam Voice,\n"
-            "Zoom, or Discord, VB-Audio Cable is needed.\n\n"
+            "To send clean, noise-free audio into games, voice chats,\n"
+            "and calls, the Virtual Audio driver is required.\n\n"
             "Do you want me to install this now?"
         )
-        dpg.show_item("modal_vbcable")
+        if dpg.does_item_exist("modal_vbcable"):
+            try:
+                vp_w = dpg.get_viewport_client_width()
+                vp_h = dpg.get_viewport_client_height()
+                w = self.s(450)
+                h = self.s(240)
+                dpg.set_item_pos("modal_vbcable", [max(0, (vp_w - w) // 2), max(0, (vp_h - h) // 2)])
+            except Exception:
+                pass
+            dpg.show_item("modal_vbcable")
+
+    def show_how_to_use_modal(self, sender=None, app_data=None):
+        """Displays the How to Use Getsu modal dialog, dynamically centered on the active viewport."""
+        if dpg.does_item_exist("modal_how_to_use"):
+            try:
+                vp_w = dpg.get_viewport_client_width()
+                vp_h = dpg.get_viewport_client_height()
+                w = self.s(450)
+                h = self.s(380)
+                dpg.set_item_pos("modal_how_to_use", [max(0, (vp_w - w) // 2), max(0, (vp_h - h) // 2)])
+            except Exception:
+                pass
+            dpg.show_item("modal_how_to_use")
 
     def _update_cable_banner(self):
-        """Updates the status card."""
+        """Updates the status card and bottom status pill."""
         if self.is_vbcable_installed:
-            dpg.set_value("banner_text", "Virtual Mic: Ready for Steam, Zoom, & Discord")
+            dpg.set_value("banner_text", "Virtual Mic: Ready for All Voice Apps & Games")
             dpg.configure_item("banner_text", color=[65, 205, 130])
             dpg.hide_item("banner_install_btn")
             dpg.configure_item("banner_install_btn", enabled=False)
+            if dpg.does_item_exist("banner_how_to_use_btn"):
+                dpg.show_item("banner_how_to_use_btn")
+                dpg.configure_item("banner_how_to_use_btn", enabled=True)
+            self._set_voice_test_button_state(not self.is_running)
+            if not self.is_running:
+                self.set_status_pill(self._get_idle_status(), self._get_idle_color())
         else:
-            dpg.set_value("banner_text", "Headphone Monitor Mode (VB-Cable not installed)")
+            dpg.set_value("banner_text", "Driver not installed")
             dpg.configure_item("banner_text", color=[235, 180, 55])
             dpg.show_item("banner_install_btn")
             dpg.configure_item("banner_install_btn", enabled=True)
+            if dpg.does_item_exist("banner_how_to_use_btn"):
+                dpg.hide_item("banner_how_to_use_btn")
+                dpg.configure_item("banner_how_to_use_btn", enabled=False)
+            self._set_voice_test_button_state(False)
+            if not self.is_running:
+                self.set_status_pill(self._get_idle_status(), self._get_idle_color())
 
     def _setup_window_hook(self):
         """Subclass the DearPyGui window so Minimize and Close minimize to tray."""
@@ -596,6 +1065,10 @@ class GetsuGUI:
         if not self._hwnd:
             print("[WARN] Getsu window handle not found for subclassing.")
             return
+
+        # Force foreground activation on initial launch
+        force_foreground_window(self._hwnd)
+        apply_dwm_title_bar(self._hwnd)
 
         # Disable Windows Maximize button and resizing frame for compact widget
         try:
@@ -624,6 +1097,13 @@ class GetsuGUI:
                 # Close button [X] -> Hide to system tray
                 user32.ShowWindow(hwnd, SW_HIDE)
                 return 0
+            elif msg == 0x0011:  # WM_QUERYENDSESSION (Windows Shutdown / Restart Manager)
+                return 1
+            elif msg == 0x0016:  # WM_ENDSESSION (Windows Shutdown / Restart Manager)
+                if wparam:
+                    self._teardown_engine_and_timers()
+                    dpg.stop_dearpygui()
+                    return 0
             elif WM_GETSU_RESTORE and msg == WM_GETSU_RESTORE:
                 self.restore_window()
                 return 0
@@ -631,6 +1111,7 @@ class GetsuGUI:
                 self._on_device_change_event()
                 return 1
             elif msg == 0x0082:  # WM_NCDESTROY
+                self._teardown_engine_and_timers()
                 # Cleanly unhook subclass procedure before window destruction
                 user32.SetWindowLongPtrW(hwnd, GWLP_WNDPROC, self._old_wndproc)
                 return user32.CallWindowProcW(self._old_wndproc, hwnd, msg, wparam, lparam)
@@ -670,9 +1151,7 @@ class GetsuGUI:
 
         def on_exit(icon, item):
             print("[APP] Exiting Getsu...")
-            self._app_running = False
-            if self.engine:
-                self.engine.stop()
+            self._teardown_engine_and_timers()
             icon.stop()
             dpg.stop_dearpygui()
 
@@ -771,12 +1250,27 @@ class GetsuGUI:
                 dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (205, 55, 55))
                 dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (140, 35, 35))
 
-        # Banner install button theme (Muted Blue)
+        # Banner install button theme (Muted Blue with Electric Blue rounded border)
         with dpg.theme() as theme_banner_btn:
             with dpg.theme_component(dpg.mvButton):
-                dpg.add_theme_color(dpg.mvThemeCol_Button, (40, 70, 110))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (55, 95, 145))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (30, 55, 85))
+                dpg.add_theme_color(dpg.mvThemeCol_Button, (30, 55, 95))
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (42, 78, 135))
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (24, 45, 78))
+                dpg.add_theme_color(dpg.mvThemeCol_Border, (59, 130, 246, 220))
+                dpg.add_theme_color(dpg.mvThemeCol_Text, (180, 215, 255))
+                dpg.add_theme_style(dpg.mvStyleVar_FrameBorderSize, 1.0)
+                dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(6))
+
+        # Status card child window theme (Symmetrical margins and calibrated padding)
+        with dpg.theme() as theme_status_card:
+            with dpg.theme_component(dpg.mvChildWindow):
+                dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, self.s(14), self.s(6))
+                dpg.add_theme_style(dpg.mvStyleVar_ChildRounding, self.s(8))
+
+        # Status text group theme (Zero item spacing so spacer sets exact vertical offset)
+        with dpg.theme() as theme_status_text_group:
+            with dpg.theme_component(dpg.mvGroup):
+                dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, 0, 0)
 
         # Sponsor link button theme (Cyan text, transparent background)
         with dpg.theme() as theme_link_btn:
@@ -786,22 +1280,76 @@ class GetsuGUI:
                 dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (25, 45, 75, 180))
                 dpg.add_theme_color(dpg.mvThemeCol_Text, (85, 195, 255))
 
-        # Boost active button theme (Emerald Green)
+        # Boost active button theme (Muted Blue with Electric Blue rounded border, like Install Driver)
         with dpg.theme() as self.theme_boost_active:
             with dpg.theme_component(dpg.mvButton):
-                dpg.add_theme_color(dpg.mvThemeCol_Button, (30, 125, 75))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (38, 155, 92))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (24, 100, 60))
-                dpg.add_theme_color(dpg.mvThemeCol_Text, (255, 255, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_Button, (30, 55, 95))
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (42, 78, 135))
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (24, 45, 78))
+                dpg.add_theme_color(dpg.mvThemeCol_Border, (59, 130, 246, 220))
+                dpg.add_theme_color(dpg.mvThemeCol_Text, (180, 215, 255))
+                dpg.add_theme_style(dpg.mvStyleVar_FrameBorderSize, 1.0)
                 dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(6))
 
-        # Boost inactive button theme (Muted Dark Frame)
+        # Boost inactive button theme (Muted dark frame with subtle border)
         with dpg.theme() as self.theme_boost_inactive:
             with dpg.theme_component(dpg.mvButton):
-                dpg.add_theme_color(dpg.mvThemeCol_Button, (25, 32, 42))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (35, 45, 60))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (20, 26, 35))
-                dpg.add_theme_color(dpg.mvThemeCol_Text, (140, 155, 175))
+                dpg.add_theme_color(dpg.mvThemeCol_Button, (22, 28, 38))
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (32, 42, 58))
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (18, 24, 32))
+                dpg.add_theme_color(dpg.mvThemeCol_Border, (40, 50, 68, 160))
+                dpg.add_theme_color(dpg.mvThemeCol_Text, (130, 145, 165))
+                dpg.add_theme_style(dpg.mvStyleVar_FrameBorderSize, 1.0)
+                dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(6))
+
+        # Voice test button theme (Option A: Electric Ocean Blue - Available)
+        with dpg.theme() as self.theme_voice_btn:
+            with dpg.theme_component(dpg.mvButton):
+                dpg.add_theme_color(dpg.mvThemeCol_Button, (35, 78, 130))
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (48, 105, 175))
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (28, 62, 105))
+                dpg.add_theme_color(dpg.mvThemeCol_Text, (240, 248, 255))
+                dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(6))
+
+        # Voice test button theme (Sunken Charcoal - Unavailable while active, dead on hover)
+        with dpg.theme() as self.theme_voice_btn_disabled:
+            for state in (True, False):
+                with dpg.theme_component(dpg.mvButton, enabled_state=state):
+                    dpg.add_theme_color(dpg.mvThemeCol_Button, (20, 24, 30))
+                    dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (20, 24, 30))
+                    dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (20, 24, 30))
+                    dpg.add_theme_color(dpg.mvThemeCol_Text, (85, 95, 110))
+                    dpg.add_theme_color(dpg.mvThemeCol_TextDisabled, (85, 95, 110))
+                    dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(6))
+
+        # Unified Modal theme (Unified dark background, larger title padding, red close button)
+        with dpg.theme() as theme_modal:
+            with dpg.theme_component(dpg.mvAll):
+                dpg.add_theme_color(dpg.mvThemeCol_WindowBg, (16, 20, 26))
+                dpg.add_theme_color(dpg.mvThemeCol_TitleBg, (16, 20, 26))
+                dpg.add_theme_color(dpg.mvThemeCol_TitleBgActive, (16, 20, 26))
+                dpg.add_theme_color(dpg.mvThemeCol_TitleBgCollapsed, (16, 20, 26))
+                dpg.add_theme_color(dpg.mvThemeCol_Border, (40, 52, 70))
+                dpg.add_theme_style(dpg.mvStyleVar_FramePadding, self.s(10), self.s(10))
+                dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, self.s(18), self.s(16))
+                dpg.add_theme_style(dpg.mvStyleVar_WindowRounding, self.s(8))
+                dpg.add_theme_color(dpg.mvThemeCol_Button, (175, 45, 45))
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (215, 55, 55))
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (140, 35, 35))
+            with dpg.theme_component(dpg.mvButton):
+                dpg.add_theme_color(dpg.mvThemeCol_Button, (175, 45, 45))
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (215, 55, 55))
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (140, 35, 35))
+
+        # Modal secondary/cancel button theme (Subtle dark frame)
+        with dpg.theme() as theme_secondary_btn:
+            with dpg.theme_component(dpg.mvButton):
+                dpg.add_theme_color(dpg.mvThemeCol_Button, (28, 36, 48))
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (38, 48, 64))
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (22, 28, 38))
+                dpg.add_theme_color(dpg.mvThemeCol_Border, (48, 60, 80))
+                dpg.add_theme_color(dpg.mvThemeCol_Text, (180, 195, 215))
+                dpg.add_theme_style(dpg.mvStyleVar_FrameBorderSize, 1.0)
                 dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(6))
 
         dpg.bind_theme(global_theme)
@@ -830,23 +1378,40 @@ class GetsuGUI:
             dpg.add_spacer(height=self.s(3))
 
             # --- VB-CABLE STATUS CARD ---
-            with dpg.child_window(width=-1, height=self.s(52), border=True, no_scrollbar=True):
-                with dpg.group(horizontal=True):
-                    dpg.add_text(
-                        "Virtual Mic Status",
-                        tag="banner_text",
-                        color=[65, 205, 130]
-                    )
-                    dpg.add_spacer(width=self.s(20))
-                    dpg.add_button(
-                        label="Install Driver",
-                        callback=self.show_install_modal,
-                        tag="banner_install_btn",
-                        width=self.s(110),
-                        height=self.s(32),
-                        show=False
-                    )
+            with dpg.child_window(tag="status_card", width=-1, height=self.s(44), border=True, no_scrollbar=True):
+                with dpg.table(header_row=False, policy=dpg.mvTable_SizingStretchProp):
+                    dpg.add_table_column(init_width_or_weight=1.0)
+                    dpg.add_table_column(width_fixed=True, init_width_or_weight=self.s(120))
+                    with dpg.table_row():
+                        with dpg.group(tag="status_text_group"):
+                            dpg.add_spacer(height=self.s(3))
+                            dpg.add_text(
+                                "Virtual Mic Status",
+                                tag="banner_text",
+                                color=[65, 205, 130]
+                            )
+                        with dpg.group(tag="status_btn_group"):
+                            dpg.add_button(
+                                label="Install Driver",
+                                callback=self.show_install_modal,
+                                tag="banner_install_btn",
+                                width=-1,
+                                height=self.s(28),
+                                show=False
+                            )
+                            dpg.add_button(
+                                label="How to Use",
+                                callback=self.show_how_to_use_modal,
+                                tag="banner_how_to_use_btn",
+                                width=-1,
+                                height=self.s(28),
+                                show=False
+                            )
+            dpg.bind_item_theme("status_card", theme_status_card)
+            dpg.bind_item_theme("status_text_group", theme_status_text_group)
+            dpg.bind_item_theme("status_btn_group", theme_status_text_group)
             dpg.bind_item_theme("banner_install_btn", theme_banner_btn)
+            dpg.bind_item_theme("banner_how_to_use_btn", theme_banner_btn)
 
             dpg.add_spacer(height=self.s(3))
 
@@ -900,6 +1465,31 @@ class GetsuGUI:
                         callback=lambda: self.set_mic_boost(15)
                     )
 
+            dpg.add_spacer(height=self.s(5))
+
+            # --- VOICE SENSITIVITY THRESHOLD SLIDER ---
+            dpg.add_text("Voice Sensitivity Threshold:", color=[180, 195, 215])
+            dpg.add_slider_float(
+                default_value=float(self.config.get("vad_threshold", 0.75)),
+                min_value=0.40,
+                max_value=0.90,
+                format="%.2f",
+                callback=self.on_vad_slider_changed,
+                tag="slider_vad",
+                width=-1,
+                height=self.s(26)
+            )
+
+            dpg.add_spacer(height=self.s(4))
+
+            # --- DEFAULT MICROPHONE SWITCH CHECKBOX ---
+            dpg.add_checkbox(
+                label="Set as Default Microphone while active",
+                default_value=self.config.get("auto_route", True),
+                callback=self.on_auto_route_toggled,
+                tag="chk_auto_route"
+            )
+
             dpg.add_spacer(height=self.s(6))
 
             # --- SINGLE ACTION BUTTON: START / STOP ---
@@ -908,17 +1498,29 @@ class GetsuGUI:
                 callback=self.toggle_stream,
                 tag="btn_toggle",
                 width=-1,
-                height=self.s(54)
+                height=self.s(50)
             )
             dpg.bind_item_theme("btn_toggle", self.theme_start_btn)
 
+            dpg.add_spacer(height=self.s(4))
+
+            # --- HEAR MYSELF (11s VOICE PREVIEW TEST) ---
+            dpg.add_button(
+                label="Hear Myself (11s Voice Test)",
+                callback=self.start_voice_test,
+                tag="btn_voice_test",
+                width=-1,
+                height=self.s(32)
+            )
+            dpg.bind_item_theme("btn_voice_test", self.theme_voice_btn)
+
             dpg.add_spacer(height=self.s(6))
 
-            # --- CLEAN INSTRUCTION ---
+            # --- COMPACT STATUS PILL (OPTION B) ---
             dpg.add_text(
-                "Click START, then select CABLE Output (VB-Audio Virtual Cable) as mic in Steam, Zoom, or Discord.",
+                self._get_idle_status(),
                 tag="active_notice",
-                color=[150, 165, 185],
+                color=self._get_idle_color(),
                 wrap=self.s(485)
             )
 
@@ -943,6 +1545,7 @@ class GetsuGUI:
                 dpg.bind_item_font("status_badge_text", self.font_header)
             if self.font_btn:
                 dpg.bind_item_font("btn_toggle", self.font_btn)
+                dpg.bind_item_font("btn_voice_test", self.font_body if self.font_body else self.font_btn)
             if self.font_notice:
                 dpg.bind_item_font("active_notice", self.font_notice)
             if self.font_small:
@@ -953,6 +1556,10 @@ class GetsuGUI:
             self._update_boost_buttons_ui()
 
             # --- MODAL: VB-CABLE SETUP ---
+            modal_w = self.s(450)
+            modal_h = self.s(240)
+            modal_x = max(0, (self.s(520) - modal_w) // 2)
+            modal_y = max(0, (self.s(652) - modal_h) // 2)
             with dpg.window(
                 label="Virtual Audio Cable Setup",
                 modal=True,
@@ -960,22 +1567,21 @@ class GetsuGUI:
                 tag="modal_vbcable",
                 no_resize=True,
                 no_move=True,
-                width=self.s(450),
-                height=self.s(240),
-                pos=[self.s(25), self.s(60)]
+                no_scrollbar=True,
+                width=modal_w,
+                height=modal_h,
+                pos=[modal_x, modal_y]
             ):
-                dpg.add_text("VB-Audio Virtual Cable Required", color=[235, 180, 55])
-                dpg.add_separator()
-                dpg.add_spacer(height=self.s(4))
                 dpg.add_text(
-                    "To send clean audio into Steam Voice, Zoom, or Discord,\n"
-                    "VB-Audio Virtual Cable is needed.\n\n"
+                    "To send clean, noise-free audio into games, voice chats,\n"
+                    "and calls, the Virtual Audio driver is required.\n\n"
                     "Do you want me to install this now?",
-                    tag="install_status_text"
+                    tag="install_status_text",
+                    color=[215, 225, 240]
                 )
-                dpg.add_spacer(height=self.s(6))
+                dpg.add_spacer(height=self.s(8))
                 dpg.add_loading_indicator(tag="install_spinner", show=False, radius=float(self.s(3)))
-                dpg.add_spacer(height=self.s(6))
+                dpg.add_spacer(height=self.s(8))
 
                 with dpg.group(horizontal=True, tag="modal_buttons_row"):
                     dpg.add_button(
@@ -993,22 +1599,111 @@ class GetsuGUI:
                         height=self.s(34)
                     )
 
-                dpg.add_button(
-                    label="OK",
-                    callback=self.on_install_done_click,
-                    tag="btn_install_done",
-                    show=False,
-                    width=self.s(130),
-                    height=self.s(34)
-                )
+                with dpg.group(horizontal=True):
+                    dpg.add_spacer(width=(modal_w - self.s(130)) // 2 - self.s(18))
+                    dpg.add_button(
+                        label="OK",
+                        callback=self.on_install_done_click,
+                        tag="btn_install_done",
+                        show=False,
+                        width=self.s(130),
+                        height=self.s(34)
+                    )
+            dpg.bind_item_theme("modal_vbcable", theme_modal)
+            dpg.bind_item_theme("btn_install_confirm", self.theme_voice_btn)
+            dpg.bind_item_theme("btn_install_cancel", theme_secondary_btn)
+            dpg.bind_item_theme("btn_install_done", self.theme_voice_btn)
 
-        # Viewport configuration - auto-adapts height on first render
+            # --- MODAL: HOW TO USE GETSU ---
+            guide_w = self.s(450)
+            guide_h = self.s(380)
+            guide_x = max(0, (self.s(520) - guide_w) // 2)
+            guide_y = max(0, (self.s(652) - guide_h) // 2)
+            with dpg.window(
+                label="How to Use Getsu",
+                modal=True,
+                show=False,
+                tag="modal_how_to_use",
+                no_resize=True,
+                no_move=True,
+                no_scrollbar=True,
+                width=guide_w,
+                height=guide_h,
+                pos=[guide_x, guide_y]
+            ):
+                dpg.add_text("Just click START. Most apps will switch to clean\naudio automatically.", color=[215, 225, 240])
+                dpg.add_spacer(height=self.s(6))
+
+                dpg.add_text("Notes: Only When Needed (Games & Voice Apps)", color=[85, 175, 255])
+                dpg.add_text(
+                    "If an app or game doesn't pick up the noise filter,\ngo to its audio settings and choose:",
+                    color=[180, 195, 215]
+                )
+                dpg.add_spacer(height=self.s(2))
+                dpg.add_text("Microphone  ->  CABLE Output", color=[65, 205, 130])
+                dpg.add_spacer(height=self.s(2))
+                dpg.add_text("(This guarantees clean voice, no restart needed.)", color=[140, 155, 175])
+
+                dpg.add_spacer(height=self.s(12))
+                with dpg.group(horizontal=True):
+                    dpg.add_spacer(width=(guide_w - self.s(130)) // 2 - self.s(18))
+                    dpg.add_button(
+                        label="Got It",
+                        callback=lambda: dpg.hide_item("modal_how_to_use"),
+                        tag="btn_how_to_use_ok",
+                        width=self.s(130),
+                        height=self.s(34)
+                    )
+            dpg.bind_item_theme("modal_how_to_use", theme_modal)
+            dpg.bind_item_theme("btn_how_to_use_ok", self.theme_voice_btn)
+
+        # Viewport configuration - center on active monitor work area (taskbar-aware) from frame 0
+        vp_w = self.s(520)
+        vp_h = self.s(652)
+        try:
+            class MONITORINFO(ctypes.Structure):
+                _fields_ = [
+                    ("cbSize", wintypes.DWORD),
+                    ("rcMonitor", wintypes.RECT),
+                    ("rcWork", wintypes.RECT),
+                    ("dwFlags", wintypes.DWORD),
+                ]
+            cursor_pos = wintypes.POINT()
+            user32.GetCursorPos(ctypes.byref(cursor_pos))
+            MONITOR_DEFAULTTONEAREST = 2
+            hmon = user32.MonitorFromPoint(cursor_pos, MONITOR_DEFAULTTONEAREST)
+            mi = MONITORINFO()
+            mi.cbSize = ctypes.sizeof(MONITORINFO)
+            if hmon and user32.GetMonitorInfoW(hmon, ctypes.byref(mi)):
+                work_w = mi.rcWork.right - mi.rcWork.left
+                work_h = mi.rcWork.bottom - mi.rcWork.top
+                x_pos = mi.rcWork.left + max(0, (work_w - vp_w) // 2)
+                y_pos = mi.rcWork.top + max(0, (work_h - vp_h) // 2)
+            else:
+                work_rect = wintypes.RECT()
+                user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(work_rect), 0)
+                work_w = work_rect.right - work_rect.left
+                work_h = work_rect.bottom - work_rect.top
+                x_pos = work_rect.left + max(0, (work_w - vp_w) // 2)
+                y_pos = work_rect.top + max(0, (work_h - vp_h) // 2)
+        except Exception:
+            try:
+                screen_w = user32.GetSystemMetrics(0) or 1920
+                screen_h = user32.GetSystemMetrics(1) or 1080
+            except Exception:
+                screen_w = 1920
+                screen_h = 1080
+            x_pos = max(0, (screen_w - vp_w) // 2)
+            y_pos = max(0, (screen_h - vp_h) // 2)
+
         dpg.create_viewport(
             title="Getsu - AI Noise Cancellation",
             small_icon=ICON_ICO_PATH if os.path.exists(ICON_ICO_PATH) else "",
             large_icon=ICON_ICO_PATH if os.path.exists(ICON_ICO_PATH) else "",
-            width=self.s(520),
-            height=self.s(450),
+            width=vp_w,
+            height=vp_h,
+            x_pos=x_pos,
+            y_pos=y_pos,
             resizable=False,
             decorated=True
         )
@@ -1016,7 +1711,7 @@ class GetsuGUI:
         dpg.show_viewport()
         dpg.set_primary_window("main_window", True)
 
-        # Render 3 layout frames to settle font glyphs, then dynamically auto-fit viewport height
+        # Render 3 layout frames to settle font glyphs, then fine-tune viewport height
         dpg.render_dearpygui_frame()
         dpg.render_dearpygui_frame()
         dpg.render_dearpygui_frame()
@@ -1024,10 +1719,33 @@ class GetsuGUI:
             rect_max = dpg.get_item_rect_max("footer_sponsor_row")
             diff = dpg.get_viewport_height() - dpg.get_viewport_client_height()
             auto_fit_h = int(rect_max[1] + self.s(16)) + diff
-            dpg.set_viewport_height(auto_fit_h)
+            if abs(auto_fit_h - dpg.get_viewport_height()) > 2:
+                dpg.set_viewport_height(auto_fit_h)
             dpg.render_dearpygui_frame()
         except Exception:
             pass
+
+        # Synchronous dead-center window placement on active monitor work area (taskbar-aware)
+        try:
+            hwnd = user32.FindWindowW(None, "Getsu - AI Noise Cancellation")
+            if hwnd:
+                apply_dwm_title_bar(hwnd)
+                rect = wintypes.RECT()
+                user32.GetWindowRect(hwnd, ctypes.byref(rect))
+                win_w = rect.right - rect.left
+                win_h = rect.bottom - rect.top
+                MONITOR_DEFAULTTONEAREST = 2
+                hmon = user32.MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
+                mi = MONITORINFO()
+                mi.cbSize = ctypes.sizeof(MONITORINFO)
+                if hmon and user32.GetMonitorInfoW(hmon, ctypes.byref(mi)):
+                    work_w = mi.rcWork.right - mi.rcWork.left
+                    work_h = mi.rcWork.bottom - mi.rcWork.top
+                    cx = mi.rcWork.left + max(0, (work_w - win_w) // 2)
+                    cy = mi.rcWork.top + max(0, (work_h - win_h) // 2)
+                    user32.SetWindowPos(hwnd, 0, cx, cy, 0, 0, SWP_NOSIZE | SWP_NOZORDER)
+        except Exception as e:
+            print(f"[WARN] Failed to center window: {e}")
 
         self._update_cable_banner()
 
@@ -1038,18 +1756,29 @@ class GetsuGUI:
         self._start_tray_icon()
         threading.Thread(target=self._setup_window_hook, daemon=True).start()
 
+        # Handle terminal signals cleanly (Ctrl+C / SIGINT / SIGTERM)
+        def _sig_handler(sig, frame):
+            print("\n[GUI] Terminal exit signal received. Closing cleanly...")
+            dpg.stop_dearpygui()
+
+        try:
+            signal.signal(signal.SIGINT, _sig_handler)
+            signal.signal(signal.SIGTERM, _sig_handler)
+        except Exception:
+            pass
+
         # Run UI event loop
         dpg.start_dearpygui()
-        dpg.destroy_context()
 
-        # Cleanup
-        self._app_running = False
-        if self._device_change_timer and self._device_change_timer.is_alive():
-            self._device_change_timer.cancel()
+        # Teardown background workers and restore audio before destroying DPG context
+        self._teardown_engine_and_timers()
         if self._tray_icon:
-            self._tray_icon.stop()
-        if self.engine:
-            self.engine.stop()
+            try:
+                self._tray_icon.stop()
+            except Exception:
+                pass
+
+        dpg.destroy_context()
 
 
 def launch_gui():

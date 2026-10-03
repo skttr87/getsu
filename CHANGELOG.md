@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.0] - 2026-10-01
+
+### Added
+- **Smart Microphone Routing (Auto-Swap & Restore)**: Automatically swaps the Windows default recording device (`eCapture`) to `CABLE Output` upon clicking START, piping noise-free voice directly into Discord, Zoom, and Steam without manual settings changes.
+- **Direct In-Process CoreAudio COM Routing (`src/router.py`)**: Sub-millisecond (<1ms) Windows audio endpoint hot-swapping implemented directly in-process via `ctypes` (`IPolicyConfig`, `IMMDeviceEnumerator`), eliminating child process latency, antivirus delays, and UAC elevation barriers.
+- **5-Vector Audio Restoration Architecture**: Guarantees physical microphones are seamlessly restored across all stop and exit vectors: GUI Stop button, System Tray exit, Window close, OS shutdown (`WM_ENDSESSION`), and Watchdog emergency auto-restore.
+- **"Hear Myself" 11-Second Voice Preview Test**: In-memory test recording and playing back 11 seconds of filtered voice with physical speakers muted during recording (zero acoustic feedback loop) and zero disk clutter.
+- **Real-Time Voice Sensitivity Threshold Slider**: Thread-safe live float slider (`0.40 - 0.90`) for fine-tuning voice detection vs. background noise in real-time.
+- **Crash-Proof Atomic Configuration Management (`src/config.py`)**: Replaced truncating file writes with temporary file replacement and exponential backoff retry for transient Windows Defender file inspection locks (`WinError 32`), with `%APPDATA%\Getsu` storage for installed mode.
+- **Inno Setup Upgrade & Uninstaller Hardening (`setup.iss`)**: Proactively terminates active instances and restores physical audio before installation/removal, eliminating Restart Manager prompts and locked file deletion errors.
+- **Expanded Automated Test Suite**: Added 17 new unit and integration tests (32 total), validating CoreAudio COM swapping, atomic configuration, and crash recovery.
+
+### Fixed
+- **C# COM Interop Stack Misalignment (`AudioRestore.cs`)**: Added missing `[PreserveSig]` attributes to `IPolicyConfigWin10`, fixing stack corruption and silent failures during CoreAudio endpoint switching.
+- **COM Apartment Mode Compatibility**: Switched from `ctypes.oledll` to `ctypes.windll.ole32` with safe multi-threaded apartment (`COINIT_MULTITHREADED`) initialization, preventing `RPC_E_CHANGED_MODE` exceptions on background worker threads.
+- **Teardown Lifecycle Sequence**: Ensured background threads and audio streams are fully stopped and restored before destroying the DearPyGui context.
+- **Stale Named Mutex False-Positive**: Verified active window handle (`HWND`) exists before assuming an instance is running, resolving startup failure after task termination.
+
+---
+
 ## [1.1.0] - 2026-09-29
 
 ### Added

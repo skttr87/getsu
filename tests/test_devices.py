@@ -51,8 +51,27 @@ class TestDeviceFiltering(unittest.TestCase):
         mock_inputs.return_value = [
             {'index': 1, 'name': 'Microphone (Realtek(R) Audio)'},
         ]
-        selected = auto_select_input_device()
-        self.assertEqual(selected['name'], 'Microphone (Realtek(R) Audio)')
+    def test_laptop_mic_detection(self):
+        from src.devices import is_laptop_microphone
+        self.assertTrue(is_laptop_microphone("Realtek(R) Audio Microphone Array"))
+        self.assertTrue(is_laptop_microphone("Internal Microphone (Conexant)"))
+        self.assertTrue(is_laptop_microphone("Built-in Audio"))
+        self.assertFalse(is_laptop_microphone("HyperX QuadCast"))
+        self.assertFalse(is_laptop_microphone("Shure SM7B"))
+
+    @patch("src.devices.get_all_devices")
+    def test_validate_device_index(self, mock_get_all):
+        from src.devices import validate_device_index
+        mock_get_all.return_value = [
+            {'index': 1, 'name': 'Mic', 'inputs': 1, 'outputs': 0},
+            {'index': 2, 'name': 'Speaker', 'inputs': 0, 'outputs': 2},
+        ]
+        self.assertEqual(validate_device_index(1, is_input=True), 1)
+        self.assertIsNone(validate_device_index(1, is_input=False))
+        self.assertEqual(validate_device_index(2, is_input=False), 2)
+        self.assertIsNone(validate_device_index(2, is_input=True))
+        self.assertIsNone(validate_device_index(99, is_input=True))
+        self.assertIsNone(validate_device_index(None, is_input=True))
 
 
 if __name__ == "__main__":

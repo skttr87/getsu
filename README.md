@@ -41,7 +41,8 @@ Commercial noise cancellation tools often charge monthly subscriptions, drain yo
 ## 🚀 Quick Start (3 Steps)
 
 ### 1. Download & Install
-Download and run **[Getsu-v1.2.1-Setup.exe](https://github.com/skttr87/getsu/releases/latest)**.  
+[![Download Latest Release](https://img.shields.io/github/v/release/skttr87/getsu?label=Download%20Latest%20Installer&color=28a745&style=flat-square&logo=windows)](https://github.com/skttr87/getsu/releases/latest)  
+Download and run the latest **[Getsu Setup Installer (Releases)](https://github.com/skttr87/getsu/releases/latest)**.  
 *(The installer automatically sets up the required virtual audio driver in the background).*
 
 ### 2. Choose Your Microphone

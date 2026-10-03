@@ -55,6 +55,13 @@ Getsu will automatically route your clean, noise-free microphone to Discord, Ste
 > **Want to test how you sound?**  
 > Click **"Hear Myself (11s Voice Test)"** while stopped. Speak into your mic, and Getsu will play back 11 seconds of your clean, noise-filtered voice!
 
+### 💡 What if an app is still hearing noise? (e.g. Steam or Discord)
+Getsu automatically routes clean audio to any app set to your **"Default"** microphone. If an app still hears background noise, it is usually because that app was previously locked to your raw physical mic:
+
+* **Steam**: Go to **Settings** ➔ **Voice** ➔ Set **Voice Input Device** to **`Default`** (or **`CABLE Output (VB-Audio Virtual Cable)`**). *(Tip: Turn off Steam's built-in "Noise Cancellation" to avoid double-processing).*
+* **Discord**: Go to **User Settings** (⚙️) ➔ **Voice & Video** ➔ Set **Input Device** to **`Default`** (or **`CABLE Output (VB-Audio Virtual Cable)`**). *(Tip: Turn off Discord's Krisp filter).*
+* **PC Games (CS2, Valorant, Apex, CoD)**: Ensure in-game audio settings use **`Default System Device`** or **`CABLE Output`**.
+
 ---
 
 ## ✨ Key Features

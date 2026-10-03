@@ -471,7 +471,7 @@
       <h2>Why I built this</h2>
       <div class="story-card">
         <p>
-          "I built Getsu because I needed a way to keep my voice comms clear during online matches without my laptop dropping frames. Commercial tools often charge monthly subscriptions, lock you out after 60 minutes, or demand an expensive NVIDIA RTX graphics card. I wanted a simple, lightweight utility that runs locally on any normal CPU, has zero tracking, and just works."
+          "I built Getsu because I play Dota 2 with friends who are too broke for RTX graphics cards, studio mics, or Krisp subscriptions. Our calls were full of fan roar, mechanical keyboard clatter, and the occasional family drama in the background. I wanted a simple tool that runs locally on any normal CPU, costs nothing, has zero tracking, and gets out of the way."
         </p>
         <div class="story-author">— Ihsan, developer of Getsu</div>
       </div>
@@ -489,10 +489,13 @@
       </div>
 
       <p>
-        When you press <strong>START</strong>, Getsu automatically sets that virtual microphone as your Windows default, so most games and voice apps pick it up on their own. If an app doesn't, simply choose <code>CABLE Output</code> as the microphone in that app's settings.
+        When you press <strong>START</strong>, Getsu sets the virtual mic as your Windows default.
       </p>
       <p>
-        Press <strong>STOP</strong> or close Getsu, and your normal microphone is restored right away.
+        If an app (like Steam or in-game voice chat) doesn't pick it up immediately, it's usually because it is hard-locked to your old microphone. Open the app's audio settings, change the <strong>Input Device / Microphone</strong> to <code>CABLE Output</code>, and you're good to go.
+      </p>
+      <p>
+        When you press <strong>STOP</strong> or exit Getsu from the notification tray, your original microphone is restored right away.
       </p>
       <p style="color: var(--muted); font-size: 0.95rem;">
         <em>Note: The installer bundles the standard VB-Audio Virtual Cable driver. You can untick it during setup if you already have it installed.</em>

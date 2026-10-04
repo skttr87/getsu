@@ -871,6 +871,7 @@ class GetsuGUI:
                 onset_snr_db=self.config.get("vad_onset_snr_db", 6.0),
                 cold_start_gain=self.config.get("vad_cold_start_gain", 0.35),
                 lookahead=True,
+                floor_gain=self.config.get("vad_floor_gain", 0.02),
             )
 
             # Phase 1: Record 11 seconds (speakers MUTED, RAM only)

@@ -23,7 +23,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "vad_decay_ms": 80.0,           # Smooth natural fade to pure silence
     "vad_onset_threshold": 0.30,    # Low-threshold trigger for initial unvoiced consonants
     "vad_onset_snr_db": 6.0,        # Required dB rise above noise floor for fast onset
-    "vad_cold_start_gain": 0.35,    # Initial linear gain jump from dead silence
+    "vad_cold_start_gain": 0.0,     # Cold start initial gain (0.0 when floor_gain handles continuous continuity)
+    "vad_floor_gain": 0.02,         # Noise gate floor / expander range ~ -34 dB, eliminates pop/harsh boundary steps
     "output_gain": 1.08,            # Post-RNNoise make-up gain (+0.7 dB)
     "mic_gain": 1.0,                # Input multiplier
     "mic_boost_db": 0,              # Microphone boost step (0, 5, 10, 15 dB)
@@ -96,11 +97,14 @@ def load_config() -> Dict[str, Any]:
 
         # Automatic Migration: Upgrade legacy configs to v1.2.4 smooth gate parameters
         migrated = False
-        if merged.get("vad_cold_start_gain") == 0.70:
-            merged["vad_cold_start_gain"] = 0.35
+        if merged.get("vad_cold_start_gain") in (0.70, 0.35):
+            merged["vad_cold_start_gain"] = 0.0
             migrated = True
         if merged.get("vad_onset_snr_db") in (4.0, 5.0):
             merged["vad_onset_snr_db"] = 6.0
+            migrated = True
+        if "vad_floor_gain" not in data or data.get("vad_floor_gain") is None:
+            merged["vad_floor_gain"] = 0.02
             migrated = True
         if data.get("version") != "1.2.4":
             merged["version"] = "1.2.4"

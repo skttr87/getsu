@@ -113,6 +113,7 @@ class AdaptiveNoiseGate:
         onset_snr_db: float = 6.0,
         cold_start_gain: float = 0.35,
         lookahead: bool = False,
+        floor_gain: float = 0.0,
     ):
         self.threshold = threshold
         self.close_threshold = close_threshold
@@ -127,9 +128,10 @@ class AdaptiveNoiseGate:
         self.cold_start_gain = cold_start_gain
         self.noise_floor_db = -60.0
         self.lookahead = lookahead
+        self.floor_gain = floor_gain
 
         self.is_open = False
-        self.current_gain = 0.0
+        self.current_gain = floor_gain
         self.frames_since_speech = self.hangover_frames + 10
         self._zero_buffer: np.ndarray | None = None
         self._delay_buffer: np.ndarray | None = None
@@ -161,7 +163,7 @@ class AdaptiveNoiseGate:
             np.copyto(self._delay_buffer, frame)
             target_frame = self._work_buffer
         else:
-            target_frame = frame
+            target_frame = frame if in_place else frame.copy()
 
         start_gain = self.current_gain
 
@@ -186,10 +188,10 @@ class AdaptiveNoiseGate:
                 self.is_open = True
                 self.frames_since_speech = 0
                 target_gain = 1.0
-                if self.current_gain == 0.0 and self.cold_start_gain > 0.0:
+                if self.floor_gain <= 0.0 and self.current_gain == 0.0 and self.cold_start_gain > 0.0:
                     self.current_gain = self.cold_start_gain
             else:
-                target_gain = 0.0
+                target_gain = self.floor_gain
         else:
             # Mic is active: stay open during trailing word endings (speech_prob >= close_threshold)
             if speech_prob >= self.close_threshold:
@@ -203,7 +205,7 @@ class AdaptiveNoiseGate:
                 else:
                     # Speech ended: close gate and begin fade to silence
                     self.is_open = False
-                    target_gain = 0.0
+                    target_gain = self.floor_gain
 
         # Smooth gain transition (exponential attack, exponential decay)
         if target_gain > self.current_gain:
@@ -211,27 +213,34 @@ class AdaptiveNoiseGate:
             if self.current_gain >= 0.999:
                 self.current_gain = 1.0
         elif target_gain < self.current_gain:
-            self.current_gain = self.current_gain * self.decay_rate
-            if self.current_gain < 0.001:
-                self.current_gain = 0.0
+            self.current_gain = self.floor_gain + (self.current_gain - self.floor_gain) * self.decay_rate
+            if self.current_gain <= self.floor_gain + 0.001:
+                self.current_gain = self.floor_gain
 
         end_gain = self.current_gain
 
-        # Fast path 1: Steady silence (gain is 0.0)
-        if end_gain <= 0.0001 and start_gain <= 0.0001:
-            if self.lookahead:
-                target_frame.fill(0.0)
-                if in_place:
+        # Fast path 1: Steady silence (gain is at floor_gain)
+        if end_gain <= self.floor_gain + 0.0001 and start_gain <= self.floor_gain + 0.0001:
+            if self.floor_gain > 0.0:
+                target_frame *= self.floor_gain
+                if self.lookahead and in_place:
                     np.copyto(frame, target_frame)
-                    return frame, 0.0
-                return target_frame, 0.0
-            elif in_place:
-                frame.fill(0.0)
-                return frame, 0.0
+                    return frame, self.floor_gain
+                return target_frame, self.floor_gain
             else:
-                if self._zero_buffer is None or len(self._zero_buffer) != len(frame):
-                    self._zero_buffer = np.zeros(len(frame), dtype=frame.dtype)
-                return self._zero_buffer, 0.0
+                if self.lookahead:
+                    target_frame.fill(0.0)
+                    if in_place:
+                        np.copyto(frame, target_frame)
+                        return frame, 0.0
+                    return target_frame, 0.0
+                elif in_place:
+                    frame.fill(0.0)
+                    return frame, 0.0
+                else:
+                    if self._zero_buffer is None or len(self._zero_buffer) != len(frame):
+                        self._zero_buffer = np.zeros(len(frame), dtype=frame.dtype)
+                    return self._zero_buffer, 0.0
 
         # Fast path 2: Steady speech (gain is 1.0)
         if end_gain >= 0.999 and start_gain >= 0.999:
@@ -240,7 +249,7 @@ class AdaptiveNoiseGate:
                     np.copyto(frame, target_frame)
                     return frame, 1.0
                 return target_frame, 1.0
-            return frame, 1.0
+            return target_frame, 1.0
 
         # Transition path: Raised-Cosine (Hann) S-curve ramping eliminates clicks, pops, & harsh boundary steps
         if abs(end_gain - start_gain) > 0.005 and len(target_frame) > 0:
@@ -259,10 +268,7 @@ class AdaptiveNoiseGate:
                 return frame, end_gain
             return target_frame, end_gain
         else:
-            if in_place:
-                return frame, end_gain
-            else:
-                return target_frame.copy(), end_gain
+            return target_frame, end_gain
 
 
 def calculate_levels(frame: np.ndarray):

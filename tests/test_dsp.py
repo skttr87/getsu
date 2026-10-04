@@ -104,6 +104,46 @@ class TestDSP(unittest.TestCase):
         gated, gain = gate.process(frame, speech_prob=0.85, input_rms_db=-20.0)
         self.assertGreaterEqual(gain, 0.90)
 
+    def test_adaptive_noise_gate_floor_gain_continuity(self):
+        """Verify floor_gain holds gain at minimum non-zero level and smoothly attacks without clicks."""
+        floor = 0.02
+        gate = AdaptiveNoiseGate(
+            threshold=0.70,
+            close_threshold=0.45,
+            hangover_ms=40.0,
+            decay_ms=20.0,
+            frame_ms=10.0,
+            floor_gain=floor,
+            lookahead=True,
+        )
+        frame = np.ones(FRAME_SIZE, dtype=np.float32) * 0.5
+
+        # 1. Steady silence: gain should be floor_gain, output scaled by floor_gain
+        for _ in range(5):
+            out, gain = gate.process(frame, speech_prob=0.0)
+            self.assertAlmostEqual(gain, floor, places=4)
+        np.testing.assert_allclose(out, frame * floor, atol=1e-5)
+
+        # 2. Speech onset: gate opens, gain rises above floor_gain smoothly
+        out, gain = gate.process(frame, speech_prob=0.95)
+        self.assertTrue(gate.is_open)
+        self.assertGreater(gain, floor)
+
+        # 3. Hold open
+        for _ in range(10):
+            out, gain = gate.process(frame, speech_prob=0.95)
+        self.assertAlmostEqual(gain, 1.0, places=2)
+
+        # 4. Speech ceases, hangover expires, decay settles at floor_gain
+        for _ in range(4):  # hangover frames
+            gate.process(frame, speech_prob=0.0)
+
+        # After decay, settles cleanly at floor_gain (not 0.0)
+        for _ in range(30):
+            out, gain = gate.process(frame, speech_prob=0.0)
+        self.assertAlmostEqual(gain, floor, places=4)
+        np.testing.assert_allclose(out, frame * floor, atol=1e-5)
+
     def test_calculate_levels_no_inversion_dropout(self):
         """Verify calculate_levels does not drop to -90 dBFS when peak exceeds 1.0 (e.g. mic boost / output gain)."""
         # Normal frame with peak 0.5

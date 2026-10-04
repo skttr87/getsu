@@ -31,6 +31,7 @@ class AudioEngine:
         vad_onset_threshold: float = 0.30,
         vad_onset_snr_db: float = 6.0,
         vad_cold_start_gain: float = 0.35,
+        vad_floor_gain: float = 0.02,
         mic_gain: float = 1.0,
         output_gain: float = 1.08,
         hpf_cutoff_hz: float = 80.0,
@@ -47,6 +48,7 @@ class AudioEngine:
         self.vad_onset_threshold = vad_onset_threshold
         self.vad_onset_snr_db = vad_onset_snr_db
         self.vad_cold_start_gain = vad_cold_start_gain
+        self.vad_floor_gain = vad_floor_gain
         self.mic_gain = mic_gain
         self.output_gain = output_gain
         self.hpf_cutoff_hz = hpf_cutoff_hz
@@ -78,6 +80,7 @@ class AudioEngine:
             onset_snr_db=self.vad_onset_snr_db,
             cold_start_gain=self.vad_cold_start_gain,
             lookahead=True,
+            floor_gain=self.vad_floor_gain,
         )
 
         # Device Channel Configuration
@@ -472,6 +475,7 @@ def create_engine_from_config(
         vad_onset_threshold=config.get("vad_onset_threshold", 0.30),
         vad_onset_snr_db=config.get("vad_onset_snr_db", 6.0),
         vad_cold_start_gain=config.get("vad_cold_start_gain", 0.35),
+        vad_floor_gain=config.get("vad_floor_gain", 0.02),
         mic_gain=mic_gain,
         output_gain=config.get("output_gain", 1.08),
         hpf_cutoff_hz=config.get("hpf_cutoff_hz", 80.0),

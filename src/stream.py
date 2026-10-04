@@ -26,7 +26,11 @@ class AudioEngine:
         high_pass_enabled: bool = True,
         vad_threshold: float = 0.70,
         vad_close_threshold: float = 0.45,
-        vad_hangover_ms: float = 180.0,
+        vad_hangover_ms: float = 360.0,
+        vad_decay_ms: float = 80.0,
+        vad_onset_threshold: float = 0.30,
+        vad_onset_snr_db: float = 7.0,
+        vad_cold_start_gain: float = 0.70,
         mic_gain: float = 1.0,
         output_gain: float = 1.08,
         hpf_cutoff_hz: float = 80.0,
@@ -39,6 +43,10 @@ class AudioEngine:
         self.vad_threshold = vad_threshold
         self.vad_close_threshold = vad_close_threshold
         self.vad_hangover_ms = vad_hangover_ms
+        self.vad_decay_ms = vad_decay_ms
+        self.vad_onset_threshold = vad_onset_threshold
+        self.vad_onset_snr_db = vad_onset_snr_db
+        self.vad_cold_start_gain = vad_cold_start_gain
         self.mic_gain = mic_gain
         self.output_gain = output_gain
         self.hpf_cutoff_hz = hpf_cutoff_hz
@@ -63,9 +71,12 @@ class AudioEngine:
             threshold=self.vad_threshold,
             close_threshold=self.vad_close_threshold,
             hangover_ms=self.vad_hangover_ms,
-            decay_ms=40.0,
-            attack_ms=15.0,
+            decay_ms=self.vad_decay_ms,
+            attack_ms=8.0,
             frame_ms=10.0,
+            onset_threshold=self.vad_onset_threshold,
+            onset_snr_db=self.vad_onset_snr_db,
+            cold_start_gain=self.vad_cold_start_gain,
         )
 
         # Device Channel Configuration
@@ -153,11 +164,11 @@ class AudioEngine:
                     frame_mono *= self.output_gain
 
                 # Soft-knee gate for cooling pad silence floor (in-place zeroing for zero heap allocation)
-                frame_mono, _ = self.gate.process(frame_mono, speech_prob, in_place=True)
+                frame_mono, _ = self.gate.process(frame_mono, speech_prob, input_rms_db=input_rms_db, in_place=True)
             else:
                 # Bypass Mode: derive speech probability from RMS energy to silence background hiss
                 speech_prob = min(1.0, max(0.0, (input_rms_db + 45.0) / 20.0))
-                frame_mono, _ = self.gate.process(frame_mono, speech_prob, in_place=True)
+                frame_mono, _ = self.gate.process(frame_mono, speech_prob, input_rms_db=input_rms_db, in_place=True)
 
             # Calculate post-gate output metrics and atomically swap metrics tuple
             peak_db, rms_db = calculate_levels(frame_mono)
@@ -427,11 +438,11 @@ def create_engine_from_config(
 
     if is_laptop_mic:
         default_th = 0.70
-        default_hangover = 220.0
+        default_hangover = 360.0
         base_gain = 1.2
     else:
         default_th = 0.70
-        default_hangover = 180.0
+        default_hangover = 360.0
         base_gain = 1.0
 
     cfg_th = config.get("vad_threshold")
@@ -442,7 +453,7 @@ def create_engine_from_config(
         vad_threshold = default_th if (cfg_th is None or cfg_th in (0.75, 0.70)) else cfg_th
 
     cfg_hangover = config.get("vad_hangover_ms")
-    vad_hangover_ms = default_hangover if (cfg_hangover is None or (not is_vad_customized and cfg_hangover == 180.0)) else cfg_hangover
+    vad_hangover_ms = default_hangover if (cfg_hangover is None or (not is_vad_customized and cfg_hangover in (180.0, 220.0, 360.0))) else cfg_hangover
 
     boost_db = config.get("mic_boost_db", 0)
     boost_mult = 10.0 ** (boost_db / 20.0)
@@ -456,6 +467,10 @@ def create_engine_from_config(
         vad_threshold=vad_threshold,
         vad_close_threshold=config.get("vad_close_threshold", 0.45),
         vad_hangover_ms=vad_hangover_ms,
+        vad_decay_ms=config.get("vad_decay_ms", 80.0),
+        vad_onset_threshold=config.get("vad_onset_threshold", 0.30),
+        vad_onset_snr_db=config.get("vad_onset_snr_db", 7.0),
+        vad_cold_start_gain=config.get("vad_cold_start_gain", 0.70),
         mic_gain=mic_gain,
         output_gain=config.get("output_gain", 1.08),
         hpf_cutoff_hz=config.get("hpf_cutoff_hz", 80.0),

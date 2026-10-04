@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.2] - 2026-10-04
+
+### Added
+- **Dual-Key Onset Trigger (`AdaptiveNoiseGate`)**: Dynamically tracks ambient background noise floor (-60 dB to -20 dB) during silence. If speech probability exceeds `0.30` and incoming energy rises `+7.0 dB` above ambient room noise, the gate opens instantly on the very first 10ms frame, eliminating swallowed or muffled unvoiced consonants (*"h"*, *"s"*, *"p"*, *"t"*, *"k"*) when breaking long dead silence.
+- **Instant Cold-Start Gain (`cold_start_gain = 0.70`)**: Snaps gate gain directly to 0.70 (-3 dB) from silence, ensuring full initial consonant clarity while maintaining smooth zero-click transitions.
+- **Extended Natural Speech Hangover (`360.0ms`)**: Broadened gate hold time to 360ms to preserve soft conversational breathing, natural pauses, and subtle word endings without premature gating.
+- **Studio-Calibrated Exponential Decay (`80.0ms`)**: Tuned natural fade-out curve (decaying to absolute zero in ~350ms) to prevent abrupt sound cutting while blocking mechanical keyboard clatter.
+
+---
+
 ## [1.2.1] - 2026-10-04
 
 ### Fixed

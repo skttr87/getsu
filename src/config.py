@@ -9,7 +9,7 @@ from typing import Dict, Any
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "app_name": "Getsu",
-    "version": "1.2.1",
+    "version": "1.2.2",
     "input_device_id": None,
     "input_device_name": None,
     "output_device_id": None,
@@ -19,7 +19,11 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "hpf_cutoff_hz": 80.0,          # High-pass filter cutoff frequency in Hz
     "vad_threshold": 0.70,          # Tuned for cooling pad noise rejection (0.0 to 1.0)
     "vad_close_threshold": 0.45,    # Hysteresis close threshold preserving unvoiced consonants
-    "vad_hangover_ms": 180.0,       # Hold time to avoid cutting word endings
+    "vad_hangover_ms": 360.0,       # Extended hold time across natural pauses and breaths
+    "vad_decay_ms": 80.0,           # Smooth natural fade to pure silence
+    "vad_onset_threshold": 0.30,    # Low-threshold trigger for initial unvoiced consonants
+    "vad_onset_snr_db": 7.0,        # Required dB rise above noise floor for fast onset
+    "vad_cold_start_gain": 0.70,    # Initial linear gain jump from dead silence
     "output_gain": 1.08,            # Post-RNNoise make-up gain (+0.7 dB)
     "mic_gain": 1.0,                # Input multiplier
     "mic_boost_db": 0,              # Microphone boost step (0, 5, 10, 15 dB)

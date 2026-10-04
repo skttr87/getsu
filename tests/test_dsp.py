@@ -42,6 +42,7 @@ class TestDSP(unittest.TestCase):
             decay_ms=20.0,
             attack_ms=15.0,
             frame_ms=10.0,
+            cold_start_gain=0.0,
         )
         frame = np.ones(FRAME_SIZE, dtype=np.float32) * 0.5
 
@@ -72,6 +73,36 @@ class TestDSP(unittest.TestCase):
             gated_frame, gain = gate.process(frame, 0.0)
         self.assertEqual(gain, 0.0, "Gate failed to reach complete silence")
         np.testing.assert_array_equal(gated_frame, np.zeros_like(frame))
+
+    def test_adaptive_noise_gate_dual_key_onset_and_cold_start(self):
+        """Verify dual-key onset trigger fast-opens on low VAD with energy jump and applies cold start gain."""
+        gate = AdaptiveNoiseGate(
+            threshold=0.70,
+            close_threshold=0.45,
+            hangover_ms=360.0,
+            decay_ms=80.0,
+            attack_ms=8.0,
+            frame_ms=10.0,
+            onset_threshold=0.30,
+            onset_snr_db=7.0,
+            cold_start_gain=0.70,
+        )
+        frame = np.ones(FRAME_SIZE, dtype=np.float32) * 0.1
+
+        # Frame 1-5: Background fan noise (-50 dB, prob 0.05) -> Gate must stay completely closed
+        for _ in range(5):
+            gated, gain = gate.process(frame, speech_prob=0.05, input_rms_db=-50.0)
+            self.assertEqual(gain, 0.0, "Fan noise should not open gate")
+
+        # Frame 6: Early consonant onset ('h', 's', 't') -> prob 0.35 (< 0.70 threshold), but -35 dB (> -50 + 7 dB)
+        gated, gain = gate.process(frame, speech_prob=0.35, input_rms_db=-35.0)
+        self.assertTrue(gate.is_open, "Dual-key onset trigger should open gate on consonant energy rise")
+        # Cold start gain (0.70) + 1 frame attack ramp
+        self.assertGreaterEqual(gain, 0.70, "Cold start gain should be at least 0.70 on initial frame")
+
+        # Frame 7: Loud voiced vowel follows (prob 0.85, -20 dB) -> Full open
+        gated, gain = gate.process(frame, speech_prob=0.85, input_rms_db=-20.0)
+        self.assertGreaterEqual(gain, 0.90)
 
     def test_calculate_levels_no_inversion_dropout(self):
         """Verify calculate_levels does not drop to -90 dBFS when peak exceeds 1.0 (e.g. mic boost / output gain)."""

@@ -84,23 +84,28 @@ class HighPassFilter:
 
 class AdaptiveNoiseGate:
     """
-    Adaptive Dual-Threshold (Hysteresis) Soft-Knee Noise Gate.
+    Adaptive Dual-Threshold (Hysteresis) Soft-Knee Noise Gate with Dynamic Onset Detection.
     Features:
-    - Open Threshold: Optimized threshold (0.70) prevents cooling pad fan noise while opening instantly on speech onset.
-    - Close Threshold (Hysteresis): Lower threshold (0.45) keeps gate 100% open during soft
-      word endings and unvoiced consonants ('s', 't', 'p', 'th', 'd').
-    - Extended Hangover (180ms): Ensures vocal decay finishes naturally without fading early.
-    - Smooth Exponential Decay: Gently fades to absolute zero silence between sentences.
+    - Open Threshold: Standard threshold (0.70) rejects cooling pad fan noise during idle.
+    - Dual-Key Onset Trigger: Fast-opens gate on early speech probability (0.30) if energy rises
+      above background noise floor (+7.0 dB), preserving unvoiced consonants ('s', 't', 'p', 'k', 'h').
+    - Cold-Start Gain: Jumps immediately to 0.70 on cold onset from dead silence to eliminate muffled syllables.
+    - Close Threshold (Hysteresis): Lower threshold (0.45) keeps gate 100% open during soft word endings.
+    - Extended Hangover (360ms): Holds open across natural speech pauses and breathing.
+    - Smooth Exponential Decay (80ms): Gently fades to absolute zero silence without chopping.
     """
 
     def __init__(
         self,
         threshold: float = 0.70,
         close_threshold: float = 0.45,
-        hangover_ms: float = 180.0,
-        decay_ms: float = 40.0,
+        hangover_ms: float = 360.0,
+        decay_ms: float = 80.0,
         attack_ms: float = 8.0,
         frame_ms: float = 10.0,
+        onset_threshold: float = 0.30,
+        onset_snr_db: float = 7.0,
+        cold_start_gain: float = 0.70,
     ):
         self.threshold = threshold
         self.close_threshold = close_threshold
@@ -110,23 +115,51 @@ class AdaptiveNoiseGate:
         attack_factor = frame_ms / attack_ms
         self.attack_rate = 1.0 - math.exp(-attack_factor)
 
+        self.onset_threshold = onset_threshold
+        self.onset_snr_db = onset_snr_db
+        self.cold_start_gain = cold_start_gain
+        self.noise_floor_db = -60.0
+
         self.is_open = False
         self.current_gain = 0.0
         self.frames_since_speech = self.hangover_frames + 10
         self._zero_buffer: np.ndarray | None = None
 
-    def process(self, frame: np.ndarray, speech_prob: float, in_place: bool = False) -> tuple[np.ndarray, float]:
+    def process(
+        self,
+        frame: np.ndarray,
+        speech_prob: float,
+        input_rms_db: float | None = None,
+        in_place: bool = False
+    ) -> tuple[np.ndarray, float]:
         """
-        Applies hysteresis soft-knee gating based on RNNoise speech probability.
-        Smooth exponential attack (15ms) eliminates onset clicks.
+        Applies hysteresis soft-knee gating based on RNNoise speech probability and dynamic onset SNR.
+        Smooth exponential attack and cold-start gain eliminates onset clipping and muffled speech.
         Returns the gated audio frame and current applied gain.
         """
         if not self.is_open:
-            # Mic is closed: require higher speech probability to open (rejects fans)
-            if speech_prob >= self.threshold:
+            # Ambient noise floor tracking during silence
+            if input_rms_db is not None and -100.0 < input_rms_db < -20.0:
+                if input_rms_db < self.noise_floor_db:
+                    self.noise_floor_db += (input_rms_db - self.noise_floor_db) * 0.15
+                else:
+                    self.noise_floor_db += (input_rms_db - self.noise_floor_db) * 0.02
+
+            # Dual-Key Trigger evaluation:
+            # 1. Standard high-confidence VAD trigger
+            # 2. Fast onset trigger: energy rise >= onset_snr_db above noise floor with early speech cue
+            is_onset = False
+            if input_rms_db is not None:
+                snr = input_rms_db - self.noise_floor_db
+                if snr >= self.onset_snr_db and speech_prob >= self.onset_threshold:
+                    is_onset = True
+
+            if speech_prob >= self.threshold or is_onset:
                 self.is_open = True
                 self.frames_since_speech = 0
                 target_gain = 1.0
+                if self.current_gain == 0.0 and self.cold_start_gain > 0.0:
+                    self.current_gain = self.cold_start_gain
             else:
                 target_gain = 0.0
         else:

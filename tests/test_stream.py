@@ -33,7 +33,7 @@ class TestAudioEngine(unittest.TestCase):
 
         engine = create_engine_from_config(config, input_device_id=0, output_device_id=1, is_laptop_mic=True)
         self.assertEqual(engine.vad_threshold, 0.70)
-        self.assertEqual(engine.vad_hangover_ms, 360.0)
+        self.assertEqual(engine.vad_hangover_ms, 280.0)
         # base_gain (1.2) * 10^(5/20) (1.778) ≈ 2.134
         self.assertAlmostEqual(engine.mic_gain, 1.2 * (10.0 ** (5 / 20.0)), places=2)
         self.assertEqual(engine.output_gain, 1.08)
@@ -60,7 +60,7 @@ class TestAudioEngine(unittest.TestCase):
 
         engine = create_engine_from_config(config, input_device_id=0, output_device_id=1, is_laptop_mic=False)
         self.assertEqual(engine.vad_threshold, 0.70)
-        self.assertEqual(engine.vad_hangover_ms, 360.0)
+        self.assertEqual(engine.vad_hangover_ms, 280.0)
         self.assertEqual(engine.mic_gain, 1.0)
 
     @patch("src.stream.sd.query_devices")

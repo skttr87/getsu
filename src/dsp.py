@@ -107,16 +107,17 @@ class AdaptiveNoiseGate:
     def __init__(
         self,
         threshold: float = 0.70,
-        close_threshold: float = 0.45,
-        hangover_ms: float = 360.0,
+        close_threshold: float = 0.55,
+        hangover_ms: float = 280.0,
         decay_ms: float = 80.0,
-        attack_ms: float = 22.0,
+        attack_ms: float = 28.0,
         frame_ms: float = 10.0,
-        onset_threshold: float = 0.30,
-        onset_snr_db: float = 8.0,
+        onset_threshold: float = 0.35,
+        onset_snr_db: float = 10.0,
         cold_start_gain: float = 0.35,
         lookahead: bool = False,
         floor_gain: float = 0.0,
+        cooldown_ms: float = 150.0,
     ):
         self.threshold = threshold
         self.close_threshold = close_threshold
@@ -132,6 +133,9 @@ class AdaptiveNoiseGate:
         self.noise_floor_db = -60.0
         self.lookahead = lookahead
         self.floor_gain = floor_gain
+
+        self.cooldown_frames = max(1, int(cooldown_ms / frame_ms))
+        self.frames_since_close = self.cooldown_frames + 10
 
         self.is_open = False
         self.current_gain = floor_gain
@@ -171,6 +175,9 @@ class AdaptiveNoiseGate:
         start_gain = self.current_gain
 
         if not self.is_open:
+            self.frames_since_close += 1
+            in_cooldown = self.frames_since_close <= self.cooldown_frames
+
             # Ambient noise floor tracking during silence
             if input_rms_db is not None and -100.0 < input_rms_db < -20.0:
                 if input_rms_db < self.noise_floor_db:
@@ -181,8 +188,9 @@ class AdaptiveNoiseGate:
             # Dual-Key Trigger evaluation:
             # 1. Standard high-confidence VAD trigger
             # 2. Fast onset trigger: energy rise >= onset_snr_db above noise floor with early speech cue
+            # (Inhibited during post-close cooldown to eliminate background chatter decay aborts/clicks)
             is_onset = False
-            if input_rms_db is not None:
+            if input_rms_db is not None and not in_cooldown:
                 snr = input_rms_db - self.noise_floor_db
                 if snr >= self.onset_snr_db and speech_prob >= self.onset_threshold:
                     is_onset = True
@@ -208,6 +216,7 @@ class AdaptiveNoiseGate:
                 else:
                     # Speech ended: close gate and begin fade to silence
                     self.is_open = False
+                    self.frames_since_close = 0
                     target_gain = self.floor_gain
 
         # Smooth gain transition (exponential attack, exponential decay)

@@ -210,8 +210,8 @@ class TestDSP(unittest.TestCase):
         """Verify noise gate uses smooth Raised-Cosine (Hann) S-curve ramping without step discontinuities."""
         gate = AdaptiveNoiseGate()
         self.assertEqual(gate.cold_start_gain, 0.35)
-        self.assertEqual(gate.onset_snr_db, 8.0)
-        self.assertEqual(gate.attack_rate, 1.0 - np.exp(-10.0 / 22.0))
+        self.assertEqual(gate.onset_snr_db, 10.0)
+        self.assertEqual(gate.attack_rate, 1.0 - np.exp(-10.0 / 28.0))
 
         # Transition frame from silence to open
         frame = np.ones(FRAME_SIZE, dtype=np.float32)
@@ -242,10 +242,42 @@ class TestDSP(unittest.TestCase):
         # Frame 3: Continuing voice
         f_speech2 = np.ones(FRAME_SIZE, dtype=np.float32) * 0.75
         out3, g3 = gate.process(f_speech2.copy(), speech_prob=0.95, input_rms_db=-20.0)
-        # Out3 is the actual first speech frame, delivered at smooth high gain (>= 0.70)
-        self.assertGreaterEqual(g3, 0.70)
+        # Out3 is the actual first speech frame, delivered at smooth high gain (>= 0.65)
+        self.assertGreaterEqual(g3, 0.65)
         self.assertAlmostEqual(float(np.max(out3)), 0.75 * g3, places=2)
+
+    def test_adaptive_noise_gate_rearm_cooldown_blocks_background_chatter(self):
+        """Verify 150ms Gate Re-Arm Cooldown blocks low-confidence chatter but allows high-confidence voice."""
+        gate = AdaptiveNoiseGate(
+            threshold=0.70,
+            close_threshold=0.55,
+            hangover_ms=20.0,  # 2 frames hangover
+            cooldown_ms=50.0,  # 5 frames cooldown
+            onset_threshold=0.35,
+            onset_snr_db=10.0,
+            floor_gain=0.06,
+        )
+        frame = np.ones(FRAME_SIZE, dtype=np.float32) * 0.2
+
+        # 1. User speaks with loud voice (prob 0.90) -> Gate opens
+        gate.process(frame, speech_prob=0.90, input_rms_db=-20.0)
+        self.assertTrue(gate.is_open)
+
+        # 2. User stops, hangover expires (2 frames) -> Gate closes, cooldown starts
+        gate.process(frame, speech_prob=0.10, input_rms_db=-65.0)
+        gate.process(frame, speech_prob=0.10, input_rms_db=-65.0)
+        gate.process(frame, speech_prob=0.10, input_rms_db=-65.0)
+        self.assertFalse(gate.is_open, "Gate should be closed after hangover")
+
+        # 3. Background chatter arrives during cooldown (prob 0.45, SNR +15dB) -> Must be blocked!
+        out, gain = gate.process(frame, speech_prob=0.45, input_rms_db=-50.0)
+        self.assertFalse(gate.is_open, "Background chatter during cooldown must NOT re-open gate")
+
+        # 4. High-confidence user speech arrives (prob 0.85) -> Must bypass cooldown immediately!
+        out, gain = gate.process(frame, speech_prob=0.85, input_rms_db=-20.0)
+        self.assertTrue(gate.is_open, "High-confidence user voice must immediately bypass cooldown")
 
 
 if __name__ == "__main__":
     unittest.main()
+

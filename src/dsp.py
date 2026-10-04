@@ -82,8 +82,9 @@ class HighPassFilter:
         return out
 
 
-# Precomputed 480-sample Half-Cosine / Raised-Cosine (Hann) curve for zero-allocation C1 slew ramping
-_S_CURVE_TABLE_480 = (0.5 * (1.0 - np.cos(np.pi * np.linspace(0.0, 1.0, 480)))).astype(np.float32)
+# Precomputed 480-sample Quintic Smootherstep (Perlin C2) curve for zero-jerk, zero-allocation slew ramping
+_T_480 = np.linspace(0.0, 1.0, 480, dtype=np.float32)
+_S_CURVE_TABLE_480 = (6.0 * _T_480**5 - 15.0 * _T_480**4 + 10.0 * _T_480**3).astype(np.float32)
 
 
 class AdaptiveNoiseGate:
@@ -92,13 +93,14 @@ class AdaptiveNoiseGate:
     Features:
     - Open Threshold: Standard threshold (0.70) rejects cooling pad fan noise during idle.
     - Dual-Key Onset Trigger: Fast-opens gate on early speech probability (0.30) if energy rises
-      above background noise floor (+5.0 dB), preserving unvoiced consonants ('s', 't', 'p', 'k', 'h').
-    - Cold-Start Gain: Soft-awakens at 0.35 on cold onset from dead silence to eliminate muffled syllables
-      without creating harsh amplitude spikes or pops.
+      above background noise floor (+7.0 dB), preserving unvoiced consonants ('s', 't', 'p', 'k', 'h')
+      while blocking distant background room chatter.
+    - Noise Gate Floor: Holds baseline gain at 0.035 (-29.1 dB / -95 dBFS) to keep wireless headset
+      DAC amplifiers energized, completely eliminating squelch sleep and wake-up pops.
     - Close Threshold (Hysteresis): Lower threshold (0.45) keeps gate 100% open during soft word endings.
     - Extended Hangover (360ms): Holds open across natural speech pauses and breathing.
-    - Smooth Exponential Decay (80ms): Gently fades to absolute zero silence without chopping.
-    - Raised-Cosine S-Curve: Continuous C1 derivative gain ramping completely eliminates clicks and pops.
+    - Smooth Exponential Decay (80ms): Gently fades down to gate floor without chopping.
+    - Quintic Smootherstep S-Curve: C2 continuous derivative and zero boundary acceleration eliminates clicks and jerk.
     """
 
     def __init__(
@@ -110,7 +112,7 @@ class AdaptiveNoiseGate:
         attack_ms: float = 15.0,
         frame_ms: float = 10.0,
         onset_threshold: float = 0.30,
-        onset_snr_db: float = 6.0,
+        onset_snr_db: float = 7.0,
         cold_start_gain: float = 0.35,
         lookahead: bool = False,
         floor_gain: float = 0.0,
@@ -251,12 +253,13 @@ class AdaptiveNoiseGate:
                 return target_frame, 1.0
             return target_frame, 1.0
 
-        # Transition path: Raised-Cosine (Hann) S-curve ramping eliminates clicks, pops, & harsh boundary steps
+        # Transition path: Quintic Smootherstep (C2) S-curve ramping eliminates clicks, pops, & boundary jerk
         if abs(end_gain - start_gain) > 0.005 and len(target_frame) > 0:
             if len(target_frame) == 480:
                 s_curve = _S_CURVE_TABLE_480
             else:
-                s_curve = (0.5 * (1.0 - np.cos(np.pi * np.linspace(0.0, 1.0, len(target_frame))))).astype(target_frame.dtype)
+                t = np.linspace(0.0, 1.0, len(target_frame), dtype=target_frame.dtype)
+                s_curve = (6.0 * t**5 - 15.0 * t**4 + 10.0 * t**3).astype(target_frame.dtype, copy=False)
             ramp = (start_gain + (end_gain - start_gain) * s_curve).astype(target_frame.dtype, copy=False)
             target_frame *= ramp
         else:

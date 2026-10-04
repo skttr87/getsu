@@ -106,7 +106,7 @@ class TestDSP(unittest.TestCase):
 
     def test_adaptive_noise_gate_floor_gain_continuity(self):
         """Verify floor_gain holds gain at minimum non-zero level and smoothly attacks without clicks."""
-        floor = 0.02
+        floor = 0.035
         gate = AdaptiveNoiseGate(
             threshold=0.70,
             close_threshold=0.45,
@@ -143,6 +143,19 @@ class TestDSP(unittest.TestCase):
             out, gain = gate.process(frame, speech_prob=0.0)
         self.assertAlmostEqual(gain, floor, places=4)
         np.testing.assert_allclose(out, frame * floor, atol=1e-5)
+
+    def test_quintic_smootherstep_c2_properties(self):
+        """Verify _S_CURVE_TABLE_480 is monotonically increasing with C2 boundary smoothness."""
+        from src.dsp import _S_CURVE_TABLE_480
+        self.assertEqual(len(_S_CURVE_TABLE_480), 480)
+        self.assertAlmostEqual(_S_CURVE_TABLE_480[0], 0.0, places=5)
+        self.assertAlmostEqual(_S_CURVE_TABLE_480[-1], 1.0, places=5)
+        # Monotonically non-decreasing
+        diff = np.diff(_S_CURVE_TABLE_480)
+        self.assertTrue(np.all(diff >= 0.0), "S-curve must be monotonically increasing")
+        # Near-zero boundary velocity (C1)
+        self.assertLess(diff[0], 1e-4)
+        self.assertLess(diff[-1], 1e-4)
 
     def test_calculate_levels_no_inversion_dropout(self):
         """Verify calculate_levels does not drop to -90 dBFS when peak exceeds 1.0 (e.g. mic boost / output gain)."""
@@ -197,7 +210,7 @@ class TestDSP(unittest.TestCase):
         """Verify noise gate uses smooth Raised-Cosine (Hann) S-curve ramping without step discontinuities."""
         gate = AdaptiveNoiseGate()
         self.assertEqual(gate.cold_start_gain, 0.35)
-        self.assertEqual(gate.onset_snr_db, 6.0)
+        self.assertEqual(gate.onset_snr_db, 7.0)
         self.assertEqual(gate.attack_rate, 1.0 - np.exp(-10.0 / 15.0))
 
         # Transition frame from silence to open

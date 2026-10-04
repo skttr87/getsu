@@ -868,10 +868,10 @@ class GetsuGUI:
                 attack_ms=15.0,
                 frame_ms=10.0,
                 onset_threshold=self.config.get("vad_onset_threshold", 0.30),
-                onset_snr_db=self.config.get("vad_onset_snr_db", 7.0),
+                onset_snr_db=self.config.get("vad_onset_snr_db", 8.0),
                 cold_start_gain=self.config.get("vad_cold_start_gain", 0.35),
                 lookahead=True,
-                floor_gain=self.config.get("vad_floor_gain", 0.035),
+                floor_gain=self.config.get("vad_floor_gain", 0.04),
             )
 
             # Phase 1: Record 11 seconds (speakers MUTED, RAM only)

@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dual-Sided Host API Alignment & Self-Healing**: Enforced strict Host API matching between input and output devices (`find_matching_cable_input()`), ensuring that WASAPI microphones are paired exclusively with the WASAPI endpoint of VB-Cable (`CABLE Input`). Added input-side realignment and emergency retry self-healing in `AudioEngine.start()` to prevent `Illegal combination of I/O devices [PaErrorCode -9993]`.
 - **Speech Onset Clarity After Long Silence**: Tuned default voice sensitivity threshold to `0.70` (from `0.75`) and tightened noise gate attack time to `8.0ms` (from `15.0ms`), eliminating muffled or swallowed consonant attacks (*"s"*, *"t"*, *"k"*, *"p"*) when speaking again after prolonged quiet.
 - **Installer Multi-Instance Prevention**: Added kernel mutex guards (`SetupMutex` and `AppMutex`) in Inno Setup to prevent duplicate installer windows and file-lock collisions when users double-click the setup executable.
+- **Clean Initial Device Auto-Detection**: Reset distributed `config.json` template device fields to `null`, ensuring new installations immediately run the 4-tier hardware auto-detection on first launch (prioritizing active USB/wireless headsets over motherboard Realtek jacks).
 - **Human-Readable Error Translation**: Replaced raw C library PortAudio stack dumps in the GUI status pill with plain-English guidance for driver conflicts, exclusive-mode locks, and device disconnects.
 
 ---

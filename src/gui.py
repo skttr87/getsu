@@ -550,7 +550,7 @@ class GetsuGUI:
                     except Exception as e:
                         print(f"[HARDWARE] Failed to restart stream after rescan: {e}")
                         self.is_running = False
-                        self.set_status_pill(f"▲ Failed to restart: {e}", [235, 75, 75])
+                        self.set_status_pill(f"▲ {self._format_audio_error(e)}", [235, 75, 75])
 
             except Exception as e:
                 print(f"[HARDWARE] Error during hardware rescan: {e}")
@@ -612,6 +612,22 @@ class GetsuGUI:
         dpg.set_value("active_notice", text)
         if color:
             dpg.configure_item("active_notice", color=color)
+
+    def _format_audio_error(self, e: Exception) -> str:
+        """Translates technical PortAudio / driver exceptions into clear, actionable advice."""
+        err_str = str(e)
+        if "WdmSyncIoctl" in err_str or "0x00000492" in err_str or "WDM-KS" in err_str:
+            return "Could not start microphone (driver conflict). Please re-select your mic or restart Getsu."
+        if "-9999" in err_str or "Unanticipated host error" in err_str:
+            return "Could not start microphone. Ensure it is plugged in and not in exclusive use by another app."
+        if "-9993" in err_str or "Illegal combination" in err_str:
+            return "Audio device format mismatch. Re-selecting your microphone in the list usually fixes this."
+        if any(k in err_str.lower() for k in ["busy", "access denied", "device unavailable", "in use"]):
+            return "Microphone is in exclusive use by another app or disconnected."
+        clean_err = err_str.replace("Error starting stream: ", "").strip()
+        if len(clean_err) > 85:
+            clean_err = clean_err[:82] + "..."
+        return f"Could not start microphone: {clean_err}"
 
     def _set_voice_test_button_state(self, enabled: bool):
         """Sets the voice test button enabled/disabled state, contextual label, and theme."""
@@ -733,7 +749,7 @@ class GetsuGUI:
                             pass
                         self.engine = None
                     self.is_running = False
-                    self.set_status_pill(f"▲ Audio device failed to start: {e}", [235, 75, 75])
+                    self.set_status_pill(f"▲ {self._format_audio_error(e)}", [235, 75, 75])
                 finally:
                     # Enforce symmetric 3-second state lock
                     elapsed = time.monotonic() - start_time
@@ -946,7 +962,7 @@ class GetsuGUI:
             self.set_status_pill("▲ Microphone busy or disconnected.", [235, 75, 75])
         except Exception as e:
             print(f"[VOICE TEST] Error during voice preview: {e}")
-            self.set_status_pill(f"▲ Voice test error: {e}", [235, 75, 75])
+            self.set_status_pill(f"▲ {self._format_audio_error(e)}", [235, 75, 75])
         finally:
             if rn is not None:
                 try:

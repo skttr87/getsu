@@ -31,7 +31,7 @@ def get_all_devices(force_rescan: bool = False) -> List[Dict]:
 
             # Exclude raw Windows WDM-KS devices: WDM-KS uses legacy kernel IOCTLs
             # that fail with GLE 0x00000492 on modern Realtek/Intel HD audio drivers
-            if 'WDM-KS' in host_name:
+            if 'WDM-KS' in host_name.upper():
                 continue
 
             result.append({

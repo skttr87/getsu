@@ -9,7 +9,7 @@ from typing import Dict, Any
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "app_name": "Getsu",
-    "version": "1.2.3",
+    "version": "1.2.4",
     "input_device_id": None,
     "input_device_name": None,
     "output_device_id": None,
@@ -22,8 +22,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "vad_hangover_ms": 360.0,       # Extended hold time across natural pauses and breaths
     "vad_decay_ms": 80.0,           # Smooth natural fade to pure silence
     "vad_onset_threshold": 0.30,    # Low-threshold trigger for initial unvoiced consonants
-    "vad_onset_snr_db": 4.0,        # Required dB rise above noise floor for fast onset
-    "vad_cold_start_gain": 0.70,    # Initial linear gain jump from dead silence
+    "vad_onset_snr_db": 5.0,        # Required dB rise above noise floor for fast onset
+    "vad_cold_start_gain": 0.35,    # Initial linear gain jump from dead silence
     "output_gain": 1.08,            # Post-RNNoise make-up gain (+0.7 dB)
     "mic_gain": 1.0,                # Input multiplier
     "mic_boost_db": 0,              # Microphone boost step (0, 5, 10, 15 dB)
@@ -93,6 +93,16 @@ def load_config() -> Dict[str, Any]:
         # Ensure all default keys exist
         merged = copy.deepcopy(DEFAULT_CONFIG)
         merged.update(data)
+
+        # Automatic Migration: Upgrade legacy configs to v1.2.4 smooth gate parameters
+        if data.get("version") != "1.2.4":
+            if merged.get("vad_cold_start_gain") == 0.70:
+                merged["vad_cold_start_gain"] = 0.35
+            if merged.get("vad_onset_snr_db") == 4.0:
+                merged["vad_onset_snr_db"] = 5.0
+            merged["version"] = "1.2.4"
+            save_config(merged)
+
         return merged
     except Exception as e:
         print(f"[WARN] Failed to load config.json ({e}), using defaults.")

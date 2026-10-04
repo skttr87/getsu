@@ -35,7 +35,6 @@ from src.devices import (
     get_physical_output_device,
     install_vbcable_driver,
     get_all_devices,
-    ensure_physical_default_playback,
     find_matching_cable_input,
 )
 from src.config import load_config, save_config
@@ -264,14 +263,6 @@ class GetsuGUI:
 
         # Start stream health watchdog
         threading.Thread(target=self._watchdog_loop, daemon=True).start()
-
-        # Safeguard: Ensure Windows default playback device remains physical speakers/headphones
-        def _check_playback_guard():
-            ok = ensure_physical_default_playback()
-            if ok:
-                print("[INIT] Verified default Windows playback device is physical.")
-
-        threading.Thread(target=_check_playback_guard, daemon=True).start()
 
     def s(self, val: float) -> int:
         """Scale pixel value according to active monitor DPI."""

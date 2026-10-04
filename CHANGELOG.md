@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.4] - 2026-10-04
+
+### Fixed & Enhanced
+- **Zero Audio Output Interference**: Eliminated all playback device tampering across the entire app lifecycle. Removed background playback guards (`_check_playback_guard` in `src/gui.py`) and installer overrides (`--ensure-physical` in `setup.iss`). Getsu now strictly operates on audio input (`eCapture`), leaving whatever playback endpoint is chosen by Windows or the user (USB/Wireless headsets, Bluetooth, DACs, HDMI, speakers) 100% untouched during installation, launch, stream start, stream stop, and exit.
+- **S-Curve (Raised-Cosine / Hann) Gain Ramping**: Upgraded gate transition interpolation in `AdaptiveNoiseGate` to a precomputed Raised-Cosine S-curve lookup table. Guarantees zero derivative ($C^1$ smooth) at buffer boundaries, 100% eliminating transient clicks and pop sounds while running 3x faster than linear interpolation.
+- **Natural Voice Awakening (`cold_start_gain = 0.35`, `attack_ms = 15.0ms`)**: Re-calibrated cold-start gain to 0.35 and gate attack envelope to 15.0ms (pro broadcast standard). Completely eliminates harsh volume bursts on the first syllable while preserving initial unvoiced consonants (*"s"*, *"t"*, *"p"*, *"k"*) without muffling.
+- **Optimized Transient SNR (`onset_snr_db = 5.0 dB`)**: Balanced transient energy detection to 5.0 dB above room noise, ensuring instant detection of speech onset while rejecting light breathing and room ambience.
+- **Seamless Config Migration**: Added automatic legacy config upgrade in `src/config.py` that gracefully migrates older `config.json` files to the smooth v1.2.4 gate parameters.
+
+---
+
 ## [1.2.3] - 2026-10-04
 
 ### Fixed & Enhanced

@@ -153,5 +153,24 @@ class TestDSP(unittest.TestCase):
         self.assertLess(avg_ms, 5.0, f"Inference took {avg_ms} ms, exceeding real-time budget")
 
 
+    def test_adaptive_noise_gate_raised_cosine_s_curve_ramping(self):
+        """Verify noise gate uses smooth Raised-Cosine (Hann) S-curve ramping without step discontinuities."""
+        gate = AdaptiveNoiseGate()
+        self.assertEqual(gate.cold_start_gain, 0.35)
+        self.assertEqual(gate.onset_snr_db, 5.0)
+        self.assertEqual(gate.attack_rate, 1.0 - np.exp(-10.0 / 15.0))
+
+        # Transition frame from silence to open
+        frame = np.ones(FRAME_SIZE, dtype=np.float32)
+        out_frame, end_gain = gate.process(frame.copy(), speech_prob=0.9)
+        self.assertGreater(end_gain, 0.0)
+
+        # In Raised-Cosine, derivative at boundaries t=0 and t=N-1 is zero (no clicks)
+        # Check first step is smaller than linear step: out_frame[1] - out_frame[0] < out_frame[240] - out_frame[239]
+        slope_start = out_frame[1] - out_frame[0]
+        slope_mid = out_frame[240] - out_frame[239]
+        self.assertLess(slope_start, slope_mid, "S-curve ramp must have gentler slope at onset than at midpoint")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2,7 +2,7 @@
 ; ==============================================================
 
 #define MyAppName "Getsu"
-#define MyAppVersion "1.2.3"
+#define MyAppVersion "1.2.4"
 #define MyAppPublisher "skttr87"
 #define MyAppURL "https://github.com/skttr87/getsu"
 #define MyAppExeName "getsu.exe"
@@ -33,13 +33,13 @@ CloseApplications=force
 RestartApplications=no
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-VersionInfoVersion=1.2.3.0
+VersionInfoVersion=1.2.4.0
 VersionInfoCompany=skttr87
 VersionInfoDescription=Getsu - AI Real-Time Noise Cancellation Setup
 VersionInfoCopyright=Copyright (c) 2026 Ihsan (@skttr87)
 VersionInfoProductName=Getsu AI Noise Cancellation
-VersionInfoProductVersion=1.2.1
-VersionInfoOriginalFileName=Getsu-v1.2.1-Setup.exe
+VersionInfoProductVersion=1.2.4
+VersionInfoOriginalFileName=Getsu-v1.2.4-Setup.exe
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -234,11 +234,10 @@ begin
   AppDir := ExpandConstant('{app}');
   AudioRestoreExe := AddBackslash(AppDir) + 'drivers\vbcable\AudioRestore.exe';
 
-  // 1. If AudioRestore exists from prior installation, ensure microphone & playback are restored to physical hardware
+  // 1. If AudioRestore exists from prior installation, ensure microphone is restored to physical hardware
   if FileExists(AudioRestoreExe) then
   begin
     Exec(AudioRestoreExe, '--ensure-physical-capture', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    Exec(AudioRestoreExe, '--ensure-physical', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
 
   // 2. Forcibly close any running getsu.exe processes so binaries and DLLs in {app} are unlocked
@@ -280,11 +279,10 @@ begin
   AppDir := ExpandConstant('{app}');
   AudioRestoreExe := AddBackslash(AppDir) + 'drivers\vbcable\AudioRestore.exe';
 
-  // 1. Immediately restore default microphone & playback device to physical hardware
+  // 1. Immediately restore default microphone to physical hardware
   if FileExists(AudioRestoreExe) then
   begin
     Exec(AudioRestoreExe, '--ensure-physical-capture', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    Exec(AudioRestoreExe, '--ensure-physical', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
 
   // 2. Forcibly terminate running getsu.exe processes so binaries and DLLs can be completely removed
@@ -325,11 +323,10 @@ begin
   begin
     AudioRestoreExe := AddBackslash(AppDir) + 'drivers\vbcable\AudioRestore.exe';
 
-    // Ensure audio endpoints are physical and getsu is dead before file deletion
+    // Ensure microphone endpoint is physical and getsu is dead before file deletion
     if FileExists(AudioRestoreExe) then
     begin
       Exec(AudioRestoreExe, '--ensure-physical-capture', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-      Exec(AudioRestoreExe, '--ensure-physical', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     end;
     Exec('taskkill.exe', '/F /T /IM getsu.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Sleep(300);
@@ -413,16 +410,14 @@ begin
       begin
         Exec(AudioRestoreExe, '--restore "' + BackupFile + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
         Exec(AudioRestoreExe, '--restore-capture "' + BackupCaptureFile + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-        Exec(AudioRestoreExe, '--ensure-physical', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
         Exec(AudioRestoreExe, '--ensure-physical-capture', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
       end;
     end
     else
     begin
-      // If already installed, just ensure physical speakers & microphone remain default
+      // If already installed, ensure physical microphone remains default
       if FileExists(AudioRestoreExe) then
       begin
-        Exec(AudioRestoreExe, '--ensure-physical', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
         Exec(AudioRestoreExe, '--ensure-physical-capture', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
       end;
     end;

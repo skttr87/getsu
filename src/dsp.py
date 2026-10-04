@@ -82,17 +82,23 @@ class HighPassFilter:
         return out
 
 
+# Precomputed 480-sample Half-Cosine / Raised-Cosine (Hann) curve for zero-allocation C1 slew ramping
+_S_CURVE_TABLE_480 = (0.5 * (1.0 - np.cos(np.pi * np.linspace(0.0, 1.0, 480)))).astype(np.float32)
+
+
 class AdaptiveNoiseGate:
     """
     Adaptive Dual-Threshold (Hysteresis) Soft-Knee Noise Gate with Dynamic Onset Detection.
     Features:
     - Open Threshold: Standard threshold (0.70) rejects cooling pad fan noise during idle.
     - Dual-Key Onset Trigger: Fast-opens gate on early speech probability (0.30) if energy rises
-      above background noise floor (+7.0 dB), preserving unvoiced consonants ('s', 't', 'p', 'k', 'h').
-    - Cold-Start Gain: Jumps immediately to 0.70 on cold onset from dead silence to eliminate muffled syllables.
+      above background noise floor (+5.0 dB), preserving unvoiced consonants ('s', 't', 'p', 'k', 'h').
+    - Cold-Start Gain: Soft-awakens at 0.35 on cold onset from dead silence to eliminate muffled syllables
+      without creating harsh amplitude spikes or pops.
     - Close Threshold (Hysteresis): Lower threshold (0.45) keeps gate 100% open during soft word endings.
     - Extended Hangover (360ms): Holds open across natural speech pauses and breathing.
     - Smooth Exponential Decay (80ms): Gently fades to absolute zero silence without chopping.
+    - Raised-Cosine S-Curve: Continuous C1 derivative gain ramping completely eliminates clicks and pops.
     """
 
     def __init__(
@@ -101,11 +107,11 @@ class AdaptiveNoiseGate:
         close_threshold: float = 0.45,
         hangover_ms: float = 360.0,
         decay_ms: float = 80.0,
-        attack_ms: float = 8.0,
+        attack_ms: float = 15.0,
         frame_ms: float = 10.0,
         onset_threshold: float = 0.30,
-        onset_snr_db: float = 4.0,
-        cold_start_gain: float = 0.70,
+        onset_snr_db: float = 5.0,
+        cold_start_gain: float = 0.35,
     ):
         self.threshold = threshold
         self.close_threshold = close_threshold
@@ -134,7 +140,7 @@ class AdaptiveNoiseGate:
     ) -> tuple[np.ndarray, float]:
         """
         Applies hysteresis soft-knee gating based on RNNoise speech probability and dynamic onset SNR.
-        Sample-accurate slew-rate ramping eliminates onset clicks and harsh digital transients.
+        Sample-accurate Raised-Cosine S-curve ramping eliminates clicks, pops, and harsh transients.
         Returns the gated audio frame and current applied gain.
         """
         start_gain = self.current_gain
@@ -205,9 +211,13 @@ class AdaptiveNoiseGate:
         if end_gain >= 0.999 and start_gain >= 0.999:
             return frame, 1.0
 
-        # Transition path: Sample-accurate slew ramping prevents step clicks & harsh edges
+        # Transition path: Raised-Cosine (Hann) S-curve ramping eliminates clicks, pops, & harsh boundary steps
         if abs(end_gain - start_gain) > 0.005 and len(frame) > 0:
-            ramp = np.linspace(start_gain, end_gain, len(frame), dtype=frame.dtype)
+            if len(frame) == 480:
+                s_curve = _S_CURVE_TABLE_480
+            else:
+                s_curve = (0.5 * (1.0 - np.cos(np.pi * np.linspace(0.0, 1.0, len(frame))))).astype(frame.dtype)
+            ramp = (start_gain + (end_gain - start_gain) * s_curve).astype(frame.dtype, copy=False)
             if in_place:
                 frame *= ramp
                 return frame, end_gain

@@ -1,6 +1,6 @@
 {
     "app_name": "Getsu",
-    "version": "1.2.2",
+    "version": "1.2.3",
     "input_device_id": null,
     "input_device_name": null,
     "output_device_id": null,
@@ -13,7 +13,7 @@
     "vad_hangover_ms": 360.0,
     "vad_decay_ms": 80.0,
     "vad_onset_threshold": 0.3,
-    "vad_onset_snr_db": 7.0,
+    "vad_onset_snr_db": 4.0,
     "vad_cold_start_gain": 0.7,
     "output_gain": 1.08,
     "mic_gain": 1.0,

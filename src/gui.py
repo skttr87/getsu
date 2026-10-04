@@ -29,6 +29,7 @@ import numpy as np
 
 from src.devices import (
     get_input_devices,
+    auto_select_input_device,
     check_vbcable_status,
     auto_select_output_device,
     get_physical_output_device,
@@ -411,7 +412,8 @@ class GetsuGUI:
         elif self.selected_input_idx is not None and self.selected_input_idx in self.device_map.values():
             self.selected_input_name = self._get_selected_input_label()
         else:
-            self.selected_input_idx = self._get_windows_default_input()
+            best_input = auto_select_input_device()
+            self.selected_input_idx = best_input['index'] if (best_input and 'index' in best_input and best_input['index'] in self.device_map.values()) else self._get_windows_default_input()
             self.selected_input_name = self._get_selected_input_label()
             self.config["input_device_name"] = self.selected_input_name
             self.config["input_device_id"] = self.selected_input_idx

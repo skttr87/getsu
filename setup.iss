@@ -2,7 +2,7 @@
 ; ==============================================================
 
 #define MyAppName "Getsu"
-#define MyAppVersion "1.2.2"
+#define MyAppVersion "1.2.3"
 #define MyAppPublisher "skttr87"
 #define MyAppURL "https://github.com/skttr87/getsu"
 #define MyAppExeName "getsu.exe"
@@ -23,7 +23,7 @@ DisableDirPage=no
 DisableProgramGroupPage=yes
 PrivilegesRequired=admin
 OutputDir=dist\installer
-OutputBaseFilename=Getsu-v1.2.1-Setup
+OutputBaseFilename=Getsu-v{#MyAppVersion}-Setup
 SetupIconFile=getsu.ico
 Compression=lzma2/max
 SolidCompression=yes
@@ -33,7 +33,7 @@ CloseApplications=force
 RestartApplications=no
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-VersionInfoVersion=1.2.1.0
+VersionInfoVersion=1.2.3.0
 VersionInfoCompany=skttr87
 VersionInfoDescription=Getsu - AI Real-Time Noise Cancellation Setup
 VersionInfoCopyright=Copyright (c) 2026 Ihsan (@skttr87)
@@ -372,6 +372,7 @@ var
   DriverSetupExe: String;
   AudioRestoreExe: String;
   BackupFile: String;
+  BackupCaptureFile: String;
   NeedsInstall: Boolean;
 begin
   if CurStep = ssPostInstall then
@@ -379,6 +380,7 @@ begin
     AudioRestoreExe := ExpandConstant('{app}\drivers\vbcable\AudioRestore.exe');
     DriverSetupExe := ExpandConstant('{app}\drivers\vbcable\VBCABLE_Setup_x64.exe');
     BackupFile := ExpandConstant('{tmp}\default_audio_backup.txt');
+    BackupCaptureFile := ExpandConstant('{tmp}\default_capture_backup.txt');
 
     NeedsInstall := True;
     if FileExists(AudioRestoreExe) then
@@ -392,10 +394,11 @@ begin
     // Getsu will prompt cleanly in-app upon first launch if the driver is not yet present.
     if NeedsInstall and (not WizardSilent) and WizardIsTaskSelected('installvbcable') then
     begin
-      // 1. Backup current default playback device (Speakers / Headphones)
+      // 1. Backup current default playback device (Speakers) and capture device (Microphone)
       if FileExists(AudioRestoreExe) then
       begin
         Exec(AudioRestoreExe, '--backup "' + BackupFile + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+        Exec(AudioRestoreExe, '--backup-capture "' + BackupCaptureFile + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
       end;
 
       // 2. Install VB-Cable driver
@@ -405,10 +408,11 @@ begin
         Sleep(2500);
       end;
 
-      // 3. Immediately restore original physical speakers/headphones as default Windows output
+      // 3. Immediately restore original physical speakers/headphones & microphone
       if FileExists(AudioRestoreExe) then
       begin
         Exec(AudioRestoreExe, '--restore "' + BackupFile + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+        Exec(AudioRestoreExe, '--restore-capture "' + BackupCaptureFile + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
         Exec(AudioRestoreExe, '--ensure-physical', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
         Exec(AudioRestoreExe, '--ensure-physical-capture', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
       end;

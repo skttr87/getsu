@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.3] - 2026-10-04
+
+### Fixed & Enhanced
+- **Installer & GUI Headset Auto-Selection**: Added capture endpoint preservation (`--backup-capture` and `--restore-capture`) in `setup.iss` and `AudioRestore.cs` so driver installation never resets Windows default recording endpoint to motherboard Realtek. Connected `src/gui.py` directly to `auto_select_input_device()` so USB/Wireless gaming headsets (MPOW, HyperX, Razer, Logitech, Corsair, SteelSeries, etc.) are accurately auto-selected on first launch.
+- **Sample-Accurate Slew Ramping**: Replaced block gain stepping with per-sample linear interpolation (`np.linspace`) across the 480-sample frame during gain transitions in `AdaptiveNoiseGate`. Completely eliminates micro-square-wave transient clicks and harshness on speech onset.
+- **Enhanced Consonant Sensitivity (`onset_snr_db = 4.0 dB`)**: Optimized the energy rise threshold over ambient room noise from 7.0 dB to 4.0 dB (2x more sensitive to speech power), enabling gentle whispering and soft unvoiced consonants (*"h"*, *"s"*, *"p"*, *"t"*) to wake up the gate instantly without being muffled.
+
+---
+
 ## [1.2.2] - 2026-10-04
 
 ### Added

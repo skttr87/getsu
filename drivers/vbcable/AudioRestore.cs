@@ -329,9 +329,57 @@ namespace AudioRestoreTool
 
                 return EnsurePhysical(enumerator);
             }
+            else if (args[0] == "--backup-capture" && args.Length > 1)
+            {
+                try
+                {
+                    IMMDevice dev;
+                    if ((enumerator.GetDefaultAudioEndpoint(EDataFlow.eCapture, ERole.eConsole, out dev) == 0 && dev != null) ||
+                        (enumerator.GetDefaultAudioEndpoint(EDataFlow.eCapture, ERole.eCommunications, out dev) == 0 && dev != null))
+                    {
+                        string id;
+                        dev.GetId(out id);
+                        string name = GetFriendlyName(dev);
+                        if (!name.ToLower().Contains("cable") && !name.ToLower().Contains("vb-audio"))
+                        {
+                            File.WriteAllText(args[1], id);
+                            Console.WriteLine("Backed up physical default capture: " + name + " (" + id + ")");
+                            return 0;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("Capture backup failed: " + ex.Message);
+                    return 1;
+                }
+            }
+            else if (args[0] == "--restore-capture" && args.Length > 1)
+            {
+                string id = null;
+                if (File.Exists(args[1]))
+                {
+                    id = File.ReadAllText(args[1]).Trim();
+                }
+
+                if (!string.IsNullOrEmpty(id))
+                {
+                    if (SetAsDefault(id))
+                    {
+                        Console.WriteLine("Successfully restored default capture endpoint to: " + id);
+                        return 0;
+                    }
+                }
+
+                return EnsurePhysicalCapture(enumerator);
+            }
             else if (args[0] == "--ensure-physical")
             {
                 return EnsurePhysical(enumerator);
+            }
+            else if (args[0] == "--ensure-physical-capture")
+            {
+                return EnsurePhysicalCapture(enumerator);
             }
 
             return 0;
@@ -361,6 +409,34 @@ namespace AudioRestoreTool
                 {
                     int count;
                     col.GetCount(out count);
+                    // Pass 1: Prioritize external USB / Wireless Headsets & Microphones
+                    for (int i = 0; i < count; i++)
+                    {
+                        IMMDevice dev;
+                        if (col.Item(i, out dev) == 0 && dev != null)
+                        {
+                            string name = GetFriendlyName(dev);
+                            string nameLower = name.ToLower();
+                            if (!nameLower.Contains("cable") && !nameLower.Contains("vb-audio"))
+                            {
+                                if (nameLower.Contains("headset") || nameLower.Contains("usb") || nameLower.Contains("wireless") ||
+                                    nameLower.Contains("mpow") || nameLower.Contains("hyperx") || nameLower.Contains("razer") ||
+                                    nameLower.Contains("logitech") || nameLower.Contains("corsair") || nameLower.Contains("steelseries") ||
+                                    nameLower.Contains("yeti") || nameLower.Contains("fifine") || nameLower.Contains("elgato") ||
+                                    nameLower.Contains("rode") || nameLower.Contains("sennheiser") || nameLower.Contains("audio-technica"))
+                                {
+                                    string id;
+                                    dev.GetId(out id);
+                                    if (SetAsDefault(id))
+                                    {
+                                        Console.WriteLine("Set default capture to physical headset/external mic: " + name);
+                                        return 0;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Pass 2: Fallback to any physical mic (e.g. onboard Realtek)
                     for (int i = 0; i < count; i++)
                     {
                         IMMDevice dev;

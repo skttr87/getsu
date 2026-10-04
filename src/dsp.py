@@ -104,7 +104,7 @@ class AdaptiveNoiseGate:
         attack_ms: float = 8.0,
         frame_ms: float = 10.0,
         onset_threshold: float = 0.30,
-        onset_snr_db: float = 7.0,
+        onset_snr_db: float = 4.0,
         cold_start_gain: float = 0.70,
     ):
         self.threshold = threshold
@@ -134,9 +134,11 @@ class AdaptiveNoiseGate:
     ) -> tuple[np.ndarray, float]:
         """
         Applies hysteresis soft-knee gating based on RNNoise speech probability and dynamic onset SNR.
-        Smooth exponential attack and cold-start gain eliminates onset clipping and muffled speech.
+        Sample-accurate slew-rate ramping eliminates onset clicks and harsh digital transients.
         Returns the gated audio frame and current applied gain.
         """
+        start_gain = self.current_gain
+
         if not self.is_open:
             # Ambient noise floor tracking during silence
             if input_rms_db is not None and -100.0 < input_rms_db < -20.0:
@@ -187,9 +189,10 @@ class AdaptiveNoiseGate:
             if self.current_gain < 0.001:
                 self.current_gain = 0.0
 
-        if self.current_gain >= 0.999:
-            return frame, 1.0
-        elif self.current_gain <= 0.0001:
+        end_gain = self.current_gain
+
+        # Fast path 1: Steady silence (gain is 0.0)
+        if end_gain <= 0.0001 and start_gain <= 0.0001:
             if in_place:
                 frame.fill(0.0)
                 return frame, 0.0
@@ -197,12 +200,25 @@ class AdaptiveNoiseGate:
                 if self._zero_buffer is None or len(self._zero_buffer) != len(frame):
                     self._zero_buffer = np.zeros(len(frame), dtype=frame.dtype)
                 return self._zero_buffer, 0.0
+
+        # Fast path 2: Steady speech (gain is 1.0)
+        if end_gain >= 0.999 and start_gain >= 0.999:
+            return frame, 1.0
+
+        # Transition path: Sample-accurate slew ramping prevents step clicks & harsh edges
+        if abs(end_gain - start_gain) > 0.005 and len(frame) > 0:
+            ramp = np.linspace(start_gain, end_gain, len(frame), dtype=frame.dtype)
+            if in_place:
+                frame *= ramp
+                return frame, end_gain
+            else:
+                return (frame * ramp).astype(frame.dtype), end_gain
         else:
             if in_place:
-                frame *= self.current_gain
-                return frame, self.current_gain
+                frame *= end_gain
+                return frame, end_gain
             else:
-                return (frame * self.current_gain).astype(frame.dtype), self.current_gain
+                return (frame * end_gain).astype(frame.dtype), end_gain
 
 
 def calculate_levels(frame: np.ndarray):

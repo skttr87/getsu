@@ -24,7 +24,7 @@ class AudioEngine:
         output_device: int,
         denoise_enabled: bool = True,
         high_pass_enabled: bool = True,
-        vad_threshold: float = 0.75,
+        vad_threshold: float = 0.70,
         vad_close_threshold: float = 0.45,
         vad_hangover_ms: float = 180.0,
         mic_gain: float = 1.0,
@@ -201,7 +201,23 @@ class AudioEngine:
                 in_host = apis[in_api_idx]['name'] if (in_api_idx is not None and isinstance(apis, (list, tuple)) and in_api_idx < len(apis)) else ''
                 out_host = apis[out_api_idx]['name'] if (out_api_idx is not None and isinstance(apis, (list, tuple)) and out_api_idx < len(apis)) else ''
                 
-                if (in_host and out_host and in_host != out_host) or 'WDM-KS' in in_host or 'WDM-KS' in out_host:
+                # 1. Input-side WDM-KS defense: realign to matching WASAPI device
+                if 'WDM-KS' in in_host.upper():
+                    from src.devices import get_input_devices
+                    wasapi_mics = get_input_devices()
+                    if wasapi_mics:
+                        cur_name = in_dev_info.get('name', '').lower()
+                        matched_mic = next((m for m in wasapi_mics if m['name'].lower() in cur_name or cur_name in m['name'].lower()), wasapi_mics[0])
+                        if matched_mic['index'] != self.input_device:
+                            print(f"[STREAM] Realigning WDM-KS input device from [{self.input_device}] to WASAPI [{matched_mic['index']}] {matched_mic['name']}")
+                            self.input_device = matched_mic['index']
+                            in_dev_info = sd.query_devices(self.input_device)
+                            self.in_channels = min(2, max(1, in_dev_info['max_input_channels']))
+                            in_api_idx = in_dev_info.get('hostapi') if isinstance(in_dev_info, dict) else None
+                            in_host = apis[in_api_idx]['name'] if (in_api_idx is not None and isinstance(apis, (list, tuple)) and in_api_idx < len(apis)) else ''
+
+                # 2. Output-side alignment: realign output to matching CABLE Input
+                if (in_host and out_host and in_host != out_host) or 'WDM-KS' in out_host.upper():
                     from src.devices import find_matching_cable_input
                     matched = find_matching_cable_input(self.input_device)
                     if matched and matched['index'] != self.output_device:
@@ -243,7 +259,19 @@ class AudioEngine:
                     # If WDM-KS or Host mismatch failed, attempt emergency realign on retry
                     if attempt < 2 and any(k in str(e) for k in ["WdmSyncIoctl", "Illegal combination", "PaErrorCode -9999", "PaErrorCode -9993"]):
                         try:
-                            from src.devices import find_matching_cable_input
+                            from src.devices import get_input_devices, find_matching_cable_input
+                            # Emergency realign input to safe WASAPI mic if WDM-KS was involved
+                            if "WdmSyncIoctl" in str(e) or "WDM-KS" in str(e):
+                                wasapi_mics = get_input_devices()
+                                if wasapi_mics:
+                                    cur_name = in_dev_info.get('name', '').lower()
+                                    matched_mic = next((m for m in wasapi_mics if m['name'].lower() in cur_name or cur_name in m['name'].lower()), wasapi_mics[0])
+                                    if matched_mic['index'] != self.input_device:
+                                        print(f"[STREAM] Emergency realigning input device to [{matched_mic['index']}] {matched_mic['name']}")
+                                        self.input_device = matched_mic['index']
+                                        in_dev_info = sd.query_devices(self.input_device)
+                                        self.in_channels = min(2, max(1, in_dev_info['max_input_channels']))
+
                             matched = find_matching_cable_input(self.input_device)
                             if matched and matched['index'] != self.output_device:
                                 print(f"[STREAM] Emergency realigning output device to [{matched['index']}] {matched['name']}")
@@ -402,7 +430,7 @@ def create_engine_from_config(
         default_hangover = 220.0
         base_gain = 1.2
     else:
-        default_th = 0.75
+        default_th = 0.70
         default_hangover = 180.0
         base_gain = 1.0
 
@@ -411,7 +439,7 @@ def create_engine_from_config(
     if is_vad_customized and cfg_th is not None:
         vad_threshold = cfg_th
     else:
-        vad_threshold = default_th if (cfg_th is None or cfg_th == 0.75) else cfg_th
+        vad_threshold = default_th if (cfg_th is None or cfg_th in (0.75, 0.70)) else cfg_th
 
     cfg_hangover = config.get("vad_hangover_ms")
     vad_hangover_ms = default_hangover if (cfg_hangover is None or (not is_vad_customized and cfg_hangover == 180.0)) else cfg_hangover

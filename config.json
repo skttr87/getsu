@@ -8,7 +8,7 @@
     "denoise_enabled": true,
     "high_pass_filter": true,
     "hpf_cutoff_hz": 80.0,
-    "vad_threshold": 0.75,
+    "vad_threshold": 0.70,
     "vad_close_threshold": 0.45,
     "vad_hangover_ms": 180.0,
     "output_gain": 1.08,

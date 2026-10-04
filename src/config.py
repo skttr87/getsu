@@ -17,7 +17,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "denoise_enabled": True,
     "high_pass_filter": True,       # 80Hz rumble filter (crucial for laptop cooling pad)
     "hpf_cutoff_hz": 80.0,          # High-pass filter cutoff frequency in Hz
-    "vad_threshold": 0.75,          # Tuned for cooling pad noise rejection (0.0 to 1.0)
+    "vad_threshold": 0.70,          # Tuned for cooling pad noise rejection (0.0 to 1.0)
     "vad_close_threshold": 0.45,    # Hysteresis close threshold preserving unvoiced consonants
     "vad_hangover_ms": 180.0,       # Hold time to avoid cutting word endings
     "output_gain": 1.08,            # Post-RNNoise make-up gain (+0.7 dB)

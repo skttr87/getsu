@@ -863,7 +863,7 @@ class GetsuGUI:
             is_laptop = any(k in dev_name for k in ["realtek", "array", "built-in", "internal"])
             base_gain = 1.2 if is_laptop else 1.0
             test_gain = self.config.get("mic_gain", 1.0) * base_gain * boost_mult
-            vad_th = float(self.config.get("vad_threshold", 0.75))
+            vad_th = float(self.config.get("vad_threshold", 0.70))
 
             rn = RNNoise()
             hpf = HighPassFilter(cutoff_hz=80.0, sample_rate=float(SAMPLE_RATE))
@@ -872,7 +872,7 @@ class GetsuGUI:
                 close_threshold=0.45,
                 hangover_ms=self.config.get("vad_hangover_ms", 180.0),
                 decay_ms=40.0,
-                attack_ms=15.0,
+                attack_ms=8.0,
                 frame_ms=10.0,
             )
 
@@ -1535,7 +1535,7 @@ class GetsuGUI:
             # --- VOICE SENSITIVITY THRESHOLD SLIDER ---
             dpg.add_text("Voice Sensitivity Threshold:", color=[180, 195, 215])
             dpg.add_slider_float(
-                default_value=float(self.config.get("vad_threshold", 0.75)),
+                default_value=float(self.config.get("vad_threshold", 0.70)),
                 min_value=0.40,
                 max_value=0.90,
                 format="%.2f",

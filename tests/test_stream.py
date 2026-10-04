@@ -59,7 +59,7 @@ class TestAudioEngine(unittest.TestCase):
         config["mic_boost_db"] = 0
 
         engine = create_engine_from_config(config, input_device_id=0, output_device_id=1, is_laptop_mic=False)
-        self.assertEqual(engine.vad_threshold, 0.75)
+        self.assertEqual(engine.vad_threshold, 0.70)
         self.assertEqual(engine.vad_hangover_ms, 180.0)
         self.assertEqual(engine.mic_gain, 1.0)
 

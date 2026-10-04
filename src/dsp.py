@@ -86,7 +86,7 @@ class AdaptiveNoiseGate:
     """
     Adaptive Dual-Threshold (Hysteresis) Soft-Knee Noise Gate.
     Features:
-    - Open Threshold: Higher threshold (0.75) prevents cooling pad fan noise from opening mic.
+    - Open Threshold: Optimized threshold (0.70) prevents cooling pad fan noise while opening instantly on speech onset.
     - Close Threshold (Hysteresis): Lower threshold (0.45) keeps gate 100% open during soft
       word endings and unvoiced consonants ('s', 't', 'p', 'th', 'd').
     - Extended Hangover (180ms): Ensures vocal decay finishes naturally without fading early.
@@ -95,11 +95,11 @@ class AdaptiveNoiseGate:
 
     def __init__(
         self,
-        threshold: float = 0.75,
+        threshold: float = 0.70,
         close_threshold: float = 0.45,
         hangover_ms: float = 180.0,
         decay_ms: float = 40.0,
-        attack_ms: float = 15.0,
+        attack_ms: float = 8.0,
         frame_ms: float = 10.0,
     ):
         self.threshold = threshold

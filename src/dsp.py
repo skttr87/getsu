@@ -110,7 +110,7 @@ class AdaptiveNoiseGate:
         close_threshold: float = 0.45,
         hangover_ms: float = 360.0,
         decay_ms: float = 80.0,
-        attack_ms: float = 15.0,
+        attack_ms: float = 22.0,
         frame_ms: float = 10.0,
         onset_threshold: float = 0.30,
         onset_snr_db: float = 8.0,

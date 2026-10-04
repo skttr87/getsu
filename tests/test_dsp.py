@@ -106,7 +106,7 @@ class TestDSP(unittest.TestCase):
 
     def test_adaptive_noise_gate_floor_gain_continuity(self):
         """Verify floor_gain holds gain at minimum non-zero level and smoothly attacks without clicks."""
-        floor = 0.04
+        floor = 0.06
         gate = AdaptiveNoiseGate(
             threshold=0.70,
             close_threshold=0.45,
@@ -130,7 +130,7 @@ class TestDSP(unittest.TestCase):
         self.assertGreater(gain, floor)
 
         # 3. Hold open
-        for _ in range(10):
+        for _ in range(15):
             out, gain = gate.process(frame, speech_prob=0.95)
         self.assertAlmostEqual(gain, 1.0, places=2)
 
@@ -211,7 +211,7 @@ class TestDSP(unittest.TestCase):
         gate = AdaptiveNoiseGate()
         self.assertEqual(gate.cold_start_gain, 0.35)
         self.assertEqual(gate.onset_snr_db, 8.0)
-        self.assertEqual(gate.attack_rate, 1.0 - np.exp(-10.0 / 15.0))
+        self.assertEqual(gate.attack_rate, 1.0 - np.exp(-10.0 / 22.0))
 
         # Transition frame from silence to open
         frame = np.ones(FRAME_SIZE, dtype=np.float32)
@@ -242,8 +242,8 @@ class TestDSP(unittest.TestCase):
         # Frame 3: Continuing voice
         f_speech2 = np.ones(FRAME_SIZE, dtype=np.float32) * 0.75
         out3, g3 = gate.process(f_speech2.copy(), speech_prob=0.95, input_rms_db=-20.0)
-        # Out3 is the actual first speech frame, delivered at high gain (> 0.80)
-        self.assertGreaterEqual(g3, 0.80)
+        # Out3 is the actual first speech frame, delivered at smooth high gain (>= 0.70)
+        self.assertGreaterEqual(g3, 0.70)
         self.assertAlmostEqual(float(np.max(out3)), 0.75 * g3, places=2)
 
 

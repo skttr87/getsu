@@ -15,7 +15,7 @@
     "vad_onset_threshold": 0.3,
     "vad_onset_snr_db": 8.0,
     "vad_cold_start_gain": 0.0,
-    "vad_floor_gain": 0.04,
+    "vad_floor_gain": 0.06,
     "output_gain": 1.08,
     "mic_gain": 1.0,
     "mic_boost_db": 0,

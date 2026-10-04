@@ -865,13 +865,13 @@ class GetsuGUI:
                 close_threshold=self.config.get("vad_close_threshold", 0.45),
                 hangover_ms=self.config.get("vad_hangover_ms", 360.0),
                 decay_ms=self.config.get("vad_decay_ms", 80.0),
-                attack_ms=15.0,
+                attack_ms=22.0,
                 frame_ms=10.0,
                 onset_threshold=self.config.get("vad_onset_threshold", 0.30),
                 onset_snr_db=self.config.get("vad_onset_snr_db", 8.0),
                 cold_start_gain=self.config.get("vad_cold_start_gain", 0.35),
                 lookahead=True,
-                floor_gain=self.config.get("vad_floor_gain", 0.04),
+                floor_gain=self.config.get("vad_floor_gain", 0.06),
             )
 
             # Phase 1: Record 11 seconds (speakers MUTED, RAM only)

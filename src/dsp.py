@@ -110,8 +110,9 @@ class AdaptiveNoiseGate:
         attack_ms: float = 15.0,
         frame_ms: float = 10.0,
         onset_threshold: float = 0.30,
-        onset_snr_db: float = 5.0,
+        onset_snr_db: float = 6.0,
         cold_start_gain: float = 0.35,
+        lookahead: bool = False,
     ):
         self.threshold = threshold
         self.close_threshold = close_threshold
@@ -125,11 +126,14 @@ class AdaptiveNoiseGate:
         self.onset_snr_db = onset_snr_db
         self.cold_start_gain = cold_start_gain
         self.noise_floor_db = -60.0
+        self.lookahead = lookahead
 
         self.is_open = False
         self.current_gain = 0.0
         self.frames_since_speech = self.hangover_frames + 10
         self._zero_buffer: np.ndarray | None = None
+        self._delay_buffer: np.ndarray | None = None
+        self._work_buffer: np.ndarray | None = None
 
     def process(
         self,
@@ -141,8 +145,24 @@ class AdaptiveNoiseGate:
         """
         Applies hysteresis soft-knee gating based on RNNoise speech probability and dynamic onset SNR.
         Sample-accurate Raised-Cosine S-curve ramping eliminates clicks, pops, and harsh transients.
+        Optional 1-frame (10ms) pre-roll lookahead buffer enables 100% natural, unclipped voice onset.
         Returns the gated audio frame and current applied gain.
         """
+        if self.lookahead:
+            n = len(frame)
+            if self._delay_buffer is None or len(self._delay_buffer) != n:
+                self._delay_buffer = np.zeros(n, dtype=frame.dtype)
+            if self._work_buffer is None or len(self._work_buffer) != n:
+                self._work_buffer = np.zeros(n, dtype=frame.dtype)
+
+            # Pre-roll: copy delayed frame into work buffer
+            np.copyto(self._work_buffer, self._delay_buffer)
+            # Store current incoming frame into delay buffer for next cycle
+            np.copyto(self._delay_buffer, frame)
+            target_frame = self._work_buffer
+        else:
+            target_frame = frame
+
         start_gain = self.current_gain
 
         if not self.is_open:
@@ -199,7 +219,13 @@ class AdaptiveNoiseGate:
 
         # Fast path 1: Steady silence (gain is 0.0)
         if end_gain <= 0.0001 and start_gain <= 0.0001:
-            if in_place:
+            if self.lookahead:
+                target_frame.fill(0.0)
+                if in_place:
+                    np.copyto(frame, target_frame)
+                    return frame, 0.0
+                return target_frame, 0.0
+            elif in_place:
                 frame.fill(0.0)
                 return frame, 0.0
             else:
@@ -209,26 +235,34 @@ class AdaptiveNoiseGate:
 
         # Fast path 2: Steady speech (gain is 1.0)
         if end_gain >= 0.999 and start_gain >= 0.999:
+            if self.lookahead:
+                if in_place:
+                    np.copyto(frame, target_frame)
+                    return frame, 1.0
+                return target_frame, 1.0
             return frame, 1.0
 
         # Transition path: Raised-Cosine (Hann) S-curve ramping eliminates clicks, pops, & harsh boundary steps
-        if abs(end_gain - start_gain) > 0.005 and len(frame) > 0:
-            if len(frame) == 480:
+        if abs(end_gain - start_gain) > 0.005 and len(target_frame) > 0:
+            if len(target_frame) == 480:
                 s_curve = _S_CURVE_TABLE_480
             else:
-                s_curve = (0.5 * (1.0 - np.cos(np.pi * np.linspace(0.0, 1.0, len(frame))))).astype(frame.dtype)
-            ramp = (start_gain + (end_gain - start_gain) * s_curve).astype(frame.dtype, copy=False)
+                s_curve = (0.5 * (1.0 - np.cos(np.pi * np.linspace(0.0, 1.0, len(target_frame))))).astype(target_frame.dtype)
+            ramp = (start_gain + (end_gain - start_gain) * s_curve).astype(target_frame.dtype, copy=False)
+            target_frame *= ramp
+        else:
+            target_frame *= end_gain
+
+        if self.lookahead:
             if in_place:
-                frame *= ramp
+                np.copyto(frame, target_frame)
                 return frame, end_gain
-            else:
-                return (frame * ramp).astype(frame.dtype), end_gain
+            return target_frame, end_gain
         else:
             if in_place:
-                frame *= end_gain
                 return frame, end_gain
             else:
-                return (frame * end_gain).astype(frame.dtype), end_gain
+                return target_frame.copy(), end_gain
 
 
 def calculate_levels(frame: np.ndarray):

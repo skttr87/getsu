@@ -328,21 +328,49 @@ def auto_select_output_device() -> Tuple[Dict, str]:
 
 def get_physical_output_device() -> Optional[Dict]:
     """
-    Returns the user's primary physical playback device (headphones/speakers),
+    Returns the user's active physical playback device (headphones/speakers),
     strictly excluding virtual cables (CABLE Input, VoiceMeeter, etc.).
+    Priority 1: Windows active default WASAPI playback endpoint.
+    Priority 2: Physical outputs matching Windows default device name.
+    Priority 3: Dedicated gaming headsets/headphones over onboard motherboard speakers.
     """
     outputs = get_output_devices()
     physical_outputs = [d for d in outputs if not is_virtual_input_device(d['name'])]
     if not physical_outputs:
         return None
-    default_out_idx = sd.default.device[1]
-    for d in physical_outputs:
-        if d['index'] == default_out_idx:
-            return d
+
+    # Priority 1: Windows active default WASAPI playback endpoint
+    try:
+        hostapis = sd.query_hostapis()
+        for api in hostapis:
+            if 'WASAPI' in api.get('name', ''):
+                def_out = api.get('default_output_device', -1)
+                if def_out >= 0:
+                    for d in physical_outputs:
+                        if d['index'] == def_out:
+                            return d
+    except Exception:
+        pass
+
+    # Priority 2: Match by exact default name in physical outputs
+    try:
+        def_out_idx = sd.default.device[1]
+        if def_out_idx >= 0:
+            def_dev = sd.query_devices(def_out_idx)
+            def_name = def_dev.get('name', '').lower()
+            for d in physical_outputs:
+                if d['name'].lower() == def_name or d['index'] == def_out_idx:
+                    return d
+    except Exception:
+        pass
+
+    # Priority 3: Prioritize headphones/headsets over onboard speakers
+    headphone_keywords = ["headset", "headphones", "mpow", "wireless", "usb", "hyperx", "razer", "logitech", "corsair", "steelseries", "jbl", "sennheiser"]
     for d in physical_outputs:
         name_lower = d['name'].lower()
-        if any(k in name_lower for k in OUTPUT_HEADPHONE_KEYWORDS):
+        if any(k in name_lower for k in headphone_keywords):
             return d
+
     return physical_outputs[0]
 
 

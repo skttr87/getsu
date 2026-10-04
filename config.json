@@ -13,7 +13,7 @@
     "vad_hangover_ms": 360.0,
     "vad_decay_ms": 80.0,
     "vad_onset_threshold": 0.3,
-    "vad_onset_snr_db": 5.0,
+    "vad_onset_snr_db": 6.0,
     "vad_cold_start_gain": 0.35,
     "output_gain": 1.08,
     "mic_gain": 1.0,

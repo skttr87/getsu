@@ -22,7 +22,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "vad_hangover_ms": 360.0,       # Extended hold time across natural pauses and breaths
     "vad_decay_ms": 80.0,           # Smooth natural fade to pure silence
     "vad_onset_threshold": 0.30,    # Low-threshold trigger for initial unvoiced consonants
-    "vad_onset_snr_db": 5.0,        # Required dB rise above noise floor for fast onset
+    "vad_onset_snr_db": 6.0,        # Required dB rise above noise floor for fast onset
     "vad_cold_start_gain": 0.35,    # Initial linear gain jump from dead silence
     "output_gain": 1.08,            # Post-RNNoise make-up gain (+0.7 dB)
     "mic_gain": 1.0,                # Input multiplier
@@ -95,12 +95,17 @@ def load_config() -> Dict[str, Any]:
         merged.update(data)
 
         # Automatic Migration: Upgrade legacy configs to v1.2.4 smooth gate parameters
+        migrated = False
+        if merged.get("vad_cold_start_gain") == 0.70:
+            merged["vad_cold_start_gain"] = 0.35
+            migrated = True
+        if merged.get("vad_onset_snr_db") in (4.0, 5.0):
+            merged["vad_onset_snr_db"] = 6.0
+            migrated = True
         if data.get("version") != "1.2.4":
-            if merged.get("vad_cold_start_gain") == 0.70:
-                merged["vad_cold_start_gain"] = 0.35
-            if merged.get("vad_onset_snr_db") == 4.0:
-                merged["vad_onset_snr_db"] = 5.0
             merged["version"] = "1.2.4"
+            migrated = True
+        if migrated:
             save_config(merged)
 
         return merged

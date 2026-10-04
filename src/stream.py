@@ -29,7 +29,7 @@ class AudioEngine:
         vad_hangover_ms: float = 360.0,
         vad_decay_ms: float = 80.0,
         vad_onset_threshold: float = 0.30,
-        vad_onset_snr_db: float = 5.0,
+        vad_onset_snr_db: float = 6.0,
         vad_cold_start_gain: float = 0.35,
         mic_gain: float = 1.0,
         output_gain: float = 1.08,
@@ -72,11 +72,12 @@ class AudioEngine:
             close_threshold=self.vad_close_threshold,
             hangover_ms=self.vad_hangover_ms,
             decay_ms=self.vad_decay_ms,
-            attack_ms=8.0,
+            attack_ms=15.0,
             frame_ms=10.0,
             onset_threshold=self.vad_onset_threshold,
             onset_snr_db=self.vad_onset_snr_db,
             cold_start_gain=self.vad_cold_start_gain,
+            lookahead=True,
         )
 
         # Device Channel Configuration
@@ -469,7 +470,7 @@ def create_engine_from_config(
         vad_hangover_ms=vad_hangover_ms,
         vad_decay_ms=config.get("vad_decay_ms", 80.0),
         vad_onset_threshold=config.get("vad_onset_threshold", 0.30),
-        vad_onset_snr_db=config.get("vad_onset_snr_db", 5.0),
+        vad_onset_snr_db=config.get("vad_onset_snr_db", 6.0),
         vad_cold_start_gain=config.get("vad_cold_start_gain", 0.35),
         mic_gain=mic_gain,
         output_gain=config.get("output_gain", 1.08),

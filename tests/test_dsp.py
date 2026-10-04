@@ -157,7 +157,7 @@ class TestDSP(unittest.TestCase):
         """Verify noise gate uses smooth Raised-Cosine (Hann) S-curve ramping without step discontinuities."""
         gate = AdaptiveNoiseGate()
         self.assertEqual(gate.cold_start_gain, 0.35)
-        self.assertEqual(gate.onset_snr_db, 5.0)
+        self.assertEqual(gate.onset_snr_db, 6.0)
         self.assertEqual(gate.attack_rate, 1.0 - np.exp(-10.0 / 15.0))
 
         # Transition frame from silence to open
@@ -170,6 +170,28 @@ class TestDSP(unittest.TestCase):
         slope_start = out_frame[1] - out_frame[0]
         slope_mid = out_frame[240] - out_frame[239]
         self.assertLess(slope_start, slope_mid, "S-curve ramp must have gentler slope at onset than at midpoint")
+
+    def test_adaptive_noise_gate_lookahead_natural_onset(self):
+        """Verify 1-frame pre-roll lookahead allows gate to ramp open on silence, passing speech at full gain."""
+        gate = AdaptiveNoiseGate(lookahead=True)
+        # Frame 1: Pure silence
+        f_silence = np.zeros(FRAME_SIZE, dtype=np.float32)
+        out1, g1 = gate.process(f_silence.copy(), speech_prob=0.0)
+        self.assertEqual(g1, 0.0)
+        np.testing.assert_array_equal(out1, np.zeros(FRAME_SIZE, dtype=np.float32))
+
+        # Frame 2: Loud voice suddenly begins
+        f_speech = np.ones(FRAME_SIZE, dtype=np.float32) * 0.75
+        out2, g2 = gate.process(f_speech.copy(), speech_prob=0.95, input_rms_db=-20.0)
+        # Out2 is the pre-roll silence buffer ramping open
+        self.assertGreater(g2, 0.0)
+
+        # Frame 3: Continuing voice
+        f_speech2 = np.ones(FRAME_SIZE, dtype=np.float32) * 0.75
+        out3, g3 = gate.process(f_speech2.copy(), speech_prob=0.95, input_rms_db=-20.0)
+        # Out3 is the actual first speech frame, delivered at high gain (> 0.80)
+        self.assertGreaterEqual(g3, 0.80)
+        self.assertAlmostEqual(float(np.max(out3)), 0.75 * g3, places=2)
 
 
 if __name__ == "__main__":

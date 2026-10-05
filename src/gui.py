@@ -618,6 +618,8 @@ class GetsuGUI:
             return "Could not start microphone. Ensure it is plugged in and not in exclusive use by another app."
         if "-9993" in err_str or "Illegal combination" in err_str:
             return "Audio device format mismatch. Re-selecting your microphone in the list usually fixes this."
+        if "-9997" in err_str or "sample rate" in err_str.lower():
+            return "Microphone sample rate format mismatch. Please re-select your microphone."
         if any(k in err_str.lower() for k in ["busy", "access denied", "device unavailable", "in use"]):
             return "Microphone is in exclusive use by another app or disconnected."
         clean_err = err_str.replace("Error starting stream: ", "").strip()
@@ -916,13 +918,25 @@ class GetsuGUI:
             chunk_size = FRAME_SIZE
             processed_chunks = []
 
+            # Query host API for WASAPI auto_convert sample rate resiliency (e.g. 16kHz Bluetooth mics)
+            in_extra_settings = None
+            try:
+                raw_apis = sd.query_hostapis()
+                in_api_idx = in_info.get('hostapi')
+                if in_api_idx is not None and isinstance(raw_apis, (list, tuple)) and in_api_idx < len(raw_apis):
+                    if 'WASAPI' in raw_apis[in_api_idx]['name'].upper():
+                        in_extra_settings = sd.WasapiSettings(auto_convert=True)
+            except Exception:
+                in_extra_settings = None
+
             print(f"[VOICE TEST] Phase 1: Recording 11s from [{safe_input_idx}] {in_info['name']}...")
             with sd.InputStream(
                 samplerate=SAMPLE_RATE,
                 blocksize=chunk_size,
                 device=safe_input_idx,
                 channels=in_channels,
-                dtype='float32'
+                dtype='float32',
+                extra_settings=in_extra_settings,
             ) as stream:
                 for chunk_idx in range(total_chunks):
                     if not self._app_running or self._cancel_voice_test:
@@ -970,7 +984,7 @@ class GetsuGUI:
 
             # Phase 2: Playback 11s through primary physical speakers/headphones
             out_dev = get_physical_output_device()
-            out_idx = out_dev['index'] if out_dev else sd.default.device[1]
+            out_idx = out_dev['index'] if (out_dev and isinstance(out_dev, dict)) else (out_dev if isinstance(out_dev, int) else sd.default.device[1])
             try:
                 raw_devs = sd.query_devices()
                 raw_apis = sd.query_hostapis()
@@ -981,13 +995,23 @@ class GetsuGUI:
             out_info = sd.query_devices(safe_out_idx)
             out_channels = min(2, max(1, out_info['max_output_channels']))
 
+            out_extra_settings = None
+            try:
+                raw_apis = sd.query_hostapis()
+                out_api_idx = out_info.get('hostapi')
+                if out_api_idx is not None and isinstance(raw_apis, (list, tuple)) and out_api_idx < len(raw_apis):
+                    if 'WASAPI' in raw_apis[out_api_idx]['name'].upper():
+                        out_extra_settings = sd.WasapiSettings(auto_convert=True)
+            except Exception:
+                out_extra_settings = None
+
             print(f"[VOICE TEST] Phase 2: Playing back 11s to [{safe_out_idx}] {out_info['name']}...")
             if out_channels == 2:
                 playback_data = np.column_stack((full_audio, full_audio))
             else:
                 playback_data = full_audio
 
-            sd.play(playback_data, samplerate=SAMPLE_RATE, device=safe_out_idx)
+            sd.play(playback_data, samplerate=SAMPLE_RATE, device=safe_out_idx, extra_settings=out_extra_settings)
 
             # Countdown playback (11s)
             for sec in range(11, 0, -1):
@@ -1006,9 +1030,6 @@ class GetsuGUI:
             print("[VOICE TEST] Phase 3: RAM buffer purged. Zero disk clutter.")
             self.set_status_pill("● Voice test complete • Clean audio verified", [45, 215, 115])
 
-        except sd.PortAudioError as pae:
-            print(f"[VOICE TEST] Microphone access error: {pae}")
-            self.set_status_pill("▲ Microphone busy or disconnected.", [235, 75, 75])
         except Exception as e:
             print(f"[VOICE TEST] Error during voice preview: {e}")
             self.set_status_pill(f"▲ {self._format_audio_error(e)}", [235, 75, 75])

@@ -227,3 +227,4 @@ def resolve_single(
         f"No usable replacement for '{dev['name']}' found outside WDM-KS. "
         "Check that the device is plugged in and enabled in Windows Sound settings."
     )
+

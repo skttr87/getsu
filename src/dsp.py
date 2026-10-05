@@ -173,6 +173,8 @@ class AdaptiveNoiseGate:
         cooldown_ms: float = 150.0,
         flutter_cooldown_ms: float = 300.0,
         calibrate_startup: bool = True,
+        sustain_snr_db: float = 6.0,
+        sustain_threshold: float = 0.25,
     ):
         self.threshold = threshold
         self.close_threshold = close_threshold
@@ -184,6 +186,8 @@ class AdaptiveNoiseGate:
 
         self.onset_threshold = onset_threshold
         self.onset_snr_db = onset_snr_db
+        self.sustain_snr_db = sustain_snr_db
+        self.sustain_threshold = sustain_threshold
         self.cold_start_gain = cold_start_gain
         self.noise_floor_db = self.FLOOR_INIT_DB
         self.lookahead = lookahead
@@ -331,11 +335,13 @@ class AdaptiveNoiseGate:
             # Dual-Key Trigger evaluation:
             # 1. Standard high-confidence VAD trigger
             # 2. Fast onset trigger: energy rise >= onset_snr_db above noise floor with early speech cue
-            # (Inhibited during post-close cooldown to eliminate background chatter decay aborts/clicks)
+            # (Inhibited during post-close cooldown to eliminate background chatter decay aborts/clicks,
+            #  except for high-energy near-field speech SNR >= onset_snr_db + 4.0 dB which breaks through immediately)
             is_onset = False
-            if input_rms_db is not None and not in_cooldown:
+            if input_rms_db is not None:
                 snr = input_rms_db - self.noise_floor_db
-                if snr >= self.onset_snr_db and speech_prob >= self.onset_threshold:
+                can_trigger_onset = (not in_cooldown) or (snr >= self.onset_snr_db + 8.0 and speech_prob >= 0.40)
+                if can_trigger_onset and snr >= self.onset_snr_db and speech_prob >= self.onset_threshold:
                     is_onset = True
 
             if speech_prob >= self.threshold or is_onset:
@@ -348,8 +354,17 @@ class AdaptiveNoiseGate:
             else:
                 target_gain = self.floor_gain
         else:
-            # Mic is active: stay open during trailing word endings (speech_prob >= close_threshold)
-            if speech_prob >= self.close_threshold:
+            # Mic is active: stay open during trailing word endings and unvoiced consonants
+            # Dual-condition sustain:
+            # 1. High RNNoise speech probability (voiced phonemes)
+            # 2. Acoustic energy sustain: input level >= sustain_snr_db above noise floor with speech cue
+            is_sustained = (speech_prob >= self.close_threshold)
+            if not is_sustained and input_rms_db is not None:
+                snr = input_rms_db - self.noise_floor_db
+                if snr >= self.sustain_snr_db and speech_prob >= self.sustain_threshold:
+                    is_sustained = True
+
+            if is_sustained:
                 self.frames_since_speech = 0
                 self._burst_voiced += 1
                 target_gain = 1.0

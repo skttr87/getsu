@@ -277,6 +277,40 @@ class TestDSP(unittest.TestCase):
         out, gain = gate.process(frame, speech_prob=0.85, input_rms_db=-20.0)
         self.assertTrue(gate.is_open, "High-confidence user voice must immediately bypass cooldown")
 
+    def test_adaptive_noise_gate_energy_guarded_sustain_for_consonants(self):
+        """Verify unvoiced consonants (s, t, k) with acoustic energy hold gate open without starting decay."""
+        gate = AdaptiveNoiseGate(
+            threshold=0.70,
+            close_threshold=0.52,
+            hangover_ms=40.0,  # 4 frames
+            decay_ms=20.0,
+            frame_ms=10.0,
+            floor_gain=0.06,
+            sustain_snr_db=6.0,
+            sustain_threshold=0.25,
+        )
+        frame = np.ones(FRAME_SIZE, dtype=np.float32) * 0.2
+
+        # 1. User speaks vowel (prob 0.90, -25 dB) -> Gate opens fully
+        for _ in range(20):
+            gate.process(frame, speech_prob=0.90, input_rms_db=-25.0)
+        self.assertTrue(gate.is_open)
+        self.assertEqual(gate.current_gain, 1.0)
+
+        # 2. Mid-word unvoiced consonant (e.g. 's' in 'faster' or 't' in 'laptop'):
+        # Low speech probability (0.35 < close_threshold 0.52), but loud voice energy (-35 dB > noise floor + 6 dB)
+        for _ in range(8):  # 80ms duration (longer than 40ms hangover!)
+            out, gain = gate.process(frame, speech_prob=0.35, input_rms_db=-35.0)
+            self.assertTrue(gate.is_open, "Unvoiced consonant must sustain gate open via acoustic energy")
+            self.assertAlmostEqual(gain, 1.0, places=2, msg="Gain must stay 1.0 without fading")
+            self.assertEqual(gate.frames_since_speech, 0, "frames_since_speech must not drain during speech")
+
+        # 3. Ambient fan noise follows (prob 0.05, -60 dB) -> Energy sustain must NOT trigger
+        for _ in range(5):
+            gate.process(frame, speech_prob=0.05, input_rms_db=-60.0)
+        # After 4 frames hangover + 1 frame decay, gain must drop
+        self.assertLess(gate.current_gain, 1.0, "Gate must decay once speech stops")
+
 
 if __name__ == "__main__":
     unittest.main()

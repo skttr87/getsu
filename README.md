@@ -5,8 +5,8 @@
 </p>
 
 <p align="center">
-  <strong>Free, open-source AI noise cancellation for Windows.</strong><br>
-  Silence mechanical keyboards, desk fans, and background noise in your mic.<br>
+  <strong>Real-time AI noise cancellation for Windows.</strong><br>
+  Filters out fan roar, mechanical keyboards, room noise, and distant chatter directly on your CPU — free, offline, and lightweight.<br>
   <em>Works with Discord, Zoom, Steam, OBS, and all PC games.</em>
 </p>
 

@@ -42,6 +42,7 @@ from src.stream import AudioEngine, create_engine_from_config
 from src.router import SmartMicRouter
 from src.rnnoise import RNNoise, FRAME_SIZE, SAMPLE_RATE
 from src.dsp import HighPassFilter, AdaptiveNoiseGate, soft_limit, calculate_levels
+from src.host_api_resolver import resolve_single, DeviceResolutionError
 
 # Win32 Constants for System Tray Minimize/Close hook
 user32 = ctypes.windll.user32
@@ -608,6 +609,8 @@ class GetsuGUI:
 
     def _format_audio_error(self, e: Exception) -> str:
         """Translates technical PortAudio / driver exceptions into clear, actionable advice."""
+        if isinstance(e, DeviceResolutionError) or "DeviceResolutionError" in type(e).__name__:
+            return "Could not find a matching microphone & virtual cable pair. Check Windows Sound settings."
         err_str = str(e)
         if "WdmSyncIoctl" in err_str or "0x00000492" in err_str or "WDM-KS" in err_str:
             return "Could not start microphone (driver conflict). Please re-select your mic or restart Getsu."
@@ -727,6 +730,24 @@ class GetsuGUI:
                     self.is_running = True
                     success = True
 
+                    pair = getattr(self.engine, 'resolved_pair', None)
+                    if pair:
+                        if pair.input != self.selected_input_idx:
+                            print(f"[GUI] Synchronizing selected input to resolved safe device [{pair.input}]")
+                            self.selected_input_idx = pair.input
+                            try:
+                                self.selected_input_name = sd.query_devices(pair.input)['name']
+                            except Exception:
+                                pass
+                        if pair.output != self.selected_output_idx:
+                            self.selected_output_idx = pair.output
+                            try:
+                                self.selected_output_name = sd.query_devices(pair.output)['name']
+                            except Exception:
+                                pass
+                        if dpg.does_item_exist("input_combo"):
+                            dpg.configure_item("input_combo", default_value=self._get_selected_input_label())
+
                     self.config["input_device_id"] = self.selected_input_idx
                     self.config["input_device_name"] = self.selected_input_name
                     self.config["output_device_id"] = self.selected_output_idx
@@ -755,7 +776,10 @@ class GetsuGUI:
                         dpg.configure_item("status_badge_text", color=[45, 215, 115])
                         dpg.configure_item("btn_toggle", label="STOP", enabled=True)
                         dpg.bind_item_theme("btn_toggle", self.theme_stop_btn)
-                        if self.config.get("auto_route", True):
+                        pair = getattr(self.engine, 'resolved_pair', None)
+                        if pair and pair.ambiguous:
+                            self.set_status_pill("● Active • Default mic selected (Confirm in dropdown)", [240, 180, 50])
+                        elif self.config.get("auto_route", True):
                             if getattr(self.engine, 'router_swap_success', True):
                                 self.set_status_pill("● AI Filter Active • Clean Voice Routed", [45, 215, 115])
                             else:
@@ -846,7 +870,18 @@ class GetsuGUI:
                 self.set_status_pill("▲ No microphone selected for voice test.", [235, 75, 75])
                 return
 
-            in_info = sd.query_devices(self.selected_input_idx)
+            # Resolve safe non-WDM-KS input endpoint for voice preview
+            try:
+                raw_devs = sd.query_devices()
+                raw_apis = sd.query_hostapis()
+                safe_input_idx, notes = resolve_single(raw_devs, raw_apis, self.selected_input_idx, is_input=True)
+                for note in notes:
+                    print(f"[VOICE TEST] {note}")
+            except Exception as e:
+                print(f"[VOICE TEST] Input resolution fallback: {e}")
+                safe_input_idx = self.selected_input_idx
+
+            in_info = sd.query_devices(safe_input_idx)
             in_channels = min(2, max(1, in_info['max_input_channels']))
 
             # Instantiate DSP chain matching current settings
@@ -881,11 +916,11 @@ class GetsuGUI:
             chunk_size = FRAME_SIZE
             processed_chunks = []
 
-            print(f"[VOICE TEST] Phase 1: Recording 11s from [{self.selected_input_idx}] {in_info['name']}...")
+            print(f"[VOICE TEST] Phase 1: Recording 11s from [{safe_input_idx}] {in_info['name']}...")
             with sd.InputStream(
                 samplerate=SAMPLE_RATE,
                 blocksize=chunk_size,
-                device=self.selected_input_idx,
+                device=safe_input_idx,
                 channels=in_channels,
                 dtype='float32'
             ) as stream:
@@ -936,16 +971,23 @@ class GetsuGUI:
             # Phase 2: Playback 11s through primary physical speakers/headphones
             out_dev = get_physical_output_device()
             out_idx = out_dev['index'] if out_dev else sd.default.device[1]
-            out_info = sd.query_devices(out_idx)
+            try:
+                raw_devs = sd.query_devices()
+                raw_apis = sd.query_hostapis()
+                safe_out_idx, _ = resolve_single(raw_devs, raw_apis, out_idx, is_input=False)
+            except Exception:
+                safe_out_idx = out_idx
+
+            out_info = sd.query_devices(safe_out_idx)
             out_channels = min(2, max(1, out_info['max_output_channels']))
 
-            print(f"[VOICE TEST] Phase 2: Playing back 11s to [{out_idx}] {out_info['name']}...")
+            print(f"[VOICE TEST] Phase 2: Playing back 11s to [{safe_out_idx}] {out_info['name']}...")
             if out_channels == 2:
                 playback_data = np.column_stack((full_audio, full_audio))
             else:
                 playback_data = full_audio
 
-            sd.play(playback_data, samplerate=SAMPLE_RATE, device=out_idx)
+            sd.play(playback_data, samplerate=SAMPLE_RATE, device=safe_out_idx)
 
             # Countdown playback (11s)
             for sec in range(11, 0, -1):

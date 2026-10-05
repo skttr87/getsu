@@ -9,7 +9,7 @@ from typing import Dict, Any
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "app_name": "Getsu",
-    "version": "1.2.6",
+    "version": "1.2.7",
     "input_device_id": None,
     "input_device_name": None,
     "output_device_id": None,
@@ -122,6 +122,10 @@ def load_config() -> Dict[str, Any]:
                     migrated = True
             except Exception:
                 pass
+
+        if merged.get("version") != DEFAULT_CONFIG["version"]:
+            merged["version"] = DEFAULT_CONFIG["version"]
+            migrated = True
 
         if migrated:
             save_config(merged)

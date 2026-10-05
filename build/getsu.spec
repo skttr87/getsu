@@ -28,6 +28,7 @@ hiddenimports = [
     "cffi",
     "src.router",
     "src.config_migration_v126",
+    "src.host_api_resolver",
     "logging.handlers",
 ]
 

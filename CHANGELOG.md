@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.7] - 2026-10-06
+
+- **Proactive Host API Resolver**: Introduced `src/host_api_resolver.py` (`resolve_pair` and `resolve_single`) to inspect and align duplex input/output endpoints onto the same safe Windows Host API (prioritizing WASAPI -> DirectSound -> MME) before stream initialization, eliminating PortAudio host mismatch crashes (`PaErrorCode -9993`).
+- **Elimination of WDM-KS Driver Crashes**: Proactively avoids PortAudio's unstable WDM-KS backend on Realtek onboard audio jacks (`GLE 0x492` / `ERROR_SET_NOT_FOUND` / `PaErrorCode -9999`), transparently mapping selected endpoints to modern, stable WASAPI equivalents.
+- **Intelligent Jack Role & Token Matching**: Resolves hardware jack endpoints (e.g., WDM-KS `"Mic in at front panel (black)"`) to matching software endpoints (e.g., WASAPI `"Microphone (Realtek(R) Audio)"`) using acoustic role dictionaries (`mic`, `line`, `mix`) and token similarity.
+- **PortAudio Channel Desync Guard**: Updates stream channel counts (`in_channels`, `out_channels`) directly from resolved device metadata, preventing mono/stereo channel mismatch invalidations (`PaErrorCode -9998`).
+- **Host-Guarded Stream Settings**: Enforces `sd.WasapiSettings(auto_convert=True)` strictly on WASAPI streams, preventing invalid parameter exceptions (`PaErrorCode -9984`) on DirectSound and MME fallbacks.
+- **Synchronized GUI & Voice Test Engine**: Updated `src/gui.py` to route both the live engine and the "Hear Myself" 11s voice test through the resolver. Resolved device indices are safely persisted back to `config.json`, with visual indicators if endpoint mapping was ambiguous.
+
+---
+
 ## [1.2.6] - 2026-10-05
 
 - **Voiced-Burst Flutter Detection**: Upgraded chatter flutter detection to track voiced speech frames per burst (`_burst_voiced < 15`, speech $P \ge 0.52$) instead of total open time. Three rapid bursts under 150ms within a 3s window smoothly extend the cooldown holdoff to 300ms, automatically reverting after 3s of calm.

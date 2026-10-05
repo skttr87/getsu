@@ -16,13 +16,24 @@ NEW_CLOSE_THRESHOLD = 0.52
 NEW_HANGOVER_MS = 320.0
 
 
+def _parse_version(v) -> tuple:
+    if not v or not isinstance(v, str):
+        return (0, 0, 0)
+    try:
+        import re
+        nums = [int(x) for x in re.findall(r"\d+", v)]
+        return tuple(nums) if nums else (0, 0, 0)
+    except Exception:
+        return (0, 0, 0)
+
+
 def migrate_v126(data: dict, merged: dict) -> bool:
     """
     data   : config exactly as read from disk (used for the stored version)
     merged : DEFAULT_CONFIG overlaid with data (mutated in place)
     Returns True when `merged` changed and should be saved.
     """
-    if data.get("version") == TARGET_VERSION:
+    if _parse_version(data.get("version")) >= (1, 2, 6):
         return False
 
     if not merged.get("vad_customized", False):

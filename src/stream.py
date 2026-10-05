@@ -10,6 +10,7 @@ import sounddevice as sd
 
 from src.rnnoise import RNNoise, FRAME_SIZE, SAMPLE_RATE
 from src.dsp import HighPassFilter, AdaptiveNoiseGate, calculate_levels, soft_limit
+from src.host_api_resolver import resolve_pair, DeviceResolutionError, ResolvedPair
 
 
 class AudioEngine:
@@ -58,6 +59,7 @@ class AudioEngine:
         self._was_muted = False
         self.callback_error_count = 0
         self.last_callback_error: Optional[str] = None
+        self.resolved_pair: Optional[ResolvedPair] = None
         self._lock = threading.RLock()
         self._watchdog_lock = threading.Lock()
 
@@ -215,56 +217,50 @@ class AudioEngine:
             if self._running:
                 return
 
-            # Dynamically query channel configuration in case devices changed
+            # Proactive Host API & Safe Device Resolution:
+            # Resolves matching (input, output) pair up-front (WASAPI > DirectSound > MME) and eliminates WDM-KS.
+            try:
+                raw_devs = sd.query_devices()
+                raw_apis = sd.query_hostapis()
+                if isinstance(raw_devs, (list, tuple)) and isinstance(raw_apis, (list, tuple)):
+                    pair = resolve_pair(raw_devs, raw_apis, self.input_device, self.output_device)
+                    self.resolved_pair = pair
+                    if pair.input != self.input_device:
+                        print(f"[STREAM] Realigned input device from [{self.input_device}] to [{pair.input}] ({pair.host_name})")
+                        self.input_device = pair.input
+                    if pair.output != self.output_device:
+                        print(f"[STREAM] Realigned output device from [{self.output_device}] to [{pair.output}] ({pair.host_name})")
+                        self.output_device = pair.output
+                    for note in pair.notes:
+                        print(f"[STREAM] {note}")
+            except DeviceResolutionError:
+                raise
+            except Exception as e:
+                print(f"[STREAM] Host API resolution skipped: {e}")
+
+            # Query channel configuration for resolved endpoints
             in_dev_info = sd.query_devices(self.input_device)
             out_dev_info = sd.query_devices(self.output_device)
             self.in_channels = min(2, max(1, in_dev_info['max_input_channels']))
             self.out_channels = min(2, max(1, out_dev_info['max_output_channels']))
 
-            # Host API Alignment Guard:
-            # PortAudio requires input and output in a duplex stream to share the exact same Host API.
-            # If mismatched or if WDM-KS is detected, realign output to matching CABLE Input.
-            try:
-                apis = sd.query_hostapis()
-                in_api_idx = in_dev_info.get('hostapi') if isinstance(in_dev_info, dict) else None
-                out_api_idx = out_dev_info.get('hostapi') if isinstance(out_dev_info, dict) else None
-                in_host = apis[in_api_idx]['name'] if (in_api_idx is not None and isinstance(apis, (list, tuple)) and in_api_idx < len(apis)) else ''
-                out_host = apis[out_api_idx]['name'] if (out_api_idx is not None and isinstance(apis, (list, tuple)) and out_api_idx < len(apis)) else ''
-                
-                # 1. Input-side WDM-KS defense: realign to matching WASAPI device
-                if 'WDM-KS' in in_host.upper():
-                    from src.devices import get_input_devices
-                    wasapi_mics = get_input_devices()
-                    if wasapi_mics:
-                        cur_name = in_dev_info.get('name', '').lower()
-                        matched_mic = next((m for m in wasapi_mics if m['name'].lower() in cur_name or cur_name in m['name'].lower()), wasapi_mics[0])
-                        if matched_mic['index'] != self.input_device:
-                            print(f"[STREAM] Realigning WDM-KS input device from [{self.input_device}] to WASAPI [{matched_mic['index']}] {matched_mic['name']}")
-                            self.input_device = matched_mic['index']
-                            in_dev_info = sd.query_devices(self.input_device)
-                            self.in_channels = min(2, max(1, in_dev_info['max_input_channels']))
-                            in_api_idx = in_dev_info.get('hostapi') if isinstance(in_dev_info, dict) else None
-                            in_host = apis[in_api_idx]['name'] if (in_api_idx is not None and isinstance(apis, (list, tuple)) and in_api_idx < len(apis)) else ''
-
-                # 2. Output-side alignment: realign output to matching CABLE Input
-                if (in_host and out_host and in_host != out_host) or 'WDM-KS' in out_host.upper():
-                    from src.devices import find_matching_cable_input
-                    matched = find_matching_cable_input(self.input_device)
-                    if matched and matched['index'] != self.output_device:
-                        print(f"[STREAM] Realigning output device from [{self.output_device}] to [{matched['index']}] {matched['name']} to match Host API ({in_host})")
-                        self.output_device = matched['index']
-                        out_dev_info = sd.query_devices(self.output_device)
-                        self.out_channels = min(2, max(1, out_dev_info['max_output_channels']))
-            except Exception as e:
-                print(f"[STREAM] Host API alignment check skipped: {e}")
-
             # Safe WASAPI auto_convert setting for robust 48kHz duplex streaming
             extra_settings = None
-            try:
-                if 'WASAPI' in in_host.upper() and 'WASAPI' in out_host.upper():
+            is_wasapi = getattr(self.resolved_pair, 'is_wasapi', False) if self.resolved_pair else False
+            if not self.resolved_pair:
+                try:
+                    in_api_idx = in_dev_info.get('hostapi') if isinstance(in_dev_info, dict) else None
+                    apis = sd.query_hostapis()
+                    in_host = apis[in_api_idx]['name'] if (in_api_idx is not None and isinstance(apis, (list, tuple)) and in_api_idx < len(apis)) else ''
+                    is_wasapi = 'WASAPI' in in_host.upper()
+                except Exception:
+                    is_wasapi = False
+
+            if is_wasapi:
+                try:
                     extra_settings = sd.WasapiSettings(auto_convert=True)
-            except Exception:
-                extra_settings = None
+                except Exception:
+                    extra_settings = None
 
             # Recalibrate noise gate baseline profiler before opening audio stream
             self.gate.recalibrate()

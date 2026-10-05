@@ -143,7 +143,7 @@ class TestAtomicConfig(unittest.TestCase):
         cfg = load_config()
         self.assertIsInstance(cfg, dict)
         self.assertIn("version", cfg)
-        self.assertEqual(cfg["version"], "1.2.5")
+        self.assertEqual(cfg["version"], "1.2.6")
 
         # Test atomic save
         cfg["test_key"] = "test_val_123"

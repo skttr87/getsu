@@ -4,8 +4,16 @@ Features:
 - Biquad High-Pass Filter (80Hz Butterworth rumble filter for cooling pads / desk bumps)
 - Adaptive Soft-Knee Noise Gate with Hangover (eliminates cooling pad fan hiss between words)
 - RMS / Peak level metering
+- Smooth Peak Soft-Limiter
+
+v1.2.6 gate changes:
+- Voiced-burst flutter detection (tracks voiced frames < 150 ms inside bursts).
+- AdaptiveNoiseGate.reset() / recalibrate() for clean mute and device-change handling.
+- Speech-guarded startup ambient profiler (median of non-speech frames).
+- Guarded dual-rate noise-floor tracking with a per-frame rise cap (0.5 dB) and lower clamp (-75 dBFS).
 """
 import math
+from collections import deque
 import numpy as np
 
 
@@ -43,17 +51,21 @@ class HighPassFilter:
         self.a1 = a1 / a0
         self.a2 = a2 / a0
 
-    def reset(self):
+    def reset_state(self):
+        """Zero the filter memory only (keeps the output buffer; safe to call from the audio thread)."""
         self.x1 = 0.0
         self.x2 = 0.0
         self.y1 = 0.0
         self.y2 = 0.0
+
+    def reset(self):
+        self.reset_state()
         self._out_buffer: np.ndarray | None = None
 
     def process(self, frame: np.ndarray) -> np.ndarray:
         """
         Process a 1D float32 audio frame through the filter.
-        Uses Direct Form I for numerical stability with zero heap allocations.
+        Uses Direct Form I for numerical stability.
         """
         n = len(frame)
         if self._out_buffer is None or len(self._out_buffer) != n:
@@ -64,7 +76,6 @@ class HighPassFilter:
         a1, a2 = self.a1, self.a2
         x1, x2, y1, y2 = self.x1, self.x2, self.y1, self.y2
 
-        # Fast C-level list unpack avoids 480 numpy scalar wrapper allocations
         frame_list = frame.tolist() if isinstance(frame, np.ndarray) else frame
         for i in range(n):
             x0 = frame_list[i]
@@ -91,24 +102,66 @@ _S_CURVE_TABLE_480 = np.maximum.accumulate(np.clip(_S_CURVE_F64, 0.0, 1.0).astyp
 class AdaptiveNoiseGate:
     """
     Adaptive Dual-Threshold (Hysteresis) Soft-Knee Noise Gate with Dynamic Onset Detection.
-    Features:
-    - Open Threshold: Standard threshold (0.70) rejects cooling pad fan noise during idle.
-    - Dual-Key Onset Trigger: Fast-opens gate on early speech probability (0.30) if energy rises
-      above background noise floor (+8.0 dB), preserving unvoiced consonants ('s', 't', 'p', 'k', 'h')
-      while completely blocking distant background room chatter.
-    - Noise Gate Floor: Holds baseline gain at 0.04 (-28.0 dB / -94 dBFS) to keep wireless headset
-      DAC amplifiers energized, completely eliminating squelch sleep and wake-up pops.
-    - Close Threshold (Hysteresis): Lower threshold (0.45) keeps gate 100% open during soft word endings.
-    - Extended Hangover (360ms): Holds open across natural speech pauses and breathing.
-    - Smooth Exponential Decay (80ms): Gently fades down to gate floor without chopping.
-    - Septic Smootherstep S-Curve: C3 continuous derivative with zero boundary jerk eliminates clicks, pops, and tail ticks.
+
+    Defaults (v1.2.6):
+    - Open threshold 0.70: standard high-confidence RNNoise speech probability.
+    - Onset trigger: opens early at speech_prob >= 0.35 when the input level is at least
+      onset_snr_db (10 dB) above the tracked ambient noise floor. Inhibited during the
+      post-close cooldown.
+    - Close threshold 0.52 + hangover 320 ms: keeps the gate open across soft word endings,
+      breaths and natural pauses.
+    - floor_gain: gain applied while closed. The engine passes 0.06, i.e. 20*log10(0.06) = -24.4 dB
+      of attenuation (not silence), which keeps wireless DAC amplifiers energized.
+      floor_gain=0.0 gives true digital silence.
+    - Exponential attack (attack_ms) / decay (decay_ms) with a septic smootherstep (C3) ramp
+      inside each frame to avoid clicks.
+    - Optional 1-frame (10 ms) lookahead so the gate decision leads the audio.
+
+    Flutter protection:
+    - A "burst" is one open period of the gate. Its length is the number of VOICED frames
+      (speech_prob >= close_threshold), not the gate-open time, because the hangover alone keeps the
+      gate open for >= hangover_ms.
+    - If >= 3 bursts shorter than 150 ms of voiced audio occur within 3.0 s, the cooldown that blocks
+      the onset trigger is extended from 150 ms to 300 ms. It reverts by itself once 3.0 s pass
+      without new flutter events. (The cooldown only blocks the onset path; probabilities
+      >= threshold can still reopen the gate.)
+
+    Noise floor:
+    - Startup profiler: median input level of non-speech frames (speech_prob < 0.20) over the first
+      ~0.5 s, clamped to [-75, -36] dBFS. Falls back to the default seed when the timeout (1.5 s)
+      passes with too few ambient frames. Call recalibrate() after a device or room change.
+    - Tracking while closed: fast fall (0.15), slow rise (0.02), and a faster rise (0.10) only during
+      the post-close cooldown with speech_prob < 0.20. Every rise is capped at 0.5 dB per frame so
+      impulsive non-speech sounds (keyboard, clicks, breaths) cannot yank the floor upward, and the
+      floor never falls below -75 dBFS.
+
+    cold_start_gain is kept for backward compatibility; it only has an effect when floor_gain == 0.
     """
+
+    FLOOR_INIT_DB = -60.0
+    FLOOR_MIN_DB = -75.0
+    FLOOR_MAX_DB = -36.0
+    AMBIENT_PROB_MAX = 0.20
+    FLOOR_FALL_RATE = 0.15
+    FLOOR_SLOW_RISE_RATE = 0.02
+    FLOOR_FAST_RISE_RATE = 0.10
+    FLOOR_RISE_CAP_DB = 0.5
+
+    CALIBRATION_TARGET = 50       # frames of ambient audio (~500 ms)
+    CALIBRATION_TIMEOUT = 150     # frames (~1.5 s)
+    CALIBRATION_MIN_SAMPLES = 10
+
+    FLUTTER_BURST_FRAMES = 15     # < 150 ms voiced audio counts as a flutter blip
+    FLUTTER_EVENT_THRESHOLD = 3
+    FLUTTER_WINDOW_FRAMES = 300   # 3.0 s
+
+    _IDLE_FRAMES = 10**6
 
     def __init__(
         self,
         threshold: float = 0.70,
-        close_threshold: float = 0.55,
-        hangover_ms: float = 280.0,
+        close_threshold: float = 0.52,
+        hangover_ms: float = 320.0,
         decay_ms: float = 80.0,
         attack_ms: float = 28.0,
         frame_ms: float = 10.0,
@@ -118,6 +171,8 @@ class AdaptiveNoiseGate:
         lookahead: bool = False,
         floor_gain: float = 0.0,
         cooldown_ms: float = 150.0,
+        flutter_cooldown_ms: float = 300.0,
+        calibrate_startup: bool = True,
     ):
         self.threshold = threshold
         self.close_threshold = close_threshold
@@ -130,12 +185,13 @@ class AdaptiveNoiseGate:
         self.onset_threshold = onset_threshold
         self.onset_snr_db = onset_snr_db
         self.cold_start_gain = cold_start_gain
-        self.noise_floor_db = -60.0
+        self.noise_floor_db = self.FLOOR_INIT_DB
         self.lookahead = lookahead
         self.floor_gain = floor_gain
 
         self.cooldown_frames = max(1, int(cooldown_ms / frame_ms))
-        self.frames_since_close = self.cooldown_frames + 10
+        self.max_cooldown_frames = max(self.cooldown_frames, int(flutter_cooldown_ms / frame_ms))
+        self.frames_since_close = self._IDLE_FRAMES
 
         self.is_open = False
         self.current_gain = floor_gain
@@ -143,6 +199,92 @@ class AdaptiveNoiseGate:
         self._zero_buffer: np.ndarray | None = None
         self._delay_buffer: np.ndarray | None = None
         self._work_buffer: np.ndarray | None = None
+
+        # Flutter state
+        self._frame_idx = 0
+        self._burst_voiced = 0
+        self._flutter_events: deque = deque()
+
+        # Startup profiler state
+        self._calibrate_startup = calibrate_startup
+        self._calibrated = not calibrate_startup
+        self._cal_elapsed = 0
+        self._cal_buffer: list = []
+
+    # ------------------------------------------------------------------ control
+
+    def reset(self):
+        """
+        Return the gate to a clean closed state (call once on the mute transition).
+        Keeps the learned noise floor. Zeroes the lookahead buffer so unmute cannot
+        emit stale audio, and clears flutter history.
+        """
+        self.is_open = False
+        self.current_gain = self.floor_gain
+        self.frames_since_speech = self.hangover_frames + 10
+        self.frames_since_close = self._IDLE_FRAMES
+        self._burst_voiced = 0
+        self._flutter_events.clear()
+        if self._delay_buffer is not None:
+            self._delay_buffer.fill(0.0)
+
+    def recalibrate(self):
+        """Restart the startup ambient profiler (call on stream start / device change)."""
+        self.noise_floor_db = self.FLOOR_INIT_DB
+        self._cal_elapsed = 0
+        self._cal_buffer = []
+        self._calibrated = not self._calibrate_startup
+
+    # ------------------------------------------------------------------ helpers
+
+    def _current_cooldown_frames(self) -> int:
+        ev = self._flutter_events
+        while ev and self._frame_idx - ev[0] > self.FLUTTER_WINDOW_FRAMES:
+            ev.popleft()
+        if len(ev) >= self.FLUTTER_EVENT_THRESHOLD:
+            return self.max_cooldown_frames
+        return self.cooldown_frames
+
+    def _finish_calibration(self, value_db: float):
+        self.noise_floor_db = max(self.FLOOR_MIN_DB, min(self.FLOOR_MAX_DB, value_db))
+        self._calibrated = True
+        self._cal_buffer = []
+
+    def _calibrate_step(self, input_rms_db, speech_prob: float):
+        self._cal_elapsed += 1
+        if (
+            input_rms_db is not None
+            and -100.0 < input_rms_db < -20.0
+            and speech_prob < self.AMBIENT_PROB_MAX
+        ):
+            self._cal_buffer.append(float(input_rms_db))
+
+        if len(self._cal_buffer) >= self.CALIBRATION_TARGET:
+            self._finish_calibration(float(np.median(self._cal_buffer)))
+        elif self._cal_elapsed >= self.CALIBRATION_TIMEOUT:
+            if len(self._cal_buffer) >= self.CALIBRATION_MIN_SAMPLES:
+                self._finish_calibration(float(np.percentile(self._cal_buffer, 25)))
+            else:
+                # Not enough clean ambient frames: keep the default seed
+                self._calibrated = True
+                self._cal_buffer = []
+
+    def _track_floor(self, input_rms_db, speech_prob: float, in_cooldown: bool):
+        if input_rms_db is None or not (-100.0 < input_rms_db < -20.0):
+            return
+        diff = input_rms_db - self.noise_floor_db
+        if diff < 0.0:
+            self.noise_floor_db = max(
+                self.FLOOR_MIN_DB, self.noise_floor_db + diff * self.FLOOR_FALL_RATE
+            )
+        else:
+            if in_cooldown and speech_prob < self.AMBIENT_PROB_MAX:
+                rate = self.FLOOR_FAST_RISE_RATE
+            else:
+                rate = self.FLOOR_SLOW_RISE_RATE
+            self.noise_floor_db += min(diff * rate, self.FLOOR_RISE_CAP_DB)
+
+    # ------------------------------------------------------------------ main
 
     def process(
         self,
@@ -153,10 +295,14 @@ class AdaptiveNoiseGate:
     ) -> tuple[np.ndarray, float]:
         """
         Applies hysteresis soft-knee gating based on RNNoise speech probability and dynamic onset SNR.
-        Sample-accurate Raised-Cosine S-curve ramping eliminates clicks, pops, and harsh transients.
-        Optional 1-frame (10ms) pre-roll lookahead buffer enables 100% natural, unclipped voice onset.
+        Sample-accurate S-curve ramping eliminates clicks, pops, and harsh transients.
+        Optional 1-frame (10ms) pre-roll lookahead buffer enables natural, unclipped voice onset.
         Returns the gated audio frame and current applied gain.
         """
+        self._frame_idx += 1
+        if not self._calibrated:
+            self._calibrate_step(input_rms_db, speech_prob)
+
         if self.lookahead:
             n = len(frame)
             if self._delay_buffer is None or len(self._delay_buffer) != n:
@@ -176,14 +322,11 @@ class AdaptiveNoiseGate:
 
         if not self.is_open:
             self.frames_since_close += 1
-            in_cooldown = self.frames_since_close <= self.cooldown_frames
+            in_cooldown = self.frames_since_close <= self._current_cooldown_frames()
 
-            # Ambient noise floor tracking during silence
-            if input_rms_db is not None and -100.0 < input_rms_db < -20.0:
-                if input_rms_db < self.noise_floor_db:
-                    self.noise_floor_db += (input_rms_db - self.noise_floor_db) * 0.15
-                else:
-                    self.noise_floor_db += (input_rms_db - self.noise_floor_db) * 0.02
+            # Ambient noise floor tracking during silence (paused until startup calibration completes)
+            if self._calibrated:
+                self._track_floor(input_rms_db, speech_prob, in_cooldown)
 
             # Dual-Key Trigger evaluation:
             # 1. Standard high-confidence VAD trigger
@@ -198,6 +341,7 @@ class AdaptiveNoiseGate:
             if speech_prob >= self.threshold or is_onset:
                 self.is_open = True
                 self.frames_since_speech = 0
+                self._burst_voiced = 1 if speech_prob >= self.close_threshold else 0
                 target_gain = 1.0
                 if self.floor_gain <= 0.0 and self.current_gain == 0.0 and self.cold_start_gain > 0.0:
                     self.current_gain = self.cold_start_gain
@@ -207,6 +351,7 @@ class AdaptiveNoiseGate:
             # Mic is active: stay open during trailing word endings (speech_prob >= close_threshold)
             if speech_prob >= self.close_threshold:
                 self.frames_since_speech = 0
+                self._burst_voiced += 1
                 target_gain = 1.0
             else:
                 self.frames_since_speech += 1
@@ -217,6 +362,8 @@ class AdaptiveNoiseGate:
                     # Speech ended: close gate and begin fade to silence
                     self.is_open = False
                     self.frames_since_close = 0
+                    if self._burst_voiced < self.FLUTTER_BURST_FRAMES:
+                        self._flutter_events.append(self._frame_idx)
                     target_gain = self.floor_gain
 
         # Smooth gain transition (exponential attack, exponential decay)
@@ -291,9 +438,26 @@ def calculate_levels(frame: np.ndarray):
         return -100.0, -100.0
     peak = float(np.max(np.abs(frame)))
     rms = float(np.sqrt(np.dot(frame, frame) / len(frame)))
-    
+
     # Convert to dBFS (reference 1.0 for normalized float32; 32767 only if PCM range > 100)
     ref = 32767.0 if peak > 100.0 else 1.0
     peak_db = 20.0 * math.log10(max(peak / ref, 1e-5))
     rms_db = 20.0 * math.log10(max(rms / ref, 1e-5))
     return peak_db, rms_db
+
+
+def soft_limit(x: np.ndarray, threshold: float = 0.85) -> np.ndarray:
+    """
+    Smooth transparent soft-saturation limiter.
+    Passes audio transparently (1:1) when |x| <= threshold.
+    Softens loud screaming/laughter peaks using tanh saturation, eliminating hard digital clipping.
+    """
+    abs_x = np.abs(x)
+    over = abs_x > threshold
+    if not np.any(over):
+        return x
+    out = x.copy()
+    scale = 1.0 - threshold
+    out[over] = np.sign(x[over]) * (threshold + scale * np.tanh((abs_x[over] - threshold) / scale))
+    return out
+

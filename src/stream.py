@@ -9,7 +9,7 @@ import numpy as np
 import sounddevice as sd
 
 from src.rnnoise import RNNoise, FRAME_SIZE, SAMPLE_RATE
-from src.dsp import HighPassFilter, AdaptiveNoiseGate, calculate_levels
+from src.dsp import HighPassFilter, AdaptiveNoiseGate, calculate_levels, soft_limit
 
 
 class AudioEngine:
@@ -25,8 +25,8 @@ class AudioEngine:
         denoise_enabled: bool = True,
         high_pass_enabled: bool = True,
         vad_threshold: float = 0.70,
-        vad_close_threshold: float = 0.55,
-        vad_hangover_ms: float = 280.0,
+        vad_close_threshold: float = 0.52,
+        vad_hangover_ms: float = 320.0,
         vad_decay_ms: float = 80.0,
         vad_onset_threshold: float = 0.35,
         vad_onset_snr_db: float = 10.0,
@@ -55,6 +55,9 @@ class AudioEngine:
         self.router = router
         self.router_swap_success: bool = True
         self.is_muted = False
+        self._was_muted = False
+        self.callback_error_count = 0
+        self.last_callback_error: Optional[str] = None
         self._lock = threading.RLock()
         self._watchdog_lock = threading.Lock()
 
@@ -131,9 +134,14 @@ class AudioEngine:
 
             # Check mute
             if self.is_muted:
+                if not self._was_muted:
+                    self.gate.reset()
+                    self.hpf.reset_state()
+                    self._was_muted = True
                 outdata.fill(0)
                 self._metrics = (0.0, -100.0, -100.0, -100.0)
                 return
+            self._was_muted = False
 
             # 1. Stereo Downmixing with safe multi-channel array guard
             if indata.ndim > 1 and indata.shape[1] >= 2:
@@ -143,20 +151,19 @@ class AudioEngine:
             else:
                 frame_mono = indata.copy()
 
-            # 2. Apply mic gain & clamp normalized input before RNNoise
-            if self.mic_gain != 1.0:
-                frame_mono *= self.mic_gain
-            np.clip(frame_mono, -1.0, 1.0, out=frame_mono)
-
-            # 3. DSP Stage 1: High-Pass Filter (80Hz rumble cut for cooling pads)
+            # 2. DSP Stage 1: High-Pass Filter (80Hz rumble cut for cooling pads)
             if self.high_pass_enabled:
                 frame_mono = self.hpf.process(frame_mono)
 
             # Dual-Stage Metering: Pre-gate input level (audible voice level without fan rumble inflation)
             input_peak_db, input_rms_db = calculate_levels(frame_mono)
 
+            # Preserving clean dynamic headroom for RNNoise without pre-saturation clipping
+            np.clip(frame_mono, -1.0, 1.0, out=frame_mono)
+
             speech_prob = 0.0
-            # 4. DSP Stage 2 & 3: RNNoise Neural Suppression + Soft-Knee Adaptive Gate
+            total_gain = self.output_gain * self.mic_gain
+            # 3. DSP Stage 2 & 3: RNNoise Neural Suppression + Soft-Knee Adaptive Gate
             rn = self.rnnoise
             if self.denoise_enabled and getattr(self, 'denoise_available', True) and rn is not None:
                 # Scale to 16-bit float range expected by RNNoise
@@ -164,16 +171,21 @@ class AudioEngine:
                 frame_rn, speech_prob = rn.process_frame(frame_rn)
                 frame_mono = frame_rn / 32767.0
 
-                # Post-RNNoise make-up gain (+0.7 dB) to restore natural speech body
-                if self.output_gain != 1.0:
-                    frame_mono *= self.output_gain
+                # Post-RNNoise gain staging (preserves natural voice body)
+                if total_gain != 1.0:
+                    frame_mono *= total_gain
 
                 # Soft-knee gate for cooling pad silence floor (in-place zeroing for zero heap allocation)
                 frame_mono, _ = self.gate.process(frame_mono, speech_prob, input_rms_db=input_rms_db, in_place=True)
             else:
-                # Bypass Mode: derive speech probability from RMS energy to silence background hiss
+                # Bypass Mode: apply gain and derive speech probability from RMS energy to silence background hiss
+                if total_gain != 1.0:
+                    frame_mono *= total_gain
                 speech_prob = min(1.0, max(0.0, (input_rms_db + 45.0) / 20.0))
                 frame_mono, _ = self.gate.process(frame_mono, speech_prob, input_rms_db=input_rms_db, in_place=True)
+
+            # Soft limiting to gently compress loud peaks without harsh clipping distortion
+            frame_mono = soft_limit(frame_mono, threshold=0.85)
 
             # Calculate post-gate output metrics and atomically swap metrics tuple
             peak_db, rms_db = calculate_levels(frame_mono)
@@ -188,7 +200,9 @@ class AudioEngine:
             else:
                 outdata[:, 0] = frame_mono
                 outdata[:, 1] = frame_mono
-        except Exception:
+        except Exception as e:
+            self.callback_error_count += 1
+            self.last_callback_error = str(e)
             # Fault barrier: output silence rather than letting PortAudio abort stream
             try:
                 outdata.fill(0)
@@ -244,10 +258,21 @@ class AudioEngine:
             except Exception as e:
                 print(f"[STREAM] Host API alignment check skipped: {e}")
 
+            # Safe WASAPI auto_convert setting for robust 48kHz duplex streaming
+            extra_settings = None
+            try:
+                if 'WASAPI' in in_host.upper() and 'WASAPI' in out_host.upper():
+                    extra_settings = sd.WasapiSettings(auto_convert=True)
+            except Exception:
+                extra_settings = None
+
+            # Recalibrate noise gate baseline profiler before opening audio stream
+            self.gate.recalibrate()
+
             print(f"[STREAM] Starting low-latency stream...")
             print(f"         Input  : [{self.input_device}] {in_dev_info['name']} ({self.in_channels} ch)")
             print(f"         Output : [{self.output_device}] {out_dev_info['name']} ({self.out_channels} ch)")
-            print(f"         Latency: 10ms (480 samples @ 48kHz)")
+            print(f"         Blocksize: 10ms (480 samples @ 48kHz) | Est. Latency: ~45ms round-trip")
             
             last_err = None
             for attempt in range(3):
@@ -259,6 +284,7 @@ class AudioEngine:
                         channels=(self.in_channels, self.out_channels),
                         dtype='float32',
                         latency='low',
+                        extra_settings=extra_settings,
                         callback=self._audio_callback
                     )
                     self._stream.start()
@@ -441,24 +467,17 @@ def create_engine_from_config(
         except Exception:
             is_laptop_mic = False
 
-    if is_laptop_mic:
-        default_th = 0.70
-        default_hangover = 360.0
-        base_gain = 1.2
-    else:
-        default_th = 0.70
-        default_hangover = 360.0
-        base_gain = 1.0
+    base_gain = 1.2 if is_laptop_mic else 1.0
 
     cfg_th = config.get("vad_threshold")
     is_vad_customized = config.get("vad_customized", False)
     if is_vad_customized and cfg_th is not None:
         vad_threshold = cfg_th
     else:
-        vad_threshold = default_th if (cfg_th is None or cfg_th in (0.75, 0.70)) else cfg_th
+        vad_threshold = 0.70 if (cfg_th is None or cfg_th in (0.75, 0.70)) else cfg_th
 
-    cfg_hangover = config.get("vad_hangover_ms")
-    vad_hangover_ms = default_hangover if (cfg_hangover is None or (not is_vad_customized and cfg_hangover in (180.0, 220.0, 360.0))) else cfg_hangover
+    vad_hangover_ms = config.get("vad_hangover_ms", 320.0)
+    vad_close_threshold = config.get("vad_close_threshold", 0.52)
 
     boost_db = config.get("mic_boost_db", 0)
     boost_mult = 10.0 ** (boost_db / 20.0)
@@ -470,7 +489,7 @@ def create_engine_from_config(
         denoise_enabled=config.get("denoise_enabled", True),
         high_pass_enabled=config.get("high_pass_filter", True),
         vad_threshold=vad_threshold,
-        vad_close_threshold=config.get("vad_close_threshold", 0.55),
+        vad_close_threshold=vad_close_threshold,
         vad_hangover_ms=vad_hangover_ms,
         vad_decay_ms=config.get("vad_decay_ms", 80.0),
         vad_onset_threshold=config.get("vad_onset_threshold", 0.35),

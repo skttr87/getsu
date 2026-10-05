@@ -27,6 +27,7 @@ hiddenimports = [
     "PIL",
     "cffi",
     "src.router",
+    "src.config_migration_v126",
     "logging.handlers",
 ]
 

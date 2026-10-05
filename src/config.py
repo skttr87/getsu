@@ -9,7 +9,7 @@ from typing import Dict, Any
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "app_name": "Getsu",
-    "version": "1.2.5",
+    "version": "1.2.6",
     "input_device_id": None,
     "input_device_name": None,
     "output_device_id": None,
@@ -18,8 +18,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "high_pass_filter": True,       # 80Hz rumble filter (crucial for laptop cooling pad)
     "hpf_cutoff_hz": 80.0,          # High-pass filter cutoff frequency in Hz
     "vad_threshold": 0.70,          # Tuned for cooling pad noise rejection (0.0 to 1.0)
-    "vad_close_threshold": 0.55,    # Hysteresis close threshold preserving unvoiced consonants
-    "vad_hangover_ms": 280.0,       # Extended hold time across natural pauses and breaths
+    "vad_close_threshold": 0.52,    # Hysteresis close threshold preserving unvoiced consonants
+    "vad_hangover_ms": 320.0,       # Extended hold time across natural pauses and breaths
     "vad_decay_ms": 80.0,           # Smooth natural fade to pure silence
     "vad_onset_threshold": 0.35,    # Low-threshold trigger for initial unvoiced consonants
     "vad_onset_snr_db": 10.0,        # Required dB rise above noise floor for fast onset
@@ -95,16 +95,10 @@ def load_config() -> Dict[str, Any]:
         merged = copy.deepcopy(DEFAULT_CONFIG)
         merged.update(data)
 
-        # Automatic Migration: Upgrade legacy configs to v1.2.4 smooth gate parameters
+        # Automatic Migration: Upgrade legacy configs
         migrated = False
         if merged.get("vad_cold_start_gain") in (0.70, 0.35):
             merged["vad_cold_start_gain"] = 0.0
-            migrated = True
-        if merged.get("vad_close_threshold") in (None, 0.45):
-            merged["vad_close_threshold"] = 0.55
-            migrated = True
-        if merged.get("vad_hangover_ms") in (None, 360.0):
-            merged["vad_hangover_ms"] = 280.0
             migrated = True
         if merged.get("vad_onset_snr_db") in (4.0, 5.0, 6.0, 7.0, 8.0):
             merged["vad_onset_snr_db"] = 10.0
@@ -115,9 +109,20 @@ def load_config() -> Dict[str, Any]:
         if "vad_floor_gain" not in data or data.get("vad_floor_gain") in (None, 0.02, 0.03, 0.035, 0.04):
             merged["vad_floor_gain"] = 0.06
             migrated = True
-        if data.get("version") != "1.2.5":
-            merged["version"] = "1.2.5"
-            migrated = True
+
+        # v1.2.6 migration (handles stale close thresholds, hangovers, and version bump)
+        try:
+            from src.config_migration_v126 import migrate_v126
+            if migrate_v126(data, merged):
+                migrated = True
+        except ImportError:
+            try:
+                from config_migration_v126 import migrate_v126
+                if migrate_v126(data, merged):
+                    migrated = True
+            except Exception:
+                pass
+
         if migrated:
             save_config(merged)
 

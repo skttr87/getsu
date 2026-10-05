@@ -2,7 +2,7 @@
 ; ==============================================================
 
 #define MyAppName "Getsu"
-#define MyAppVersion "1.2.5"
+#define MyAppVersion "1.2.6"
 #define MyAppPublisher "skttr87"
 #define MyAppURL "https://github.com/skttr87/getsu"
 #define MyAppExeName "getsu.exe"

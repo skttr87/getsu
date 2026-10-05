@@ -41,7 +41,7 @@ from src.config import load_config, save_config
 from src.stream import AudioEngine, create_engine_from_config
 from src.router import SmartMicRouter
 from src.rnnoise import RNNoise, FRAME_SIZE, SAMPLE_RATE
-from src.dsp import HighPassFilter, AdaptiveNoiseGate
+from src.dsp import HighPassFilter, AdaptiveNoiseGate, soft_limit, calculate_levels
 
 # Win32 Constants for System Tray Minimize/Close hook
 user32 = ctypes.windll.user32
@@ -862,18 +862,19 @@ class GetsuGUI:
             hpf = HighPassFilter(cutoff_hz=80.0, sample_rate=float(SAMPLE_RATE))
             gate = AdaptiveNoiseGate(
                 threshold=vad_th,
-                close_threshold=self.config.get("vad_close_threshold", 0.55),
-                hangover_ms=self.config.get("vad_hangover_ms", 280.0),
-                decay_ms=self.config.get("vad_decay_ms", 80.0),
+                close_threshold=float(self.config.get("vad_close_threshold", 0.52)),
+                hangover_ms=float(self.config.get("vad_hangover_ms", 320.0)),
+                decay_ms=float(self.config.get("vad_decay_ms", 80.0)),
                 attack_ms=28.0,
                 frame_ms=10.0,
-                onset_threshold=self.config.get("vad_onset_threshold", 0.35),
-                onset_snr_db=self.config.get("vad_onset_snr_db", 10.0),
-                cold_start_gain=self.config.get("vad_cold_start_gain", 0.35),
+                onset_threshold=float(self.config.get("vad_onset_threshold", 0.35)),
+                onset_snr_db=float(self.config.get("vad_onset_snr_db", 10.0)),
+                cold_start_gain=float(self.config.get("vad_cold_start_gain", 0.35)),
                 lookahead=True,
-                floor_gain=self.config.get("vad_floor_gain", 0.06),
+                floor_gain=float(self.config.get("vad_floor_gain", 0.06)),
                 cooldown_ms=150.0,
             )
+            gate.recalibrate()
 
             # Phase 1: Record 11 seconds (speakers MUTED, RAM only)
             total_chunks = 1100
@@ -900,17 +901,24 @@ class GetsuGUI:
                     else:
                         mono = indata.copy()
 
-                    # Apply gain & clamp
-                    if test_gain != 1.0:
-                        mono *= test_gain
+                    # DSP Stage 1: High-Pass Filter (80Hz rumble cut)
+                    mono = hpf.process(mono)
+
+                    # Dual-Stage Metering & unclipped headroom preservation before RNNoise
+                    _, input_rms_db = calculate_levels(mono)
                     np.clip(mono, -1.0, 1.0, out=mono)
 
-                    # DSP
-                    mono = hpf.process(mono)
+                    # DSP Stage 2: RNNoise neural suppression
                     frame_rn = mono * 32767.0
                     frame_rn, sp = rn.process_frame(frame_rn)
-                    mono = (frame_rn / 32767.0) * 1.08
-                    mono, _ = gate.process(mono, sp, in_place=True)
+
+                    # DSP Stage 3: Post-RNNoise gain staging
+                    out_gain = float(self.config.get("output_gain", 1.08))
+                    mono = (frame_rn / 32767.0) * out_gain * test_gain
+
+                    # DSP Stage 4: Soft-knee gate & gentle limiter
+                    mono, _ = gate.process(mono, sp, input_rms_db=input_rms_db, in_place=True)
+                    mono = soft_limit(mono, threshold=0.85)
                     processed_chunks.append(mono)
 
                     # Update countdown UI once every 100 chunks (~1.0s)

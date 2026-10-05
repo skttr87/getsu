@@ -1,6 +1,6 @@
 {
     "app_name": "Getsu",
-    "version": "1.2.5",
+    "version": "1.2.6",
     "input_device_id": null,
     "input_device_name": null,
     "output_device_id": null,
@@ -9,8 +9,8 @@
     "high_pass_filter": true,
     "hpf_cutoff_hz": 80.0,
     "vad_threshold": 0.7,
-    "vad_close_threshold": 0.55,
-    "vad_hangover_ms": 280.0,
+    "vad_close_threshold": 0.52,
+    "vad_hangover_ms": 320.0,
     "vad_decay_ms": 80.0,
     "vad_onset_threshold": 0.35,
     "vad_onset_snr_db": 10.0,

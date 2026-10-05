@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.6] - 2026-10-05
+
+- **Voiced-Burst Flutter Detection**: Upgraded chatter flutter detection to track voiced speech frames per burst (`_burst_voiced < 15`, speech $P \ge 0.52$) instead of total open time. Three rapid bursts under 150ms within a 3s window smoothly extend the cooldown holdoff to 300ms, automatically reverting after 3s of calm.
+- **Speech-Guarded Ambient Calibration Profiler**: Intelligent non-speech median profiler over the initial 50 clean frames (~500ms), bounded within $[-75, -36]\text{ dBFS}$ with safe fallback to $-60\text{ dBFS}$ on timeout or high ambient noise.
+- **Noise Floor Tracking Clamps & Rise Cap**: Clamped downward floor tracking to `FLOOR_MIN_DB = -75.0 dBFS` to prevent baseline drift in long silence. Capped upward floor rise to a maximum of $0.5\text{ dB/frame}$ to eliminate sudden acoustic transient distortions.
+- **Clean State Reset on Mute**: Implemented `gate.reset()` and `hpf.reset_state()` on mute transitions, cleanly flushing delay buffers, high-pass filter memories, and flutter history to eliminate stale audio leaks on unmute.
+- **Pre-RNNoise Headroom & Post-RNNoise Gain Staging**: Removed pre-RNNoise hard clipping and microphone gain multiplier. RNNoise GRU now receives pristine, uncompressed microphone audio with combined gain staging (`output_gain * mic_gain`) moved post-RNNoise.
+- **Gentle Soft Limiter Peak Protection**: Integrated hyperbolic tangent soft limiting (`soft_limit`, threshold = 0.85) to smoothly compress loud acoustic peaks without harsh DAC clipping.
+- **WASAPI Resilient Stream Support**: Added `sd.WasapiSettings(auto_convert=True)` host-guarded for Windows WASAPI endpoints, preventing stream initialization failures on devices running non-native 48kHz sample rates.
+- **Parity in Voice Test Preview**: Aligned GUI Voice Test DSP pipeline with stream engine settings (`close_threshold = 0.52`, `hangover_ms = 320.0ms`, post-RNNoise gain staging, unclipped input, and soft limiter).
+- **Safe Single-Run Version Migration**: Added `migrate_v126()` to automatically migrate stale defaults to `close_threshold = 0.52` and `hangover_ms = 320.0ms` while strictly honoring user customizations.
+
+---
+
 ## [1.2.5] - 2026-10-05
 
 - **Gate Re-Arm Cooldown Timer (150ms Holdoff)**: Implemented a 15-frame (150ms) intelligent re-arm holdoff in `AdaptiveNoiseGate`. When the gate closes, low-confidence onset triggers are inhibited during the decay window, completely eliminating tail clicks, flutter ticks, and decay-abort spikes caused by people talking in the background. High-confidence user speech ($P \ge 0.70$) breaks through instantly with zero latency penalty.

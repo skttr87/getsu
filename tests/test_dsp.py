@@ -311,6 +311,54 @@ class TestDSP(unittest.TestCase):
         # After 4 frames hangover + 1 frame decay, gain must drop
         self.assertLess(gate.current_gain, 1.0, "Gate must decay once speech stops")
 
+    def test_adaptive_noise_gate_sustain_capped_against_steady_noise(self):
+        """Verify the sustain rule does not pin the gate open forever under continuous noise."""
+        gate = AdaptiveNoiseGate(
+            hangover_ms=320.0,
+            calibrate_startup=False,
+            close_threshold=0.52,
+            sustain_snr_db=6.0,
+            sustain_threshold=0.25,
+        )
+        gate.noise_floor_db = -60.0
+        frame = np.ones(FRAME_SIZE, dtype=np.float32) * 0.1
+
+        # 1. Open gate with clear speech
+        gate.process(frame, speech_prob=0.85, input_rms_db=-30.0)
+        self.assertTrue(gate.is_open)
+
+        # 2. Feed steady noise (SNR = 10 dB, speech_prob = 0.30)
+        # Gate must close after ~72 frames (40 frames sustain cap + 32 hangover frames) instead of running forever
+        frames_stayed_open = 0
+        for _ in range(500):
+            gate.process(frame, speech_prob=0.30, input_rms_db=-50.0)
+            if gate.is_open:
+                frames_stayed_open += 1
+
+        self.assertFalse(gate.is_open, "Gate must close when steady noise continues past the sustain window")
+        self.assertLessEqual(frames_stayed_open, 75, "Sustain window must cap within ~72 frames")
+
+    def test_adaptive_noise_gate_cooldown_breakthrough_tightened(self):
+        """Verify tightened breakthrough (prob >= 0.55, SNR >= onset_snr_db + 8) rejects loud non-speech transients."""
+        gate = AdaptiveNoiseGate(cooldown_ms=150.0, onset_snr_db=10.0, calibrate_startup=False)
+        gate.noise_floor_db = -60.0
+        frame = np.ones(FRAME_SIZE, dtype=np.float32)
+
+        # Open and then immediately close gate
+        gate.process(frame, speech_prob=0.90, input_rms_db=-25.0)
+        for _ in range(gate.hangover_frames + 5):
+            gate.process(frame, speech_prob=0.0, input_rms_db=-60.0)
+        self.assertFalse(gate.is_open)
+        self.assertLess(gate.frames_since_close, gate.cooldown_frames)
+
+        # Loud transient (prob 0.45, SNR +15 dB) during cooldown must NOT break through
+        gate.process(frame, speech_prob=0.45, input_rms_db=-45.0)
+        self.assertFalse(gate.is_open, "Loud transient with prob < 0.55 must be rejected during cooldown")
+
+        # Loud genuine speech (prob 0.60, SNR +20 dB) must break through immediately
+        gate.process(frame, speech_prob=0.60, input_rms_db=-40.0)
+        self.assertTrue(gate.is_open, "High-energy near-field speech must break through cooldown")
+
 
 if __name__ == "__main__":
     unittest.main()

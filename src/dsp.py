@@ -207,6 +207,7 @@ class AdaptiveNoiseGate:
         # Flutter state
         self._frame_idx = 0
         self._burst_voiced = 0
+        self._frames_since_voiced = 1000
         self._flutter_events: deque = deque()
 
         # Startup profiler state
@@ -228,6 +229,7 @@ class AdaptiveNoiseGate:
         self.frames_since_speech = self.hangover_frames + 10
         self.frames_since_close = self._IDLE_FRAMES
         self._burst_voiced = 0
+        self._frames_since_voiced = 1000
         self._flutter_events.clear()
         if self._delay_buffer is not None:
             self._delay_buffer.fill(0.0)
@@ -336,17 +338,18 @@ class AdaptiveNoiseGate:
             # 1. Standard high-confidence VAD trigger
             # 2. Fast onset trigger: energy rise >= onset_snr_db above noise floor with early speech cue
             # (Inhibited during post-close cooldown to eliminate background chatter decay aborts/clicks,
-            #  except for high-energy near-field speech SNR >= onset_snr_db + 4.0 dB which breaks through immediately)
+            #  except for high-energy near-field speech SNR >= onset_snr_db + 8.0 dB, speech_prob >= 0.55 which breaks through immediately)
             is_onset = False
             if input_rms_db is not None:
                 snr = input_rms_db - self.noise_floor_db
-                can_trigger_onset = (not in_cooldown) or (snr >= self.onset_snr_db + 8.0 and speech_prob >= 0.40)
+                can_trigger_onset = (not in_cooldown) or (snr >= self.onset_snr_db + 8.0 and speech_prob >= 0.55)
                 if can_trigger_onset and snr >= self.onset_snr_db and speech_prob >= self.onset_threshold:
                     is_onset = True
 
             if speech_prob >= self.threshold or is_onset:
                 self.is_open = True
                 self.frames_since_speech = 0
+                self._frames_since_voiced = 0 if speech_prob >= self.close_threshold else 1000
                 self._burst_voiced = 1 if speech_prob >= self.close_threshold else 0
                 target_gain = 1.0
                 if self.floor_gain <= 0.0 and self.current_gain == 0.0 and self.cold_start_gain > 0.0:
@@ -357,16 +360,20 @@ class AdaptiveNoiseGate:
             # Mic is active: stay open during trailing word endings and unvoiced consonants
             # Dual-condition sustain:
             # 1. High RNNoise speech probability (voiced phonemes)
-            # 2. Acoustic energy sustain: input level >= sustain_snr_db above noise floor with speech cue
-            is_sustained = (speech_prob >= self.close_threshold)
-            if not is_sustained and input_rms_db is not None:
+            # 2. Acoustic energy sustain (unvoiced consonants/stops): input level >= sustain_snr_db
+            #    above noise floor within 400 ms (40 frames) of a truly voiced frame.
+            voiced = (speech_prob >= self.close_threshold)
+            self._frames_since_voiced = 0 if voiced else self._frames_since_voiced + 1
+            is_sustained = voiced
+            if not voiced and input_rms_db is not None and self._frames_since_voiced <= 40:
                 snr = input_rms_db - self.noise_floor_db
                 if snr >= self.sustain_snr_db and speech_prob >= self.sustain_threshold:
                     is_sustained = True
 
             if is_sustained:
                 self.frames_since_speech = 0
-                self._burst_voiced += 1
+                if voiced:
+                    self._burst_voiced += 1
                 target_gain = 1.0
             else:
                 self.frames_since_speech += 1

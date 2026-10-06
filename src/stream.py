@@ -292,33 +292,6 @@ class AudioEngine:
                             self._stream.close()
                         except Exception:
                             pass
-                        self._stream = None
-
-                    # If WDM-KS or Host mismatch failed, attempt emergency realign on retry
-                    if attempt < 2 and any(k in str(e) for k in ["WdmSyncIoctl", "Illegal combination", "PaErrorCode -9999", "PaErrorCode -9993"]):
-                        try:
-                            from src.devices import get_input_devices, find_matching_cable_input
-                            # Emergency realign input to safe WASAPI mic if WDM-KS was involved
-                            if "WdmSyncIoctl" in str(e) or "WDM-KS" in str(e):
-                                wasapi_mics = get_input_devices()
-                                if wasapi_mics:
-                                    cur_name = in_dev_info.get('name', '').lower()
-                                    matched_mic = next((m for m in wasapi_mics if m['name'].lower() in cur_name or cur_name in m['name'].lower()), wasapi_mics[0])
-                                    if matched_mic['index'] != self.input_device:
-                                        print(f"[STREAM] Emergency realigning input device to [{matched_mic['index']}] {matched_mic['name']}")
-                                        self.input_device = matched_mic['index']
-                                        in_dev_info = sd.query_devices(self.input_device)
-                                        self.in_channels = min(2, max(1, in_dev_info['max_input_channels']))
-
-                            matched = find_matching_cable_input(self.input_device)
-                            if matched and matched['index'] != self.output_device:
-                                print(f"[STREAM] Emergency realigning output device to [{matched['index']}] {matched['name']}")
-                                self.output_device = matched['index']
-                                out_dev_info = sd.query_devices(self.output_device)
-                                self.out_channels = min(2, max(1, out_dev_info['max_output_channels']))
-                        except Exception:
-                            pass
-
                     if attempt == 2:
                         raise last_err
                     print(f"[STREAM] Transient stream opening error (attempt {attempt + 1}/3): {e}. Retrying...")

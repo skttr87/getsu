@@ -34,13 +34,13 @@ CloseApplications=force
 RestartApplications=no
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-VersionInfoVersion=1.2.7.0
+VersionInfoVersion={#MyAppVersion}.0
 VersionInfoCompany=skttr87
 VersionInfoDescription=Getsu - AI Real-Time Noise Cancellation Setup
 VersionInfoCopyright=Copyright (c) 2026 Ihsan (@skttr87)
 VersionInfoProductName=Getsu AI Noise Cancellation
-VersionInfoProductVersion=1.2.7
-VersionInfoOriginalFileName=Getsu-v1.2.7-Setup.exe
+VersionInfoProductVersion={#MyAppVersion}
+VersionInfoOriginalFileName=Getsu-v{#MyAppVersion}-Setup.exe
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

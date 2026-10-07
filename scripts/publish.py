@@ -185,6 +185,68 @@ def update_docs_files(version: str) -> bool:
     return modified
 
 
+def sync_codebase_versions(version: str) -> bool:
+    """Synchronizes target version across src/config.py, setup.iss, build/version_info.txt, and docs."""
+    modified = False
+
+    # 1. setup.iss (#define MyAppVersion & VersionInfo)
+    if SETUP_ISS.exists():
+        iss_text = SETUP_ISS.read_text(encoding="utf-8")
+        orig_iss = iss_text
+        iss_text = re.sub(
+            r'(#define\s+MyAppVersion\s+")[^"]+(")',
+            rf'\g<1>{version}\g<2>',
+            iss_text
+        )
+        iss_text = re.sub(
+            r'VersionInfoVersion=.*',
+            r'VersionInfoVersion={#MyAppVersion}.0',
+            iss_text
+        )
+        iss_text = re.sub(
+            r'VersionInfoProductVersion=.*',
+            r'VersionInfoProductVersion={#MyAppVersion}',
+            iss_text
+        )
+        iss_text = re.sub(
+            r'VersionInfoOriginalFileName=.*',
+            r'VersionInfoOriginalFileName=Getsu-v{#MyAppVersion}-Setup.exe',
+            iss_text
+        )
+        if iss_text != orig_iss:
+            SETUP_ISS.write_text(iss_text, encoding="utf-8")
+            print(f"[INFO] Synchronized {SETUP_ISS.relative_to(REPO_ROOT)} to v{version}")
+            modified = True
+
+    # 2. build/version_info.txt
+    version_info_path = REPO_ROOT / "build" / "version_info.txt"
+    if version_info_path.exists():
+        vi_text = version_info_path.read_text(encoding="utf-8")
+        orig_vi = vi_text
+        try:
+            parts = [int(p) for p in version.split(".")][:3]
+            while len(parts) < 3:
+                parts.append(0)
+            tuple_str = f"({parts[0]}, {parts[1]}, {parts[2]}, 0)"
+            vi_text = re.sub(r'filevers=\([^)]+\)', f'filevers={tuple_str}', vi_text)
+            vi_text = re.sub(r'prodvers=\([^)]+\)', f'prodvers={tuple_str}', vi_text)
+            vi_text = re.sub(r"StringStruct\('FileVersion',\s*'[^']+'\)", f"StringStruct('FileVersion', '{version}.0')", vi_text)
+            vi_text = re.sub(r"StringStruct\('ProductVersion',\s*'[^']+'\)", f"StringStruct('ProductVersion', '{version}')", vi_text)
+            if vi_text != orig_vi:
+                version_info_path.write_text(vi_text, encoding="utf-8")
+                print(f"[INFO] Synchronized {version_info_path.relative_to(REPO_ROOT)} to v{version}")
+                modified = True
+        except Exception as e:
+            print(f"[WARN] Could not update version_info.txt: {e}")
+
+    # 3. docs/index.html & docs/sitemap.xml
+    docs_mod = update_docs_files(version)
+    if docs_mod:
+        modified = True
+
+    return modified
+
+
 def build_installer(version: str):
     """Executes PyInstaller spec build and Inno Setup compiler."""
     print(f"\n[BUILD] Step 1: Compiling PyInstaller canonical spec...")
@@ -397,11 +459,14 @@ def main():
     print(f" Getsu Unified Release Automation — Target: {tag}")
     print(f"==================================================")
 
-    # 1. Build if requested
+    # 1. Synchronize Version across codebase (config, setup.iss, version_info.txt, docs)
+    sync_codebase_versions(version)
+
+    # 2. Build if requested
     if args.build:
         build_installer(version)
 
-    # 2. Locate installer
+    # 3. Locate installer
     installer_path = DIST_INSTALLER_DIR / f"Getsu-{tag}-Setup.exe"
     if not installer_path.is_file():
         # Fallback without tag
@@ -412,9 +477,6 @@ def main():
             print(f"[ERROR] Installer not found at {installer_path}")
             print("Tip: Run with --build or compile using Inno Setup first.")
             sys.exit(1)
-
-    # 3. Synchronize Web Docs
-    update_docs_files(version)
 
     # 4. Git Synchronization
     if not args.no_git:

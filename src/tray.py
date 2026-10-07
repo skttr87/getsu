@@ -170,12 +170,8 @@ class TrayApp:
                 item(label, self._select_output_device(idx), checked=lambda it, c=is_checked: c)
             )
 
-        version = "1.2.8"
-        try:
-            from src.config import DEFAULT_CONFIG
-            version = DEFAULT_CONFIG.get("version", "1.2.8")
-        except Exception:
-            pass
+        from src.config import APP_VERSION
+        version = APP_VERSION
         menu_entries = [
             item(f"Getsu AI Noise Cancellation v{version}", None, enabled=False),
 

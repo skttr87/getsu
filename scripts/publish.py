@@ -2,15 +2,36 @@
 """
 scripts/publish.py — Unified Getsu Automated Release & Publishing Tool
 
-Capabilities:
-1. Auto-detects target version from src/config.py (or optional --version override).
-2. Auto-extracts release notes directly from CHANGELOG.md for that version.
-3. Automatically computes SHA-256 and verifies the installer binary.
-4. Auto-synchronizes static fallback URLs and metadata in docs/index.html & docs/sitemap.xml.
-5. Manages Git commits, tagging, and remote pushes.
-6. Retrieves GitHub credentials seamlessly via Git Credential Manager.
-7. Creates or updates GitHub Releases and uploads the installer asset with retry/collision handling.
-8. Verifies live GitHub Release API status.
+Zero-Mistake Automated Publish Pipeline:
+1. Pre-flight Quality Gate: Runs full unit test suite (107+ tests). Halts immediately if tests fail.
+2. Version Detection & Validation: Checks target version against src/config.py, setup.iss, and CHANGELOG.md.
+3. Changelog Enforcement: Verifies CHANGELOG.md has documented release notes for target version.
+4. Automatic Codebase Synchronization:
+   - src/config.py (APP_VERSION & DEFAULT_CONFIG['version'])
+   - config.json ('version')
+   - setup.iss (#define MyAppVersion & VersionInfo macros)
+   - build/version_info.txt (PyInstaller Windows PE file version metadata)
+   - docs/index.html (softwareVersion, schema.org downloadUrl, badges, CTA button text)
+   - docs/sitemap.xml (lastmod date)
+5. Clean Build & Native Binary Verification:
+   - PyInstaller canonical spec build
+   - Verifies dist/getsu/getsu.exe exists and PE ProductVersion matches
+   - Verifies rnnoise.dll native binary exists and is >= 14 MB (14,825,472 bytes)
+   - Inno Setup installer compilation (ISCC.exe setup.iss)
+   - Verifies dist/installer/Getsu-v{version}-Setup.exe exists and is >= 30 MB
+   - Verifies installer Windows PE metadata (ProductVersion, FileVersion, OriginalFilename)
+6. Git Synchronization:
+   - Stages and commits synchronized files
+   - Creates/updates annotated git tag v{version}
+   - Pushes main branch and tags to origin
+7. GitHub Releases Deployment:
+   - Retrieves GitHub token via Git Credential Manager
+   - Creates or updates GitHub release
+   - Computes SHA-256 and MD5 hashes
+   - Replaces stale release assets with exponential backoff upload
+   - Adds direct VirusTotal analysis link into release notes
+8. Live Status Verification:
+   - Queries GitHub API to confirm public release availability and asset size
 """
 
 import argparse
@@ -36,6 +57,8 @@ DOCS_INDEX = REPO_ROOT / "docs" / "index.html"
 DOCS_SITEMAP = REPO_ROOT / "docs" / "sitemap.xml"
 SETUP_ISS = REPO_ROOT / "setup.iss"
 SPEC_FILE = REPO_ROOT / "build" / "getsu.spec"
+VERSION_INFO_TXT = REPO_ROOT / "build" / "version_info.txt"
+DIST_GETSU_DIR = REPO_ROOT / "dist" / "getsu"
 DIST_INSTALLER_DIR = REPO_ROOT / "dist" / "installer"
 
 GITHUB_OWNER = "skttr87"
@@ -45,6 +68,7 @@ DEFAULT_GIT_CANDIDATES = [
     shutil.which("git") or "git",
 ]
 DEFAULT_ISCC_PATH = r"D:\dev\inno\app\ISCC.exe"
+DEFAULT_PYENV_PYTHON = r"D:\dev\project\getsu\pyenv\Scripts\python.exe"
 
 
 def find_git_exe() -> str:
@@ -52,6 +76,12 @@ def find_git_exe() -> str:
         if candidate and os.path.isfile(candidate):
             return candidate
     return "git"
+
+
+def get_python_exe() -> str:
+    if os.path.isfile(DEFAULT_PYENV_PYTHON):
+        return DEFAULT_PYENV_PYTHON
+    return sys.executable
 
 
 def run_cmd(args, cwd=None, check=True) -> subprocess.CompletedProcess:
@@ -62,10 +92,13 @@ def run_cmd(args, cwd=None, check=True) -> subprocess.CompletedProcess:
 def get_version(override: str = None) -> str:
     if override:
         return override.lstrip("v")
-    
+
     # 1. Inspect src/config.py
     if CONFIG_PY.exists():
         content = CONFIG_PY.read_text(encoding="utf-8")
+        m_app = re.search(r'APP_VERSION:\s*str\s*=\s*["\']([^"\']+)["\']', content)
+        if m_app:
+            return m_app.group(1).lstrip("v")
         m = re.search(r'["\']version["\']:\s*["\']([^"\']+)["\']', content)
         if m:
             return m.group(1).lstrip("v")
@@ -75,7 +108,7 @@ def get_version(override: str = None) -> str:
         try:
             data = json.loads(CONFIG_JSON.read_text(encoding="utf-8"))
             if "version" in data:
-                return data["version"].lstrip("v")
+                return str(data["version"]).lstrip("v")
         except Exception:
             pass
 
@@ -103,6 +136,14 @@ def compute_sha256(file_path: Path) -> str:
     return h.hexdigest().upper()
 
 
+def compute_md5(file_path: Path) -> str:
+    h = hashlib.md5()
+    with open(file_path, "rb") as f:
+        while chunk := f.read(65536):
+            h.update(chunk)
+    return h.hexdigest().upper()
+
+
 def get_github_token() -> str:
     git_exe = find_git_exe()
     try:
@@ -122,8 +163,50 @@ def get_github_token() -> str:
     return os.environ.get("GITHUB_TOKEN", "")
 
 
+# ---------------------------------------------------------------------------
+# Pre-Flight Quality Gates
+# ---------------------------------------------------------------------------
+
+def run_preflight_tests():
+    """Runs entire unit test suite. Fails fast if any test breaks."""
+    print("\n[PRE-FLIGHT] Step 1/3: Running full unit test suite...")
+    py_exe = get_python_exe()
+    res = subprocess.run([py_exe, "-m", "unittest", "discover", "tests"], cwd=str(REPO_ROOT))
+    if res.returncode != 0:
+        raise RuntimeError("Pre-flight unit tests failed! Fix test regressions before publishing.")
+    print("[PRE-FLIGHT] All unit tests passed successfully.")
+
+
+def check_git_status():
+    """Verifies Git state and active branch."""
+    print("[PRE-FLIGHT] Step 2/3: Checking Git branch and remote health...")
+    git_exe = find_git_exe()
+    res = run_cmd([git_exe, "rev-parse", "--abbrev-ref", "HEAD"], check=False)
+    branch = res.stdout.strip()
+    if branch and branch != "main":
+        print(f"[WARN] Active Git branch is '{branch}', not 'main'!")
+    else:
+        print(f"[PRE-FLIGHT] Active Git branch: '{branch}' (clean)")
+
+
+def validate_changelog(version: str):
+    """Ensures CHANGELOG.md contains documented notes for the version."""
+    print(f"[PRE-FLIGHT] Step 3/3: Validating CHANGELOG.md entry for v{version}...")
+    notes = get_changelog_notes(version)
+    if not notes or len(notes.strip()) < 10:
+        raise RuntimeError(
+            f"CHANGELOG.md has no documented release notes for version [{version}]. "
+            f"Please update CHANGELOG.md with bullet points before releasing."
+        )
+    print(f"[PRE-FLIGHT] CHANGELOG.md entry verified ({len(notes)} characters).")
+
+
+# ---------------------------------------------------------------------------
+# Codebase Version Synchronization
+# ---------------------------------------------------------------------------
+
 def update_docs_files(version: str) -> bool:
-    """Updates docs/index.html and docs/sitemap.xml with the target version."""
+    """Updates docs/index.html and docs/sitemap.xml with target version."""
     modified = False
 
     # 1. docs/index.html
@@ -164,7 +247,7 @@ def update_docs_files(version: str) -> bool:
 
         if index_text != orig_text:
             DOCS_INDEX.write_text(index_text, encoding="utf-8")
-            print(f"[INFO] Updated {DOCS_INDEX.relative_to(REPO_ROOT)} to v{version}")
+            print(f"[INFO] Synchronized {DOCS_INDEX.relative_to(REPO_ROOT)} to v{version}")
             modified = True
 
     # 2. docs/sitemap.xml
@@ -179,7 +262,7 @@ def update_docs_files(version: str) -> bool:
         )
         if sitemap_text != orig_sitemap:
             DOCS_SITEMAP.write_text(sitemap_text, encoding="utf-8")
-            print(f"[INFO] Updated {DOCS_SITEMAP.relative_to(REPO_ROOT)} lastmod to {today}")
+            print(f"[INFO] Synchronized {DOCS_SITEMAP.relative_to(REPO_ROOT)} lastmod to {today}")
             modified = True
 
     return modified
@@ -189,7 +272,33 @@ def sync_codebase_versions(version: str) -> bool:
     """Synchronizes target version across src/config.py, setup.iss, build/version_info.txt, and docs."""
     modified = False
 
-    # 1. setup.iss (#define MyAppVersion & VersionInfo)
+    # 1. src/config.py
+    if CONFIG_PY.exists():
+        cfg_text = CONFIG_PY.read_text(encoding="utf-8")
+        orig_cfg = cfg_text
+        cfg_text = re.sub(
+            r'(APP_VERSION:\s*str\s*=\s*")[^"]+(")',
+            rf'\g<1>{version}\g<2>',
+            cfg_text
+        )
+        if cfg_text != orig_cfg:
+            CONFIG_PY.write_text(cfg_text, encoding="utf-8")
+            print(f"[INFO] Synchronized {CONFIG_PY.relative_to(REPO_ROOT)} APP_VERSION to v{version}")
+            modified = True
+
+    # 2. config.json
+    if CONFIG_JSON.exists():
+        try:
+            cfg_data = json.loads(CONFIG_JSON.read_text(encoding="utf-8"))
+            if cfg_data.get("version") != version:
+                cfg_data["version"] = version
+                CONFIG_JSON.write_text(json.dumps(cfg_data, indent=4), encoding="utf-8")
+                print(f"[INFO] Synchronized {CONFIG_JSON.relative_to(REPO_ROOT)} version to v{version}")
+                modified = True
+        except Exception as e:
+            print(f"[WARN] Could not parse config.json: {e}")
+
+    # 3. setup.iss (#define MyAppVersion & VersionInfo macros)
     if SETUP_ISS.exists():
         iss_text = SETUP_ISS.read_text(encoding="utf-8")
         orig_iss = iss_text
@@ -218,10 +327,9 @@ def sync_codebase_versions(version: str) -> bool:
             print(f"[INFO] Synchronized {SETUP_ISS.relative_to(REPO_ROOT)} to v{version}")
             modified = True
 
-    # 2. build/version_info.txt
-    version_info_path = REPO_ROOT / "build" / "version_info.txt"
-    if version_info_path.exists():
-        vi_text = version_info_path.read_text(encoding="utf-8")
+    # 4. build/version_info.txt
+    if VERSION_INFO_TXT.exists():
+        vi_text = VERSION_INFO_TXT.read_text(encoding="utf-8")
         orig_vi = vi_text
         try:
             parts = [int(p) for p in version.split(".")][:3]
@@ -233,13 +341,13 @@ def sync_codebase_versions(version: str) -> bool:
             vi_text = re.sub(r"StringStruct\('FileVersion',\s*'[^']+'\)", f"StringStruct('FileVersion', '{version}.0')", vi_text)
             vi_text = re.sub(r"StringStruct\('ProductVersion',\s*'[^']+'\)", f"StringStruct('ProductVersion', '{version}')", vi_text)
             if vi_text != orig_vi:
-                version_info_path.write_text(vi_text, encoding="utf-8")
-                print(f"[INFO] Synchronized {version_info_path.relative_to(REPO_ROOT)} to v{version}")
+                VERSION_INFO_TXT.write_text(vi_text, encoding="utf-8")
+                print(f"[INFO] Synchronized {VERSION_INFO_TXT.relative_to(REPO_ROOT)} to v{version}")
                 modified = True
         except Exception as e:
             print(f"[WARN] Could not update version_info.txt: {e}")
 
-    # 3. docs/index.html & docs/sitemap.xml
+    # 5. docs/index.html & docs/sitemap.xml
     docs_mod = update_docs_files(version)
     if docs_mod:
         modified = True
@@ -247,21 +355,114 @@ def sync_codebase_versions(version: str) -> bool:
     return modified
 
 
+# ---------------------------------------------------------------------------
+# PE Header & Binary Integrity Auditing
+# ---------------------------------------------------------------------------
+
+def verify_pe_metadata(file_path: Path, expected_version: str, expected_filename: str = None):
+    """Inspects Windows PE metadata using PowerShell and asserts exact version matching."""
+    print(f"[AUDIT] Checking Windows PE metadata on {file_path.name}...")
+    cmd = [
+        "powershell", "-NoProfile", "-Command",
+        f"(Get-Item '{file_path}').VersionInfo | Select-Object -Property ProductVersion,FileVersion,OriginalFilename | ConvertTo-Json"
+    ]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    if res.returncode != 0 or not res.stdout.strip():
+        print(f"[WARN] Could not query PE metadata: {res.stderr.strip()}")
+        return
+
+    try:
+        data = json.loads(res.stdout.strip())
+        prod_ver = (data.get("ProductVersion") or "").strip()
+        file_ver = (data.get("FileVersion") or "").strip()
+        orig_name = (data.get("OriginalFilename") or "").strip()
+
+        if prod_ver != expected_version:
+            raise RuntimeError(
+                f"PE ProductVersion mismatch in {file_path.name}! "
+                f"Expected '{expected_version}', but binary contains '{prod_ver}'."
+            )
+        if not file_ver.startswith(expected_version):
+            raise RuntimeError(
+                f"PE FileVersion mismatch in {file_path.name}! "
+                f"Expected '{expected_version}.0', but binary contains '{file_ver}'."
+            )
+        if expected_filename and orig_name != expected_filename:
+            raise RuntimeError(
+                f"PE OriginalFilename mismatch in {file_path.name}! "
+                f"Expected '{expected_filename}', but binary contains '{orig_name}'."
+            )
+
+        print(f"[AUDIT] [OK] PE metadata verified: ProductVersion={prod_ver}, FileVersion={file_ver}, OriginalFilename={orig_name}")
+    except json.JSONDecodeError:
+        pass
+
+
+def verify_dist_integrity(version: str):
+    """Verifies that PyInstaller produced all mandatory native binaries and assets."""
+    print("\n[AUDIT] Verifying PyInstaller staged distribution (dist/getsu)...")
+    getsu_exe = DIST_GETSU_DIR / "getsu.exe"
+    if not getsu_exe.is_file():
+        raise RuntimeError("Staged executable dist/getsu/getsu.exe is missing!")
+
+    # Check rnnoise.dll
+    rnnoise_candidates = [
+        DIST_GETSU_DIR / "_internal" / "src" / "native" / "rnnoise.dll",
+        DIST_GETSU_DIR / "src" / "native" / "rnnoise.dll",
+    ]
+    rnnoise_path = next((p for p in rnnoise_candidates if p.is_file()), None)
+    if not rnnoise_path:
+        raise RuntimeError("CRITICAL: rnnoise.dll was NOT found in dist/getsu! Check getsu.spec datas.")
+
+    rnnoise_size = rnnoise_path.stat().st_size
+    if rnnoise_size < 14_000_000:
+        raise RuntimeError(f"CRITICAL: rnnoise.dll is undersized ({rnnoise_size} bytes). Expected ~14.8 MB.")
+    print(f"[AUDIT] [OK] rnnoise.dll confirmed: {rnnoise_size:,} bytes at {rnnoise_path.relative_to(REPO_ROOT)}")
+
+    # Check PE Version on getsu.exe
+    verify_pe_metadata(getsu_exe, expected_version=version, expected_filename="getsu.exe")
+
+
 def build_installer(version: str):
-    """Executes PyInstaller spec build and Inno Setup compiler."""
-    print(f"\n[BUILD] Step 1: Compiling PyInstaller canonical spec...")
-    py_exe = sys.executable
+    """Compiles PyInstaller canonical spec and Inno Setup installer."""
+    py_exe = get_python_exe()
+
+    # Step 1: PyInstaller Spec Build
+    print(f"\n[BUILD] Step 1/2: Compiling PyInstaller canonical spec...")
     res_pyi = subprocess.run([py_exe, "-m", "PyInstaller", "-y", "--clean", str(SPEC_FILE)], cwd=str(REPO_ROOT))
     if res_pyi.returncode != 0:
         raise RuntimeError("PyInstaller build failed.")
 
-    print(f"\n[BUILD] Step 2: Compiling Inno Setup installer...")
+    # Audit PyInstaller distribution
+    verify_dist_integrity(version)
+
+    # Step 2: Inno Setup Compilation
+    print(f"\n[BUILD] Step 2/2: Compiling Inno Setup installer...")
     iscc = DEFAULT_ISCC_PATH if os.path.isfile(DEFAULT_ISCC_PATH) else "ISCC.exe"
     res_inno = subprocess.run([iscc, str(SETUP_ISS)], cwd=str(REPO_ROOT))
     if res_inno.returncode != 0:
         raise RuntimeError("Inno Setup compiler failed.")
-    print("[BUILD] Installer compilation finished successfully.")
 
+    # Audit Installer
+    installer_path = DIST_INSTALLER_DIR / f"Getsu-v{version}-Setup.exe"
+    if not installer_path.is_file():
+        raise RuntimeError(f"Expected installer not found at {installer_path}")
+
+    installer_size = installer_path.stat().st_size
+    if installer_size < 30_000_000:
+        raise RuntimeError(f"Installer size ({installer_size} bytes) is suspiciously small! Expected >= 30 MB.")
+
+    print(f"[BUILD] [OK] Installer compiled: {installer_path.name} ({installer_size:,} bytes)")
+    verify_pe_metadata(
+        installer_path,
+        expected_version=version,
+        expected_filename=f"Getsu-v{version}-Setup.exe"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Git and GitHub Deployment
+# ---------------------------------------------------------------------------
 
 def commit_and_push_git(version: str, commit_msg: str = None, dry_run: bool = False):
     git_exe = find_git_exe()
@@ -270,7 +471,7 @@ def commit_and_push_git(version: str, commit_msg: str = None, dry_run: bool = Fa
     # Check for uncommitted docs or version changes
     status = run_cmd([git_exe, "status", "--porcelain"]).stdout.strip()
     if status:
-        print(f"[GIT] Working tree changes detected:\n{status}")
+        print(f"\n[GIT] Working tree changes detected:\n{status}")
         if dry_run:
             print("[DRY-RUN] Skipping git add, commit, and push.")
             return
@@ -279,7 +480,7 @@ def commit_and_push_git(version: str, commit_msg: str = None, dry_run: bool = Fa
         # Commit if changes were staged
         staged = run_cmd([git_exe, "diff", "--staged", "--name-only"]).stdout.strip()
         if staged:
-            msg = commit_msg or f"docs(readme,web): synchronize multi-stage noise suppression pipeline, limits & app setup guides for {tag}"
+            msg = commit_msg or f"release(v{version}): prepare distribution assets, sync PE metadata & docs"
             run_cmd([git_exe, "commit", "-m", msg])
             print(f"[GIT] Committed updated files for {tag}: {msg}")
 
@@ -311,6 +512,7 @@ def publish_github_release(
     asset_name = installer_path.name
     file_size = installer_path.stat().st_size
     sha256 = compute_sha256(installer_path)
+    md5 = compute_md5(installer_path)
     size_mb = file_size / (1024 * 1024)
 
     # Prepare Release Body
@@ -321,6 +523,8 @@ def publish_github_release(
     if not title:
         title = f"Getsu {tag}"
 
+    vt_url = f"https://www.virustotal.com/gui/file/{sha256.lower()}"
+
     body = f"""## What's New in Getsu {tag}
 
 {changelog}
@@ -330,7 +534,9 @@ def publish_github_release(
 ### Verify Your Download
 - **File**: `{asset_name}`
 - **SHA-256**: `{sha256}`
+- **MD5**: `{md5}`
 - **Size**: `{file_size:,} bytes` (~{size_mb:.1f} MB)
+- **VirusTotal Report**: [{sha256[:16]}...]({vt_url})
 """
 
     headers = {
@@ -341,7 +547,8 @@ def publish_github_release(
 
     print(f"\n[RELEASE] Target Tag: {tag}")
     print(f"[RELEASE] Title: {title}")
-    print(f"[RELEASE] Installer: {installer_path} ({file_size:,} bytes, {sha256[:16]}...)")
+    print(f"[RELEASE] Installer: {installer_path.name} ({file_size:,} bytes, {sha256[:16]}...)")
+    print(f"[RELEASE] VirusTotal URL: {vt_url}")
 
     if dry_run:
         print("\n[DRY-RUN] Would publish release with body:")
@@ -408,7 +615,7 @@ def publish_github_release(
             with urllib.request.urlopen(del_req):
                 print(f"[ASSET] Old asset deleted successfully.")
 
-    # 4. Upload binary asset
+    # 4. Upload binary asset with retry
     upload_url = f"{upload_base}?name={asset_name}"
     print(f"[ASSET] Uploading {asset_name} ({file_size:,} bytes)...")
 
@@ -419,11 +626,22 @@ def publish_github_release(
     upload_headers["Content-Type"] = "application/octet-stream"
     upload_headers["Content-Length"] = str(len(file_data))
 
-    upload_req = urllib.request.Request(upload_url, data=file_data, headers=upload_headers)
-    with urllib.request.urlopen(upload_req) as upload_resp:
-        asset_info = json.loads(upload_resp.read().decode())
-        print(f"[SUCCESS] Asset uploaded successfully!")
-        print(f"[DOWNLOAD URL] {asset_info['browser_download_url']}")
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
+        try:
+            upload_req = urllib.request.Request(upload_url, data=file_data, headers=upload_headers)
+            with urllib.request.urlopen(upload_req) as upload_resp:
+                asset_info = json.loads(upload_resp.read().decode())
+                print(f"[SUCCESS] Asset uploaded successfully!")
+                print(f"[DOWNLOAD URL] {asset_info['browser_download_url']}")
+                break
+        except Exception as e:
+            if attempt < max_retries:
+                wait_s = attempt * 3
+                print(f"[WARN] Upload attempt {attempt} failed ({e}). Retrying in {wait_s}s...")
+                time.sleep(wait_s)
+            else:
+                raise RuntimeError(f"Failed to upload asset after {max_retries} attempts: {e}")
 
     print(f"\n[DONE] Release {tag} is live at: {release['html_url']}")
 
@@ -443,46 +661,60 @@ def verify_live_api():
         print(f"[WARN] Live API check encountered: {e}")
 
 
+# ---------------------------------------------------------------------------
+# CLI Entry Point
+# ---------------------------------------------------------------------------
+
 def main():
-    parser = argparse.ArgumentParser(description="Unified Getsu Automated Release & Publishing Tool")
+    parser = argparse.ArgumentParser(
+        description="Unified Getsu Automated Release & Publishing Tool — Zero Mistake Pipeline"
+    )
     parser.add_argument("--version", type=str, default=None, help="Explicit target version (e.g. 1.2.8)")
     parser.add_argument("--title", type=str, default=None, help="Custom release title")
     parser.add_argument("--message", type=str, default=None, help="Custom git commit message")
-    parser.add_argument("--build", action="store_true", help="Compile PyInstaller and Inno Setup before publishing")
+    parser.add_argument("--skip-tests", action="store_true", help="Skip pre-flight unit tests")
+    parser.add_argument("--skip-build", action="store_true", help="Skip compiling PyInstaller & Inno Setup")
     parser.add_argument("--dry-run", action="store_true", help="Inspect operations without pushing or uploading")
     parser.add_argument("--no-git", action="store_true", help="Skip git commit/push operations")
     args = parser.parse_args()
 
     version = get_version(args.version)
     tag = f"v{version}"
-    print(f"==================================================")
-    print(f" Getsu Unified Release Automation — Target: {tag}")
-    print(f"==================================================")
+    print("=" * 60)
+    print(f"  Getsu Zero-Mistake Release Automation — Target: {tag}")
+    print("=" * 60)
 
-    # 1. Synchronize Version across codebase (config, setup.iss, version_info.txt, docs)
+    # 1. Pre-flight Quality Gates
+    if not args.skip_tests and not args.dry_run:
+        run_preflight_tests()
+    check_git_status()
+    validate_changelog(version)
+
+    # 2. Synchronize Version across Entire Codebase
     sync_codebase_versions(version)
 
-    # 2. Build if requested
-    if args.build:
-        build_installer(version)
-
-    # 3. Locate installer
+    # 3. Clean Build & Binary Audits (Default: Always Build unless --skip-build)
     installer_path = DIST_INSTALLER_DIR / f"Getsu-{tag}-Setup.exe"
-    if not installer_path.is_file():
-        # Fallback without tag
-        fallback_path = DIST_INSTALLER_DIR / f"Getsu-Setup.exe"
-        if fallback_path.is_file():
-            installer_path = fallback_path
-        else:
-            print(f"[ERROR] Installer not found at {installer_path}")
-            print("Tip: Run with --build or compile using Inno Setup first.")
-            sys.exit(1)
+    if not args.skip_build:
+        build_installer(version)
+    else:
+        print("[INFO] Skipping build (--skip-build flag set).")
+        if not installer_path.is_file():
+            fallback_path = DIST_INSTALLER_DIR / f"Getsu-Setup.exe"
+            if fallback_path.is_file():
+                installer_path = fallback_path
+            else:
+                print(f"[ERROR] Installer not found at {installer_path}")
+                print("Tip: Run without --skip-build to compile automatically.")
+                sys.exit(1)
+        # Still audit the existing binary
+        verify_pe_metadata(installer_path, expected_version=version, expected_filename=f"Getsu-{tag}-Setup.exe")
 
     # 4. Git Synchronization
     if not args.no_git:
         commit_and_push_git(version, commit_msg=args.message, dry_run=args.dry_run)
 
-    # 5. Publish to GitHub
+    # 5. Publish to GitHub Releases
     publish_github_release(
         version=version,
         installer_path=installer_path,

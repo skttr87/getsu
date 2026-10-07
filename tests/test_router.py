@@ -142,8 +142,9 @@ class TestAtomicConfig(unittest.TestCase):
     def test_save_and_load_config(self):
         cfg = load_config()
         self.assertIsInstance(cfg, dict)
+        from src.config import APP_VERSION
         self.assertIn("version", cfg)
-        self.assertEqual(cfg["version"], "1.2.8")
+        self.assertEqual(cfg["version"], APP_VERSION)
 
 
         # Test atomic save

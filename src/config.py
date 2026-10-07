@@ -7,9 +7,11 @@ import json
 import copy
 from typing import Dict, Any
 
+APP_VERSION: str = "1.2.8"
+
 DEFAULT_CONFIG: Dict[str, Any] = {
     "app_name": "Getsu",
-    "version": "1.2.8",
+    "version": APP_VERSION,
 
     "input_device_id": None,
     "input_device_name": None,

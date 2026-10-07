@@ -589,33 +589,46 @@
   <!-- Auto-update latest release version & download link from GitHub API -->
   <script>
     (function() {
-      fetch('https://api.github.com/repos/skttr87/getsu/releases/latest')
-        .then(function(res) { return res.ok ? res.json() : null; })
-        .then(function(data) {
-          if (!data || !data.tag_name) return;
-          var tag = data.tag_name;
-          var badge = document.getElementById('release-badge');
-          if (badge) badge.textContent = tag + ' • Windows 10 & 11 • Free & Open Source';
+      function applyRelease(data) {
+        if (!data || !data.tag_name) return;
+        var tag = data.tag_name;
+        var badge = document.getElementById('release-badge');
+        if (badge) badge.textContent = tag + ' • Windows 10 & 11 • Free & Open Source';
 
-          var exeAsset = (data.assets || []).find(function(a) {
-            return a.name && a.name.toLowerCase().endsWith('.exe');
-          });
+        var exeAsset = (data.assets || []).find(function(a) {
+          return a.name && a.name.toLowerCase().endsWith('.exe');
+        });
 
-          if (exeAsset) {
-            var downloadLink = document.getElementById('download-link');
-            var downloadText = document.getElementById('download-text');
-            if (downloadLink) downloadLink.href = exeAsset.browser_download_url;
-            if (downloadText) downloadText.textContent = 'Download Getsu ' + tag + ' (Setup.exe)';
+        if (exeAsset) {
+          var downloadLink = document.getElementById('download-link');
+          var downloadText = document.getElementById('download-text');
+          if (downloadLink) downloadLink.href = exeAsset.browser_download_url;
+          if (downloadText) downloadText.textContent = 'Download Getsu ' + tag + ' (Setup.exe)';
 
-            if (exeAsset.size) {
-              var mb = Math.round(exeAsset.size / (1024 * 1024));
-              var metaNote = document.getElementById('meta-note');
-              if (metaNote) metaNote.textContent = mb + ' MB installer • 100% offline • No account or login required';
-            }
+          if (exeAsset.size) {
+            var mb = Math.round(exeAsset.size / (1024 * 1024));
+            var metaNote = document.getElementById('meta-note');
+            if (metaNote) metaNote.textContent = mb + ' MB installer • 100% offline • No account or login required';
           }
+        }
+      }
+
+      var headers = { 'Accept': 'application/vnd.github.v3+json' };
+      var cacheBust = '?t=' + Date.now();
+
+      fetch('https://api.github.com/repos/skttr87/getsu/releases/latest' + cacheBust, { cache: 'no-store', headers: headers })
+        .then(function(res) {
+          if (res.ok) return res.json();
+          // Fallback to latest item in releases list if /releases/latest has CDN propagation delay
+          return fetch('https://api.github.com/repos/skttr87/getsu/releases' + cacheBust, { cache: 'no-store', headers: headers })
+            .then(function(r) { return r.ok ? r.json() : null; })
+            .then(function(list) { return (list && list.length) ? list[0] : null; });
+        })
+        .then(function(data) {
+          if (data) applyRelease(data);
         })
         .catch(function(err) {
-          // Gracefully keep static HTML fallbacks if offline or rate-limited
+          // Gracefully retain static HTML fallbacks if offline or API rate-limited
         });
     })();
   </script>

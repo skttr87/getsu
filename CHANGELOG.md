@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.2.8] - 2026-10-08
 
-- **Deduplicated Safe Input Listing (`list_selectable_inputs`)**: Enumerate physical recording endpoints once on their best safe host API (WASAPI > DirectSound > MME), eliminating raw WDM-KS endpoints and preventing duplicate entries. Virtual cable bridges (`CABLE Output`) are strictly excluded to prevent infinite feedback loops.
+- **Host-API Tiering & Deduplicated Safe Inputs (`list_selectable_inputs`)**: Enumerate physical recording endpoints using modern Windows CoreAudio (WASAPI) as the authoritative hardware layer, completely pruning synthetic Win32 proxy mappers (`Microsoft Sound Mapper`, `Primary Sound Capture Driver`) across all Windows locales. Virtual cable bridges (`CABLE Output`) are strictly excluded to prevent infinite feedback loops.
+- **Hardware Channel Count Fidelity**: Capture authentic mono/stereo input channels (`SelectableInput.channels`) directly from device capabilities rather than hardcoded layouts.
 - **Dynamic Wrong-Jack Advisory (`selection_hint`)**: Added contextual, real-time UX hints beneath the microphone dropdown in `gui.py`. If a user selects `Line In` or `Stereo Mix`, Getsu immediately warns them and points them to the pink `Microphone` entry before stream initiation.
 - **Granular PortAudio Error Diagnosis (`src/audio_errors.py`)**: Replaced generic `"driver conflict"` error banners with actionable, plain-language diagnosis for specific PortAudio error codes (`-9985` busy/exclusive mode, `-9997` sample rate mismatch, `-9993` host mismatch, `-9999` host error) while preserving up to 400 characters of raw technical error text for logs.
 - **Targeted Transient Stream Retry**: Audio stream retry loop now specifically retries on transient `-9985` (`PaErrorCode -9985` device busy / exclusive lock) rather than wasting 700ms on unrecoverable disconnected hardware errors.

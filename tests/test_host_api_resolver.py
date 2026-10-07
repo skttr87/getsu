@@ -279,16 +279,48 @@ class TestHostApiResolver(unittest.TestCase):
         self.assertIsNone(selection_hint(""))
 
     def test_selectable_input_subscriptable(self):
-        item = SelectableInput(index=4, name="Mic", host_name="WASAPI", role="mic")
+        item = SelectableInput(index=4, name="Mic", host_name="WASAPI", role="mic", channels=1)
         self.assertEqual(item["index"], 4)
         self.assertEqual(item["name"], "Mic")
         self.assertEqual(item["hostapi"], "WASAPI")
         self.assertEqual(item["role"], "mic")
-        self.assertEqual(item["inputs"], 2)
+        self.assertEqual(item["inputs"], 1)
+        self.assertEqual(item["channels"], 1)
+        self.assertEqual(item.channels, 1)
         self.assertEqual(item.get("index"), 4)
         self.assertEqual(item.get("nonexistent", 99), 99)
 
+    def test_list_selectable_inputs_wasapi_tiering_excludes_mme_and_directsound_proxies(self):
+        # In multi-API environment with WASAPI present, neither MME nor DirectSound proxies appear
+        inputs = list_selectable_inputs(self.devices, self.hostapis)
+        names = [i.name for i in inputs]
+        self.assertNotIn("Microsoft Sound Mapper - Input", names)
+        self.assertNotIn("Primary Sound Capture Driver", names)
+        # All returned inputs must be on WASAPI
+        for item in inputs:
+            self.assertEqual(item.host_name, "Windows WASAPI")
+
+    def test_list_selectable_inputs_fallback_prunes_slot0_synthetic_proxy(self):
+        # Create environment without WASAPI (only DirectSound and MME)
+        ds_mme_apis = [
+            {"name": "MME", "devices": [0, 1], "default_input_device": 0, "default_output_device": 1},
+            {"name": "Windows DirectSound", "devices": [2, 3, 4], "default_input_device": 2, "default_output_device": 3},
+        ]
+        devs = [
+            {"name": "Microsoft Sound Mapper - Input", "hostapi": 0, "max_input_channels": 2, "max_output_channels": 0},
+            {"name": "Microphone (Realtek Audio)", "hostapi": 0, "max_input_channels": 2, "max_output_channels": 0},
+            {"name": "Primary Sound Capture Driver", "hostapi": 1, "max_input_channels": 2, "max_output_channels": 0},
+            {"name": "CABLE Input (VB-Audio Virtual Cable)", "hostapi": 1, "max_input_channels": 0, "max_output_channels": 2},
+            {"name": "Microphone (Realtek Audio)", "hostapi": 1, "max_input_channels": 2, "max_output_channels": 0},
+        ]
+        inputs = list_selectable_inputs(devs, ds_mme_apis)
+        names = [i.name for i in inputs]
+        # In fallback tier, slot 0 proxy 'Primary Sound Capture Driver' must be pruned
+        self.assertNotIn("Primary Sound Capture Driver", names)
+        self.assertIn("Microphone (Realtek Audio)", names)
+        self.assertEqual(len(inputs), 1)
 
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -237,6 +237,7 @@ class SelectableInput:
     name: str
     host_name: str
     role: Optional[str]
+    channels: int = 2
 
     def __getitem__(self, item: str):
         if item == "index":
@@ -247,8 +248,8 @@ class SelectableInput:
             return self.host_name
         elif item == "role":
             return self.role
-        elif item == "inputs":
-            return 2
+        elif item in ("inputs", "channels"):
+            return self.channels
         raise KeyError(item)
 
     def get(self, item: str, default=None):
@@ -273,35 +274,76 @@ def _same_physical(a: str, b: str) -> bool:
     return _similarity(a, b) >= 0.75
 
 
+def _is_synthetic_proxy(dev_idx: int, hostapi_info: dict) -> bool:
+    """
+    Identifies Win32 synthetic default routing proxies (MME WAVE_MAPPER / DirectSound DSDEVID_DefaultCapture).
+    In MME and DirectSound, slot 0 is the synthetic default proxy when real hardware endpoints are present.
+    """
+    api_name = hostapi_info.get("name", "").upper()
+    if "WASAPI" in api_name or "WDM-KS" in api_name:
+        return False
+    dev_list = hostapi_info.get("devices", [])
+    return len(dev_list) > 1 and dev_idx == dev_list[0]
+
+
 def list_selectable_inputs(
     devices: Sequence[dict],
     hostapis: Sequence[dict],
     include_virtual: bool = False,
 ) -> List[SelectableInput]:
     """
-    One entry per physical input, on its best safe host API (WASAPI > DirectSound > MME).
-    WDM-KS entries (jack-style names such as 'Line in at rear panel (Blue) (Realtek(R) Audio)')
-    are never listed, so a user cannot pick a path the driver may reject.
-    Virtual cables (e.g. CABLE Output) are excluded unless include_virtual is True.
+    One entry per physical input, prioritized by modern Windows CoreAudio (WASAPI).
+    - Tier 1: If WASAPI exposes valid recording endpoints, WASAPI is the sole authoritative hardware list.
+    - Tier 2: DirectSound and MME are evaluated only if WASAPI returns zero inputs (sandbox/VM fallback).
+    - In legacy tiers, slot-0 synthetic proxies (WAVE_MAPPER / Primary Sound Capture Driver) are pruned.
+    - WDM-KS entries are never listed.
+    - Virtual cables (e.g. CABLE Output) are excluded unless include_virtual is True.
     """
     from src.devices import is_virtual_input_device
 
-    chosen: List[SelectableInput] = []
+    # Tier 1: Look for WASAPI devices (authoritative on Windows 10 & 11)
+    wasapi_inputs: List[SelectableInput] = []
+    for api_idx, h in enumerate(hostapis):
+        if "WASAPI" in h.get("name", "").upper() and not _is_avoided(h.get("name", "")):
+            for i in h.get("devices", []):
+                if 0 <= i < len(devices):
+                    d = devices[i]
+                    ch = d.get("max_input_channels", 0)
+                    if ch <= 0:
+                        continue
+                    if not include_virtual and is_virtual_input_device(d.get("name", "")):
+                        continue
+                    if not any(_same_physical(d["name"], c.name) for c in wasapi_inputs):
+                        wasapi_inputs.append(
+                            SelectableInput(i, d["name"], h["name"], _role(d["name"]), channels=ch)
+                        )
+
+    if wasapi_inputs:
+        return wasapi_inputs
+
+    # Tier 2: Structural fallback across safe host APIs (DirectSound -> MME)
+    fallback_inputs: List[SelectableInput] = []
     for api_idx in _api_order(hostapis):
-        host_name = hostapis[api_idx]["name"]
-        for i in hostapis[api_idx].get("devices", []):
-            if i < 0 or i >= len(devices):
-                continue
-            d = devices[i]
-            if d.get("max_input_channels", 0) <= 0:
-                continue
-            if not include_virtual and is_virtual_input_device(d.get("name", "")):
-                continue
-            if any(_same_physical(d["name"], c.name) for c in chosen):
-                continue
-            chosen.append(SelectableInput(i, d["name"], host_name, _role(d["name"])))
-    chosen.sort(key=lambda c: c.index)
-    return chosen
+        h = hostapis[api_idx]
+        host_name = h["name"]
+        for i in h.get("devices", []):
+            if 0 <= i < len(devices):
+                d = devices[i]
+                ch = d.get("max_input_channels", 0)
+                if ch <= 0:
+                    continue
+                if _is_synthetic_proxy(i, h):
+                    continue
+                if not include_virtual and is_virtual_input_device(d.get("name", "")):
+                    continue
+                if not any(_same_physical(d["name"], c.name) for c in fallback_inputs):
+                    fallback_inputs.append(
+                        SelectableInput(i, d["name"], host_name, _role(d["name"]), channels=ch)
+                    )
+        if fallback_inputs:
+            break
+
+    return fallback_inputs
 
 
 def selection_hint(name: Optional[str], available_names: Sequence[str] = ()) -> Optional[str]:

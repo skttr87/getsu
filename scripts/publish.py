@@ -213,12 +213,12 @@ def commit_and_push_git(version: str, dry_run: bool = False):
             print("[DRY-RUN] Skipping git add, commit, and push.")
             return
 
-        run_cmd([git_exe, "add", "docs/index.html", "docs/sitemap.xml", "scripts/publish.py"])
+        run_cmd([git_exe, "add", "-u"])
         # Commit if changes were staged
         staged = run_cmd([git_exe, "diff", "--staged", "--name-only"]).stdout.strip()
         if staged:
-            run_cmd([git_exe, "commit", "-m", f"chore(release): auto-sync website metadata & release tooling for {tag}"])
-            print(f"[GIT] Committed updated docs and release tooling for {tag}")
+            run_cmd([git_exe, "commit", "-m", f"fix(audio): tier Host APIs to WASAPI, prune Win32 proxies & preserve channel fidelity for {tag}"])
+            print(f"[GIT] Committed updated files for {tag}")
 
     if dry_run:
         print(f"[DRY-RUN] Would tag {tag} and push origin main --tags")

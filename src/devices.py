@@ -100,23 +100,19 @@ def get_input_devices(include_virtual: bool = False) -> List[Dict]:
                     'name': item.name,
                     'hostapi': item.host_name,
                     'role': item.role,
-                    'inputs': 2,
+                    'inputs': getattr(item, 'channels', 2),
                 }
                 for item in selectable
             ]
     except Exception:
         pass
-    devices = get_all_devices()
-    # Filter for devices with input channels > 0
-    inputs = [d for d in devices if d['inputs'] > 0]
 
-    # Hide virtual cables (e.g. CABLE Output) from input dropdown so users are not confused
+    devices = get_all_devices()
+    inputs = [d for d in devices if d['inputs'] > 0]
     if not include_virtual:
         physical_inputs = [d for d in inputs if not is_virtual_input_device(d['name'])]
         if physical_inputs:
             inputs = physical_inputs
-
-    # Prioritize WASAPI devices
     wasapi_inputs = [d for d in inputs if 'WASAPI' in d['hostapi']]
     return wasapi_inputs if wasapi_inputs else inputs
 

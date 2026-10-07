@@ -183,7 +183,7 @@ python -m PyInstaller --clean --noconfirm build/getsu.spec
 ## 📜 Credits & License
 
 - **[RNNoise](https://github.com/xiph/rnnoise)**: Recurrent neural network architecture for audio noise reduction by Jean-Marc Valin (Xiph.Org / Mozilla).
-- **[rnnoise-nu](https://github.com/GregorR/rnnoise-nu)**: Native dynamic library build and extended C runtime API by Gregor Richards.
+- **[pyrnnoise](https://github.com/pengzhendong/pyrnnoise)**: Precompiled Windows x64 native binary distribution by Zhendong Peng.
 - **[VB-Audio](https://vb-audio.com/Cable/)**: High-fidelity virtual audio cable driver.
 - **[DearPyGui](https://github.com/hoffstadt/DearPyGui)**: Fast GPU-accelerated immediate-mode GUI engine.
 

@@ -201,7 +201,7 @@ def build_installer(version: str):
     print("[BUILD] Installer compilation finished successfully.")
 
 
-def commit_and_push_git(version: str, dry_run: bool = False):
+def commit_and_push_git(version: str, commit_msg: str = None, dry_run: bool = False):
     git_exe = find_git_exe()
     tag = f"v{version}"
 
@@ -217,8 +217,9 @@ def commit_and_push_git(version: str, dry_run: bool = False):
         # Commit if changes were staged
         staged = run_cmd([git_exe, "diff", "--staged", "--name-only"]).stdout.strip()
         if staged:
-            run_cmd([git_exe, "commit", "-m", f"fix(audio): tier Host APIs to WASAPI, prune Win32 proxies & preserve channel fidelity for {tag}"])
-            print(f"[GIT] Committed updated files for {tag}")
+            msg = commit_msg or f"docs(readme,web): synchronize multi-stage noise suppression pipeline, limits & app setup guides for {tag}"
+            run_cmd([git_exe, "commit", "-m", msg])
+            print(f"[GIT] Committed updated files for {tag}: {msg}")
 
     if dry_run:
         print(f"[DRY-RUN] Would tag {tag} and push origin main --tags")
@@ -384,6 +385,7 @@ def main():
     parser = argparse.ArgumentParser(description="Unified Getsu Automated Release & Publishing Tool")
     parser.add_argument("--version", type=str, default=None, help="Explicit target version (e.g. 1.2.8)")
     parser.add_argument("--title", type=str, default=None, help="Custom release title")
+    parser.add_argument("--message", type=str, default=None, help="Custom git commit message")
     parser.add_argument("--build", action="store_true", help="Compile PyInstaller and Inno Setup before publishing")
     parser.add_argument("--dry-run", action="store_true", help="Inspect operations without pushing or uploading")
     parser.add_argument("--no-git", action="store_true", help="Skip git commit/push operations")
@@ -416,7 +418,7 @@ def main():
 
     # 4. Git Synchronization
     if not args.no_git:
-        commit_and_push_git(version, dry_run=args.dry_run)
+        commit_and_push_git(version, commit_msg=args.message, dry_run=args.dry_run)
 
     # 5. Publish to GitHub
     publish_github_release(

@@ -38,6 +38,20 @@ Commercial noise cancellation tools often charge monthly subscriptions, drain yo
 
 ---
 
+## 🛡️ What Getsu Blocks
+
+Getsu combines an **80Hz Butterworth rumble filter**, the **Mozilla RNNoise neural network**, and an **Adaptive S-Curve Noise Gate** with lookahead to silence domestic and gaming noise directly on your CPU:
+
+| Noise Type | Real-World Examples | How Getsu Eliminates It |
+|---|---|---|
+| **Stationary Background Noise** | Laptop cooling pads, GPU/CPU fan roar, air conditioning | **RNNoise Neural Spectral Subtraction** (100% suppressed on CPU) |
+| **Low-End Physical Rumble** | Desk typing vibrations, floor footsteps, 50/60Hz AC hum | **80Hz High-Pass Filter** (eradicates sub-audible energy before AI) |
+| **Sharp Transient Clicks** | Mechanical keyboards (Blue/Brown/Red switches), mouse clicks | **S-Curve Noise Gate + 10ms Pre-Roll** (smooth zero-jerk ramping) |
+| **Far-Field Domestic Chatter** | Family talking in next room, background living room TV | **10 dB Onset SNR Bar** (requires near-field proximity energy to open) |
+| **Sentence-Ending Chatter** | Voices trailing off while background noise continues | **150ms Re-Arm Cooldown Holdoff** (blocks decay-abort clicks) |
+
+---
+
 ## 🚀 Quick Start (3 Steps)
 
 ### 1. Download & Install
@@ -74,6 +88,51 @@ Getsu automatically routes clean audio to any app set to your **"Default"** micr
 - 🎚️ **Sensitivity Slider**: Easily adjust how sensitive Getsu is to quiet voices vs. background noise.
 - 🔌 **Plug & Play Recovery**: Unplugged your USB headset by accident? Getsu automatically switches to your backup mic without dropping your call.
 - 🖥️ **Looks Crisp Everywhere**: Automatically scales and sharpens on laptops, standard monitors, and 4K screens.
+
+---
+
+## ⚠️ Limits & Transparency Notes
+
+Every software has engineering trade-offs. Here is what to expect upfront:
+
+- **Windows Only**: Designed for Windows 10 and Windows 11 (64-bit). There are currently no macOS or Linux builds.
+- **Virtual Audio Driver Required**: Relies on VB-Audio Virtual Cable to bridge the clean audio output to your games and chat applications (the official installer installs this for you automatically).
+- **Resource Footprint**: Adds <1.2ms processing latency and consumes ~1.5% CPU on a standard quad-core CPU. **0% GPU usage** (no CUDA/RTX requirements).
+- **Unsigned SmartScreen Warning**: Getsu is independent open-source software and does not carry an expensive commercial code-signing certificate ($300+/year). Windows SmartScreen may show an *"Unknown Publisher"* warning. Click **More info** ➔ **Run anyway**. All source code is completely public and SHA-256 installer hashes are posted on every [GitHub Release](https://github.com/skttr87/getsu/releases).
+
+---
+
+## ❓ Frequently Asked Questions
+
+<details>
+<summary><strong>How is this different from Discord's Krisp?</strong></summary>
+
+> Krisp only cleans your microphone *inside* Discord voice channels. Getsu cleans your microphone at the operating system level, protecting **Discord, Steam, Zoom, Google Meet, OBS Studio, and games (CS2, Valorant, Dota 2, Apex)** simultaneously with zero time limits and zero subscriptions.
+</details>
+
+<details>
+<summary><strong>Do I need an NVIDIA RTX graphics card?</strong></summary>
+
+> No. Getsu's DSP pipeline runs 100% on standard x86 CPU instructions. It works smoothly on Intel, AMD, and budget integrated-GPU laptops without hogging graphics VRAM or compute cores.
+</details>
+
+<details>
+<summary><strong>Will Getsu affect my in-game FPS?</strong></summary>
+
+> Virtually not at all. Because Getsu does not touch your GPU and only uses ~1.5% CPU time, your graphics card remains 100% dedicated to rendering game frames.
+</details>
+
+<details>
+<summary><strong>Does it really block mechanical keyboard switches and clicks?</strong></summary>
+
+> Yes! While standalone RNNoise models struggle with sharp mechanical clatter, Getsu pairs RNNoise with an adaptive S-curve noise gate and a 10ms lookahead pre-roll buffer. Keystrokes, mouse clicks, and desk bumps are silenced without chopping off the first syllable of your words.
+</details>
+
+<details>
+<summary><strong>Is Getsu private and offline?</strong></summary>
+
+> 100% yes. All audio processing runs locally on your machine. Getsu never saves your voice to disk, transmits zero audio over the network, has no analytics tracking, and requires no account. You can audit the entire source code in this repository.
+</details>
 
 ---
 

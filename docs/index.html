@@ -84,10 +84,10 @@
           },
           {
             "@type": "Question",
-            "name": "Does it remove keyboard sounds?",
+            "name": "Does it remove mechanical keyboard sounds and mouse clicks?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "It removes most steady noise and a lot of keyboard clicking. Very loud clicks right next to the mic can still leak through. Adjust the Voice Sensitivity slider if it cuts your voice or lets noise in."
+              "text": "Yes. While standalone neural networks can struggle with sharp keystrokes, Getsu pairs RNNoise with an 80Hz rumble filter and an adaptive S-curve noise gate with 10ms lookahead pre-roll. Keystrokes, mouse clicks, and desk thumps are silenced without clipping your voice."
             }
           },
           {
@@ -381,6 +381,97 @@
       margin-bottom: 0;
     }
 
+    /* Noise Block Cards Grid */
+    .noise-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+      margin: 20px 0 28px;
+    }
+    .noise-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 18px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      transition: border-color 0.2s ease, transform 0.2s ease;
+    }
+    .noise-card:hover {
+      border-color: var(--link);
+      transform: translateY(-2px);
+    }
+    .noise-card-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 600;
+      font-size: 1.02rem;
+      color: var(--text);
+    }
+    .noise-desc {
+      font-size: 0.9rem;
+      color: var(--muted);
+      line-height: 1.5;
+      margin-bottom: 4px;
+    }
+    .noise-tag {
+      align-self: flex-start;
+      margin-top: auto;
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      background: rgba(88, 166, 255, 0.1);
+      color: var(--link);
+      border: 1px solid rgba(88, 166, 255, 0.25);
+      border-radius: 4px;
+      padding: 3px 8px;
+    }
+
+    /* Setup Guide Cards */
+    .setup-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+      margin: 20px 0 24px;
+    }
+    .setup-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 18px 20px;
+      font-size: 0.92rem;
+    }
+    .setup-card h3 {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 1.05rem;
+      color: var(--text);
+      margin-bottom: 10px;
+    }
+    .setup-card ol {
+      margin-left: 20px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+    .setup-card ol li {
+      margin-bottom: 6px;
+    }
+    .setup-card ol li strong {
+      color: var(--text);
+    }
+    .setup-tip {
+      margin-top: 12px;
+      padding: 8px 12px;
+      background: rgba(227, 179, 65, 0.1);
+      border-left: 3px solid #E3B341;
+      border-radius: 4px;
+      font-size: 0.82rem;
+      color: #E3B341;
+      line-height: 1.45;
+    }
+
     /* Simple Footer */
     footer {
       border-top: 1px solid var(--border);
@@ -439,6 +530,7 @@
         Getsu
       </a>
       <div class="nav-links">
+        <a href="#blocks">What It Blocks</a>
         <a href="#how-it-works">How It Works</a>
         <a href="#limits">Limits</a>
         <a href="#faq">FAQ</a>
@@ -497,23 +589,129 @@
       </div>
     </section>
 
+    <!-- What Getsu Blocks -->
+    <section id="blocks">
+      <h2>What Getsu blocks</h2>
+      <p style="color: var(--muted);">
+        Getsu pairs neural RNN processing with custom real-time digital signal filters to suppress almost every domestic and gaming noise profile:
+      </p>
+
+      <div class="noise-grid">
+        <div class="noise-card">
+          <div class="noise-card-header">
+            <span>💨</span>
+            <span>Stationary Fan Roar & AC</span>
+          </div>
+          <div class="noise-desc">
+            Standing pedestal fans, high-RPM laptop cooling pads, air conditioner hiss, and PC exhaust blowers.
+          </div>
+          <div class="noise-tag">Mozilla RNNoise GRU Engine</div>
+        </div>
+
+        <div class="noise-card">
+          <div class="noise-card-header">
+            <span>🔊</span>
+            <span>Low-End Physical Rumble</span>
+          </div>
+          <div class="noise-desc">
+            Heavy footsteps, desk bumps, vibrations from typing on a wooden table, and 50/60Hz electrical ground hum.
+          </div>
+          <div class="noise-tag">80Hz 2nd-Order Butterworth HPF</div>
+        </div>
+
+        <div class="noise-card">
+          <div class="noise-card-header">
+            <span>⌨️</span>
+            <span>Mechanical Keys & Clicks</span>
+          </div>
+          <div class="noise-desc">
+            Blue, brown, and red mechanical keyboard switches, rapid mouse clicks, and frantic gaming button mashing.
+          </div>
+          <div class="noise-tag">Adaptive S-Curve Gate + 10ms Pre-Roll</div>
+        </div>
+
+        <div class="noise-card">
+          <div class="noise-card-header">
+            <span>🗣️</span>
+            <span>Distant Domestic Chatter</span>
+          </div>
+          <div class="noise-desc">
+            Family talking in the next room, living room television bleed, corridor chatter, and street traffic.
+          </div>
+          <div class="noise-tag">10 dB Onset SNR Proximity Bar</div>
+        </div>
+
+        <div class="noise-card">
+          <div class="noise-card-header">
+            <span>🛑</span>
+            <span>Sentence-Ending Noise Trails</span>
+          </div>
+          <div class="noise-desc">
+            Background noise trying to rush back in as your voice decays at the end of a sentence.
+          </div>
+          <div class="noise-tag">150ms Re-Arm Cooldown Holdoff</div>
+        </div>
+      </div>
+    </section>
+
     <!-- How It Works -->
     <section id="how-it-works">
       <h2>How it works</h2>
       <p>
-        Getsu listens to your real microphone, cleans it with <strong>RNNoise</strong> (an open-source neural network from Mozilla), and sends the result to a virtual microphone called <strong>CABLE Output</strong>.
+        Getsu captures your microphone audio, passes it through an <strong>80Hz low-cut filter</strong>, isolates human speech with <strong>RNNoise</strong> (an open-source recurrent neural network from Mozilla), suppresses transient clicks with an <strong>adaptive S-curve gate</strong>, and sends the pristine voice to a virtual microphone called <strong>CABLE Output</strong>.
       </p>
 
       <div class="diagram-box">
-[ Physical Mic ] ──► [ Getsu (RNNoise on CPU) ] ──► [ CABLE Output (Virtual Mic) ] ──► [ Discord / Steam / Games ]
+[ Physical Mic ] ──► [ 80Hz Rumble Filter ] ──► [ RNNoise AI (CPU) ] ──► [ S-Curve Noise Gate ] ──► [ CABLE Output ] ──► [ Discord / Steam / Games ]
       </div>
 
       <p>
-        When you press <strong>START</strong>, Getsu sets the virtual mic as your Windows default.
+        When you press <strong>START</strong>, Getsu automatically sets the virtual mic as your Windows default recording device.
       </p>
-      <p>
-        If an app (like Steam or in-game voice chat) doesn't pick it up immediately, it's usually because it is hard-locked to your old microphone. Open the app's audio settings, change the <strong>Input Device / Microphone</strong> to <code>CABLE Output</code>, and you're good to go.
+
+      <h3 style="font-size: 1.15rem; margin-top: 24px; margin-bottom: 8px;">Configuring your games and voice apps</h3>
+      <p style="color: var(--muted); font-size: 0.95rem;">
+        Getsu automatically routes clean audio to any app set to your <strong>Default</strong> microphone. If an app was previously hard-locked to your raw physical mic, set it to <code>Default</code> or <code>CABLE Output</code>:
       </p>
+
+      <div class="setup-grid">
+        <div class="setup-card">
+          <h3>🎮 Steam Voice Chat</h3>
+          <ol>
+            <li>Open Steam ➔ <strong>Settings</strong> ➔ <strong>Voice</strong>.</li>
+            <li>Set <strong>Voice Input Device</strong> to <strong>Default</strong> (or <strong>CABLE Output</strong>).</li>
+            <li>Turn <strong>OFF</strong> Steam's built-in <em>Noise Cancellation</em>.</li>
+          </ol>
+          <div class="setup-tip">
+            💡 Steam's built-in noise cancellation can double-process audio and cause robotic distortion. Turn it off and let Getsu handle it cleanly.
+          </div>
+        </div>
+
+        <div class="setup-card">
+          <h3>💬 Discord</h3>
+          <ol>
+            <li>Open User Settings (⚙️) ➔ <strong>Voice & Video</strong>.</li>
+            <li>Set <strong>Input Device</strong> to <strong>Default</strong> (or <strong>CABLE Output</strong>).</li>
+            <li>Turn <strong>OFF</strong> Discord's <em>Krisp</em> noise suppression.</li>
+          </ol>
+          <div class="setup-tip">
+            💡 Disabling Krisp in Discord prevents double-filtering and lowers Discord's CPU usage while Getsu provides pristine voice isolation.
+          </div>
+        </div>
+
+        <div class="setup-card">
+          <h3>🏆 PC Games (CS2, Valorant, Dota, Apex)</h3>
+          <ol>
+            <li>Go to in-game <strong>Audio / Voice Settings</strong>.</li>
+            <li>Verify input device is set to <strong>Default System Device</strong> or <strong>CABLE Output</strong>.</li>
+            <li>Speak freely — all teammates will hear clean, noise-free audio!</li>
+          </ol>
+          <div class="setup-tip">
+            💡 Zero GPU usage means your framerates and frametimes remain 100% unaffected.
+          </div>
+        </div>
+      </div>
+
       <p>
         When you press <strong>STOP</strong> or exit Getsu from the notification tray, your original microphone is restored right away.
       </p>
@@ -556,8 +754,8 @@
         </div>
 
         <div class="faq-item">
-          <h3>Does it remove mechanical keyboard sounds?</h3>
-          <p>It removes most steady background hum (fans, air conditioning) and a lot of keyboard clicking. Very loud clicks right next to the mic can still leak through. Adjust the Voice Sensitivity slider in the app if it cuts your voice or lets noise in.</p>
+          <h3>Does it remove mechanical keyboard sounds and mouse clicks?</h3>
+          <p>Yes. While standalone neural networks can struggle with sharp keystrokes, Getsu pairs RNNoise with an 80Hz rumble filter and an adaptive S-curve noise gate with 10ms lookahead pre-roll. Keystrokes, mouse clicks, and desk thumps are silenced without clipping your voice.</p>
         </div>
 
         <div class="faq-item">

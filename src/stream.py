@@ -11,6 +11,8 @@ import sounddevice as sd
 from src.rnnoise import RNNoise, FRAME_SIZE, SAMPLE_RATE
 from src.dsp import HighPassFilter, AdaptiveNoiseGate, calculate_levels, soft_limit
 from src.host_api_resolver import resolve_pair, DeviceResolutionError, ResolvedPair
+from src.audio_errors import explain_start_error, ExplainedError
+
 
 
 class AudioEngine:
@@ -60,7 +62,9 @@ class AudioEngine:
         self.callback_error_count = 0
         self.last_callback_error: Optional[str] = None
         self.resolved_pair: Optional[ResolvedPair] = None
+        self.last_start_error: Optional[ExplainedError] = None
         self._lock = threading.RLock()
+
         self._watchdog_lock = threading.Lock()
 
         # DSP Components
@@ -212,7 +216,17 @@ class AudioEngine:
                 pass
 
     def start(self):
-        """Starts the real-time duplex stream with transient error retry."""
+        """Starts the stream. On failure records `last_start_error` (friendly text + raw details) and re-raises."""
+        try:
+            self._start_impl()
+            self.last_start_error = None
+        except Exception as e:
+            self.last_start_error = explain_start_error(e)
+            print(f"[STREAM] Start failed: {self.last_start_error.title} | {self.last_start_error.technical}")
+            raise
+
+    def _start_impl(self):
+        """Internal real-time duplex stream startup with transient error retry."""
         with self._lock:
             if self._running:
                 return
@@ -233,10 +247,22 @@ class AudioEngine:
                         self.output_device = pair.output
                     for note in pair.notes:
                         print(f"[STREAM] {note}")
+                    if pair.ambiguous:
+                        print("[STREAM] Warning: more than one input could match the selected microphone; "
+                              "please confirm it in the app.")
             except DeviceResolutionError:
                 raise
             except Exception as e:
-                print(f"[STREAM] Host API resolution skipped: {e}")
+                print(f"[STREAM] Host API resolution failed unexpectedly: {e!r}")
+                try:
+                    in_host = sd.query_hostapis()[sd.query_devices(self.input_device)['hostapi']]['name']
+                except Exception:
+                    in_host = ""
+                if "WDM-KS" in in_host.upper():
+                    raise DeviceResolutionError(
+                        "Could not move the microphone off the WDM-KS audio path. "
+                        "Please re-select your microphone."
+                    ) from e
 
             # Query channel configuration for resolved endpoints
             in_dev_info = sd.query_devices(self.input_device)
@@ -292,10 +318,12 @@ class AudioEngine:
                             self._stream.close()
                         except Exception:
                             pass
-                    if attempt == 2:
+                        self._stream = None
+                    if attempt == 2 or "PaErrorCode -9985" not in str(e):
                         raise last_err
-                    print(f"[STREAM] Transient stream opening error (attempt {attempt + 1}/3): {e}. Retrying...")
+                    print(f"[STREAM] Device busy (attempt {attempt + 1}/3): {e}. Retrying...")
                     time.sleep(0.10 * (2 ** attempt))
+
 
             self._running = True
             self._last_callback_time = time.monotonic()

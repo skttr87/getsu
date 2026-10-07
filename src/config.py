@@ -9,7 +9,8 @@ from typing import Dict, Any
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "app_name": "Getsu",
-    "version": "1.2.7",
+    "version": "1.2.8",
+
     "input_device_id": None,
     "input_device_name": None,
     "output_device_id": None,

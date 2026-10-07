@@ -7,7 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.8] - 2026-10-08
+
+- **Deduplicated Safe Input Listing (`list_selectable_inputs`)**: Enumerate physical recording endpoints once on their best safe host API (WASAPI > DirectSound > MME), eliminating raw WDM-KS endpoints and preventing duplicate entries. Virtual cable bridges (`CABLE Output`) are strictly excluded to prevent infinite feedback loops.
+- **Dynamic Wrong-Jack Advisory (`selection_hint`)**: Added contextual, real-time UX hints beneath the microphone dropdown in `gui.py`. If a user selects `Line In` or `Stereo Mix`, Getsu immediately warns them and points them to the pink `Microphone` entry before stream initiation.
+- **Granular PortAudio Error Diagnosis (`src/audio_errors.py`)**: Replaced generic `"driver conflict"` error banners with actionable, plain-language diagnosis for specific PortAudio error codes (`-9985` busy/exclusive mode, `-9997` sample rate mismatch, `-9993` host mismatch, `-9999` host error) while preserving up to 400 characters of raw technical error text for logs.
+- **Targeted Transient Stream Retry**: Audio stream retry loop now specifically retries on transient `-9985` (`PaErrorCode -9985` device busy / exclusive lock) rather than wasting 700ms on unrecoverable disconnected hardware errors.
+- **Subscripting Compatibility & Hardening**: Implemented dictionary subscripting (`item['index']`, `item['name']`) on `SelectableInput` dataclass to ensure backwards compatibility across `devices.py` and UI lookups.
+
+---
+
 ## [1.2.7] - 2026-10-06
+
 
 - **Proactive Host API Resolver**: Introduced `src/host_api_resolver.py` (`resolve_pair` and `resolve_single`) to inspect and align duplex input/output endpoints onto the same safe Windows Host API (prioritizing WASAPI -> DirectSound -> MME) before stream initialization, eliminating PortAudio host mismatch crashes (`PaErrorCode -9993`).
 - **Elimination of WDM-KS Driver Crashes**: Proactively avoids PortAudio's unstable WDM-KS backend on Realtek onboard audio jacks (`GLE 0x492` / `ERROR_SET_NOT_FOUND` / `PaErrorCode -9999`), transparently mapping selected endpoints to modern, stable WASAPI equivalents.

@@ -89,7 +89,23 @@ def is_virtual_input_device(name: str) -> bool:
 
 
 def get_input_devices(include_virtual: bool = False) -> List[Dict]:
-    """Return all recording/microphone devices (WASAPI preferred), excluding virtual cables by default."""
+    """Return all recording/microphone devices (WASAPI preferred), deduplicated across host APIs."""
+    try:
+        from src.host_api_resolver import list_selectable_inputs
+        selectable = list_selectable_inputs(sd.query_devices(), sd.query_hostapis(), include_virtual=include_virtual)
+        if selectable:
+            return [
+                {
+                    'index': item.index,
+                    'name': item.name,
+                    'hostapi': item.host_name,
+                    'role': item.role,
+                    'inputs': 2,
+                }
+                for item in selectable
+            ]
+    except Exception:
+        pass
     devices = get_all_devices()
     # Filter for devices with input channels > 0
     inputs = [d for d in devices if d['inputs'] > 0]
@@ -103,6 +119,7 @@ def get_input_devices(include_virtual: bool = False) -> List[Dict]:
     # Prioritize WASAPI devices
     wasapi_inputs = [d for d in inputs if 'WASAPI' in d['hostapi']]
     return wasapi_inputs if wasapi_inputs else inputs
+
 
 
 def get_output_devices() -> List[Dict]:

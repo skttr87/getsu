@@ -228,3 +228,94 @@ def resolve_single(
         "Check that the device is plugged in and enabled in Windows Sound settings."
     )
 
+
+# ----------------------------------------------------------------------------- dropdown helpers
+
+@dataclass
+class SelectableInput:
+    index: int
+    name: str
+    host_name: str
+    role: Optional[str]
+
+    def __getitem__(self, item: str):
+        if item == "index":
+            return self.index
+        elif item == "name":
+            return self.name
+        elif item == "hostapi":
+            return self.host_name
+        elif item == "role":
+            return self.role
+        elif item == "inputs":
+            return 2
+        raise KeyError(item)
+
+    def get(self, item: str, default=None):
+        try:
+            return self[item]
+        except KeyError:
+            return default
+
+
+def device_role(name: str) -> Optional[str]:
+    """'mic' / 'line' / 'mix' when the name clearly indicates one jack type."""
+    return _role(name)
+
+
+def _same_physical(a: str, b: str) -> bool:
+    la, lb = a.lower().strip(), b.lower().strip()
+    if la == lb:
+        return True
+    short, long_ = (la, lb) if len(la) <= len(lb) else (lb, la)
+    if len(short) >= 20 and long_.startswith(short):      # MME truncates names at 31 characters
+        return True
+    return _similarity(a, b) >= 0.75
+
+
+def list_selectable_inputs(
+    devices: Sequence[dict],
+    hostapis: Sequence[dict],
+    include_virtual: bool = False,
+) -> List[SelectableInput]:
+    """
+    One entry per physical input, on its best safe host API (WASAPI > DirectSound > MME).
+    WDM-KS entries (jack-style names such as 'Line in at rear panel (Blue) (Realtek(R) Audio)')
+    are never listed, so a user cannot pick a path the driver may reject.
+    Virtual cables (e.g. CABLE Output) are excluded unless include_virtual is True.
+    """
+    from src.devices import is_virtual_input_device
+
+    chosen: List[SelectableInput] = []
+    for api_idx in _api_order(hostapis):
+        host_name = hostapis[api_idx]["name"]
+        for i in hostapis[api_idx].get("devices", []):
+            if i < 0 or i >= len(devices):
+                continue
+            d = devices[i]
+            if d.get("max_input_channels", 0) <= 0:
+                continue
+            if not include_virtual and is_virtual_input_device(d.get("name", "")):
+                continue
+            if any(_same_physical(d["name"], c.name) for c in chosen):
+                continue
+            chosen.append(SelectableInput(i, d["name"], host_name, _role(d["name"])))
+    chosen.sort(key=lambda c: c.index)
+    return chosen
+
+
+def selection_hint(name: Optional[str], available_names: Sequence[str] = ()) -> Optional[str]:
+    """Short advice for selections that usually are not what the user wants, else None."""
+    if not name:
+        return None
+    role = _role(name)
+    if role == "line":
+        base = "Line In is for line-level sources (mixer, phone, console)."
+        if any(_role(a) == "mic" for a in available_names):
+            return base + " For a microphone plugged into the pink jack, choose the 'Microphone' entry instead."
+        return base + " A microphone normally needs the pink Mic jack."
+    if role == "mix":
+        return "Stereo Mix records what your PC plays, not your voice."
+    return None
+
+

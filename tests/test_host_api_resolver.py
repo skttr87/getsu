@@ -6,7 +6,12 @@ from src.host_api_resolver import (
     ResolvedPair,
     _similarity,
     _role,
+    list_selectable_inputs,
+    selection_hint,
+    device_role,
+    SelectableInput,
 )
+
 
 
 def make_mock_audio_env():
@@ -227,6 +232,62 @@ class TestHostApiResolver(unittest.TestCase):
         wdmks_apis = [{"name": "Windows WDM-KS", "devices": [0], "default_input_device": 0, "default_output_device": -1}]
         with self.assertRaises(DeviceResolutionError):
             resolve_single(devs, wdmks_apis, 0, is_input=True)
+
+    def test_list_selectable_inputs_omits_wdmks_and_deduplicates(self):
+        inputs = list_selectable_inputs(self.devices, self.hostapis)
+        # Should not contain any WDM-KS devices (indices >= 10)
+        for item in inputs:
+            self.assertNotIn("WDM-KS", item.host_name.upper())
+            self.assertLess(item.index, 10)
+        names = [i.name for i in inputs]
+        # WASAPI should be preferred, and duplicates across MME/DirectSound dropped
+        self.assertIn("Microphone (Realtek Audio)", names)
+        self.assertIn("Headset Microphone (USB Audio)", names)
+        self.assertIn("Line In (Realtek Audio)", names)
+
+    def test_list_selectable_inputs_excludes_virtual_cables(self):
+        # Even if a virtual cable is present, it must be excluded unless include_virtual=True
+        devs = list(self.devices)
+        devs.append({"name": "CABLE Output (VB-Audio Virtual Cable)", "hostapi": 2, "max_input_channels": 2, "max_output_channels": 0})
+        apis = list(self.hostapis)
+        apis[2] = dict(apis[2], devices=apis[2]["devices"] + [len(devs) - 1])
+        inputs = list_selectable_inputs(devs, apis, include_virtual=False)
+        self.assertFalse(any("CABLE Output" in i.name for i in inputs))
+
+        inputs_with_virt = list_selectable_inputs(devs, apis, include_virtual=True)
+        self.assertTrue(any("CABLE Output" in i.name for i in inputs_with_virt))
+
+    def test_selection_hint_warnings(self):
+        avail = ["Microphone (Realtek Audio)", "Line In (Realtek Audio)", "Stereo Mix (Realtek Audio)"]
+        # Line In gives line advice pointing to Microphone
+        hint_line = selection_hint("Line In (Realtek Audio)", avail)
+        self.assertIsNotNone(hint_line)
+        self.assertIn("Line In is for line-level", hint_line)
+        self.assertIn("Microphone", hint_line)
+
+        # Stereo mix gives playback advice
+        hint_mix = selection_hint("Stereo Mix (Realtek Audio)", avail)
+        self.assertIsNotNone(hint_mix)
+        self.assertIn("Stereo Mix records what your PC plays", hint_mix)
+
+        # Microphone gives no warning
+        hint_mic = selection_hint("Microphone (Realtek Audio)", avail)
+        self.assertIsNone(hint_mic)
+
+    def test_selection_hint_safe_on_none_and_empty(self):
+        self.assertIsNone(selection_hint(None))
+        self.assertIsNone(selection_hint(""))
+
+    def test_selectable_input_subscriptable(self):
+        item = SelectableInput(index=4, name="Mic", host_name="WASAPI", role="mic")
+        self.assertEqual(item["index"], 4)
+        self.assertEqual(item["name"], "Mic")
+        self.assertEqual(item["hostapi"], "WASAPI")
+        self.assertEqual(item["role"], "mic")
+        self.assertEqual(item["inputs"], 2)
+        self.assertEqual(item.get("index"), 4)
+        self.assertEqual(item.get("nonexistent", 99), 99)
+
 
 
 if __name__ == "__main__":

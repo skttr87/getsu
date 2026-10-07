@@ -42,7 +42,9 @@ from src.stream import AudioEngine, create_engine_from_config
 from src.router import SmartMicRouter
 from src.rnnoise import RNNoise, FRAME_SIZE, SAMPLE_RATE
 from src.dsp import HighPassFilter, AdaptiveNoiseGate, soft_limit, calculate_levels
-from src.host_api_resolver import resolve_single, DeviceResolutionError
+from src.host_api_resolver import resolve_single, DeviceResolutionError, selection_hint
+from src.audio_errors import explain_start_error
+
 
 # Win32 Constants for System Tray Minimize/Close hook
 user32 = ctypes.windll.user32
@@ -428,6 +430,8 @@ class GetsuGUI:
             combo_items = list(self.device_map.keys())
             current_label = self._get_selected_input_label()
             dpg.configure_item("input_combo", items=combo_items, default_value=current_label)
+            self._update_selection_hint(current_label)
+
 
     def _on_device_change_event(self):
         """Debounced listener for Windows WM_DEVICECHANGE hotplug signals."""
@@ -565,6 +569,7 @@ class GetsuGUI:
             current_label = self._get_selected_input_label()
             if dpg.does_item_exist("input_combo"):
                 dpg.set_value("input_combo", current_label)
+            self._update_selection_hint(current_label)
             self.set_status_pill("▲ Stop noise cancellation first to switch microphone.", [240, 180, 50])
             return
 
@@ -581,9 +586,24 @@ class GetsuGUI:
                 self.config["input_device_name"] = app_data
                 self.config["input_device_id"] = new_idx
                 save_config(self.config)
+                self._update_selection_hint(app_data)
                 self.set_status_pill(f"● Microphone selected: {clean_device_label(app_data)}", [65, 205, 130])
         finally:
             self._release_state_lock()
+
+    def _update_selection_hint(self, selected_label: Optional[str] = None):
+        """Updates the dynamic advisory hint beneath the microphone dropdown."""
+        if not self._ui_built or not dpg.does_item_exist("input_selection_hint"):
+            return
+        label = selected_label or self._get_selected_input_label()
+        available = list(self.device_map.keys())
+        hint = selection_hint(label, available)
+        if hint:
+            dpg.set_value("input_selection_hint", f"▲ {hint}")
+            dpg.show_item("input_selection_hint")
+        else:
+            dpg.hide_item("input_selection_hint")
+
 
     def _get_idle_status(self) -> str:
         """Returns the single-line idle status string based on driver and auto_route configuration."""
@@ -609,23 +629,13 @@ class GetsuGUI:
 
     def _format_audio_error(self, e: Exception) -> str:
         """Translates technical PortAudio / driver exceptions into clear, actionable advice."""
-        if isinstance(e, DeviceResolutionError) or "DeviceResolutionError" in type(e).__name__:
-            return "Could not find a matching microphone & virtual cable pair. Check Windows Sound settings."
-        err_str = str(e)
-        if "WdmSyncIoctl" in err_str or "0x00000492" in err_str or "WDM-KS" in err_str:
-            return "Could not start microphone (driver conflict). Please re-select your mic or restart Getsu."
-        if "-9999" in err_str or "Unanticipated host error" in err_str:
-            return "Could not start microphone. Ensure it is plugged in and not in exclusive use by another app."
-        if "-9993" in err_str or "Illegal combination" in err_str:
-            return "Audio device format mismatch. Re-selecting your microphone in the list usually fixes this."
-        if "-9997" in err_str or "sample rate" in err_str.lower():
-            return "Microphone sample rate format mismatch. Please re-select your microphone."
-        if any(k in err_str.lower() for k in ["busy", "access denied", "device unavailable", "in use"]):
-            return "Microphone is in exclusive use by another app or disconnected."
-        clean_err = err_str.replace("Error starting stream: ", "").strip()
-        if len(clean_err) > 85:
-            clean_err = clean_err[:82] + "..."
-        return f"Could not start microphone: {clean_err}"
+        explained = explain_start_error(e)
+        print(f"[AUDIO] Stream error [{explained.kind}] code={explained.code}: {explained.technical}")
+        msg = f"{explained.title}. {explained.advice}"
+        if len(msg) > 85:
+            msg = msg[:82] + "..."
+        return msg
+
 
     def _set_voice_test_button_state(self, enabled: bool):
         """Sets the voice test button enabled/disabled state, contextual label, and theme."""
@@ -1560,8 +1570,10 @@ class GetsuGUI:
                 tag="input_combo",
                 width=-1
             )
+            dpg.add_text("", tag="input_selection_hint", wrap=self.s(360), color=[240, 180, 50], show=False)
 
             dpg.add_spacer(height=self.s(4))
+
 
             # --- MICROPHONE BOOST (0, 5, 10, 15 dB) ---
             dpg.add_text("Microphone Boost:", color=[180, 195, 215])
@@ -1883,8 +1895,10 @@ class GetsuGUI:
             print(f"[WARN] Failed to center window: {e}")
 
         self._update_cable_banner()
+        self._update_selection_hint()
 
         if not self.is_vbcable_installed:
+
             dpg.show_item("modal_vbcable")
 
         # Start tray icon & window hook

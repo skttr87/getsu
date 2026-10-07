@@ -29,7 +29,6 @@ Zero-Mistake Automated Publish Pipeline:
    - Creates or updates GitHub release
    - Computes SHA-256 and MD5 hashes
    - Replaces stale release assets with exponential backoff upload
-   - Adds direct VirusTotal analysis link into release notes
 8. Live Status Verification:
    - Queries GitHub API to confirm public release availability and asset size
 """
@@ -523,8 +522,6 @@ def publish_github_release(
     if not title:
         title = f"Getsu {tag}"
 
-    vt_url = f"https://www.virustotal.com/gui/file/{sha256.lower()}"
-
     body = f"""## What's New in Getsu {tag}
 
 {changelog}
@@ -536,7 +533,6 @@ def publish_github_release(
 - **SHA-256**: `{sha256}`
 - **MD5**: `{md5}`
 - **Size**: `{file_size:,} bytes` (~{size_mb:.1f} MB)
-- **VirusTotal Report**: [{sha256[:16]}...]({vt_url})
 """
 
     headers = {
@@ -548,7 +544,6 @@ def publish_github_release(
     print(f"\n[RELEASE] Target Tag: {tag}")
     print(f"[RELEASE] Title: {title}")
     print(f"[RELEASE] Installer: {installer_path.name} ({file_size:,} bytes, {sha256[:16]}...)")
-    print(f"[RELEASE] VirusTotal URL: {vt_url}")
 
     if dry_run:
         print("\n[DRY-RUN] Would publish release with body:")

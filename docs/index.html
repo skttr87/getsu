@@ -384,9 +384,14 @@
     /* Noise Block Cards Grid */
     .noise-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      grid-template-columns: repeat(2, 1fr);
       gap: 16px;
       margin: 20px 0 28px;
+    }
+    @media (max-width: 680px) {
+      .noise-grid {
+        grid-template-columns: 1fr;
+      }
     }
     .noise-card {
       background: var(--panel);
@@ -396,11 +401,12 @@
       display: flex;
       flex-direction: column;
       gap: 8px;
-      transition: border-color 0.2s ease, transform 0.2s ease;
+      transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
     }
     .noise-card:hover {
       border-color: var(--link);
       transform: translateY(-2px);
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
     }
     .noise-card-header {
       display: flex;
@@ -421,9 +427,9 @@
       margin-top: auto;
       font-family: var(--mono);
       font-size: 0.78rem;
-      background: rgba(88, 166, 255, 0.1);
+      background: rgba(88, 166, 255, 0.08);
       color: var(--link);
-      border: 1px solid rgba(88, 166, 255, 0.25);
+      border: 1px solid rgba(88, 166, 255, 0.22);
       border-radius: 4px;
       padding: 3px 8px;
     }
@@ -593,30 +599,19 @@
     <section id="blocks">
       <h2>What Getsu blocks</h2>
       <p style="color: var(--muted);">
-        Getsu pairs neural RNN processing with custom real-time digital signal filters to suppress almost every domestic and gaming noise profile:
+        Getsu cleans your mic audio in real time, cutting out common background noise from gaming setups and shared rooms:
       </p>
 
       <div class="noise-grid">
         <div class="noise-card">
           <div class="noise-card-header">
             <span>💨</span>
-            <span>Stationary Fan Roar & AC</span>
+            <span>Fans, AC & Cooling Pads</span>
           </div>
           <div class="noise-desc">
-            Standing pedestal fans, high-RPM laptop cooling pads, air conditioner hiss, and PC exhaust blowers.
+            Standing pedestal fans, loud laptop cooling pads running on high, air conditioner hiss, and PC exhaust blowers next to your desk.
           </div>
-          <div class="noise-tag">Mozilla RNNoise GRU Engine</div>
-        </div>
-
-        <div class="noise-card">
-          <div class="noise-card-header">
-            <span>🔊</span>
-            <span>Low-End Physical Rumble</span>
-          </div>
-          <div class="noise-desc">
-            Heavy footsteps, desk bumps, vibrations from typing on a wooden table, and 50/60Hz electrical ground hum.
-          </div>
-          <div class="noise-tag">80Hz 2nd-Order Butterworth HPF</div>
+          <div class="noise-tag">Mozilla RNNoise AI</div>
         </div>
 
         <div class="noise-card">
@@ -625,31 +620,31 @@
             <span>Mechanical Keys & Clicks</span>
           </div>
           <div class="noise-desc">
-            Blue, brown, and red mechanical keyboard switches, rapid mouse clicks, and frantic gaming button mashing.
+            Loud mechanical switches (blue, brown, or red), rapid mouse clicking, and aggressive button spam while gaming or typing in calls.
           </div>
-          <div class="noise-tag">Adaptive S-Curve Gate + 10ms Pre-Roll</div>
+          <div class="noise-tag">Adaptive Lookahead Gate</div>
+        </div>
+
+        <div class="noise-card">
+          <div class="noise-card-header">
+            <span>🔊</span>
+            <span>Desk Bumps & Low Rumble</span>
+          </div>
+          <div class="noise-desc">
+            Heavy footsteps, accidental table bumps, typing vibrations rattling through your mic stand, and low 50/60Hz electrical hum.
+          </div>
+          <div class="noise-tag">80Hz High-Pass Filter</div>
         </div>
 
         <div class="noise-card">
           <div class="noise-card-header">
             <span>🗣️</span>
-            <span>Distant Domestic Chatter</span>
+            <span>Room Chatter & Background Noise</span>
           </div>
           <div class="noise-desc">
-            Family talking in the next room, living room television bleed, corridor chatter, and street traffic.
+            Family talking in the next room, TV bleed down the hall, and background noise that tries to sneak in when you pause between words.
           </div>
-          <div class="noise-tag">10 dB Onset SNR Proximity Bar</div>
-        </div>
-
-        <div class="noise-card">
-          <div class="noise-card-header">
-            <span>🛑</span>
-            <span>Sentence-Ending Noise Trails</span>
-          </div>
-          <div class="noise-desc">
-            Background noise trying to rush back in as your voice decays at the end of a sentence.
-          </div>
-          <div class="noise-tag">150ms Re-Arm Cooldown Holdoff</div>
+          <div class="noise-tag">Voice Activity Detection</div>
         </div>
       </div>
     </section>

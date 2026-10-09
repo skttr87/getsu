@@ -9,7 +9,14 @@ import numpy as np
 import sounddevice as sd
 
 from src.rnnoise import RNNoise, FRAME_SIZE, SAMPLE_RATE
-from src.dsp import HighPassFilter, AdaptiveNoiseGate, calculate_levels, soft_limit
+from src.dsp import (
+    HighPassFilter,
+    AdaptiveNoiseGate,
+    calculate_levels,
+    soft_limit,
+    SpeechLeveler,
+    process_mono_frame,
+)
 from src.host_api_resolver import resolve_pair, DeviceResolutionError, ResolvedPair
 from src.audio_errors import explain_start_error, ExplainedError
 
@@ -33,12 +40,12 @@ class AudioEngine:
         vad_decay_ms: float = 80.0,
         vad_onset_threshold: float = 0.35,
         vad_onset_snr_db: float = 10.0,
-        vad_cold_start_gain: float = 0.35,
         vad_floor_gain: float = 0.06,
         mic_gain: float = 1.0,
         output_gain: float = 1.08,
         hpf_cutoff_hz: float = 80.0,
         router: Optional[Any] = None,
+        auto_level: bool = False,
     ):
         self.input_device = input_device
         self.output_device = output_device
@@ -50,7 +57,6 @@ class AudioEngine:
         self.vad_decay_ms = vad_decay_ms
         self.vad_onset_threshold = vad_onset_threshold
         self.vad_onset_snr_db = vad_onset_snr_db
-        self.vad_cold_start_gain = vad_cold_start_gain
         self.vad_floor_gain = vad_floor_gain
         self.mic_gain = mic_gain
         self.output_gain = output_gain
@@ -87,11 +93,11 @@ class AudioEngine:
             frame_ms=10.0,
             onset_threshold=self.vad_onset_threshold,
             onset_snr_db=self.vad_onset_snr_db,
-            cold_start_gain=self.vad_cold_start_gain,
             lookahead=True,
             floor_gain=self.vad_floor_gain,
             cooldown_ms=150.0,
         )
+        self.leveler: Optional[SpeechLeveler] = SpeechLeveler() if auto_level else None
 
         # Device Channel Configuration
         in_dev_info = sd.query_devices(self.input_device)
@@ -157,47 +163,24 @@ class AudioEngine:
             else:
                 frame_mono = indata.copy()
 
-            # 2. DSP Stage 1: High-Pass Filter (80Hz rumble cut for cooling pads)
-            if self.high_pass_enabled:
-                frame_mono = self.hpf.process(frame_mono)
-
-            # Dual-Stage Metering: Pre-gate input level (audible voice level without fan rumble inflation)
-            input_peak_db, input_rms_db = calculate_levels(frame_mono)
-
-            # Preserving clean dynamic headroom for RNNoise without pre-saturation clipping
-            np.clip(frame_mono, -1.0, 1.0, out=frame_mono)
-
-            speech_prob = 0.0
+            # 2. Unified Core DSP Pipeline
             total_gain = self.output_gain * self.mic_gain
-            # 3. DSP Stage 2 & 3: RNNoise Neural Suppression + Soft-Knee Adaptive Gate
-            rn = self.rnnoise
-            if self.denoise_enabled and getattr(self, 'denoise_available', True) and rn is not None:
-                # Scale to 16-bit float range expected by RNNoise
-                frame_rn = frame_mono * 32767.0
-                frame_rn, speech_prob = rn.process_frame(frame_rn)
-                frame_mono = frame_rn / 32767.0
+            rn = self.rnnoise if (self.denoise_enabled and getattr(self, 'denoise_available', True)) else None
+            hpf = self.hpf if self.high_pass_enabled else None
 
-                # Post-RNNoise gain staging (preserves natural voice body)
-                if total_gain != 1.0:
-                    frame_mono *= total_gain
+            frame_mono, speech_prob, input_peak_db, input_rms_db = process_mono_frame(
+                frame_mono=frame_mono,
+                rnnoise=rn,
+                hpf=hpf,
+                gate=self.gate,
+                total_gain=total_gain,
+                denoise_enabled=bool(rn is not None),
+                leveler=self.leveler,
+            )
 
-                # Soft-knee gate for cooling pad silence floor (in-place zeroing for zero heap allocation)
-                frame_mono, _ = self.gate.process(frame_mono, speech_prob, input_rms_db=input_rms_db, in_place=True)
-            else:
-                # Bypass Mode: apply gain and derive speech probability from RMS energy to silence background hiss
-                if total_gain != 1.0:
-                    frame_mono *= total_gain
-                speech_prob = min(1.0, max(0.0, (input_rms_db + 45.0) / 20.0))
-                frame_mono, _ = self.gate.process(frame_mono, speech_prob, input_rms_db=input_rms_db, in_place=True)
-
-            # Soft limiting to gently compress loud peaks without harsh clipping distortion
-            frame_mono = soft_limit(frame_mono, threshold=0.85)
-
-            # Calculate post-gate output metrics and atomically swap metrics tuple
+            # 3. Post-gate output metrics and clip protection
             peak_db, rms_db = calculate_levels(frame_mono)
             self._metrics = (speech_prob, peak_db, rms_db, input_peak_db)
-
-            # Final clip to prevent DAC wrap distortion
             np.clip(frame_mono, -1.0, 1.0, out=frame_mono)
 
             # Route to output device (mono or stereo)
@@ -478,7 +461,7 @@ def create_engine_from_config(
 
     boost_db = config.get("mic_boost_db", 0)
     boost_mult = 10.0 ** (boost_db / 20.0)
-    mic_gain = config.get("mic_gain", 1.0) * base_gain * boost_mult
+    engine_mic_gain = base_gain * boost_mult
 
     return AudioEngine(
         input_device=input_device_id,
@@ -491,10 +474,10 @@ def create_engine_from_config(
         vad_decay_ms=config.get("vad_decay_ms", 80.0),
         vad_onset_threshold=config.get("vad_onset_threshold", 0.35),
         vad_onset_snr_db=config.get("vad_onset_snr_db", 10.0),
-        vad_cold_start_gain=config.get("vad_cold_start_gain", 0.35),
         vad_floor_gain=config.get("vad_floor_gain", 0.06),
-        mic_gain=mic_gain,
+        mic_gain=engine_mic_gain,
         output_gain=config.get("output_gain", 1.08),
         hpf_cutoff_hz=config.get("hpf_cutoff_hz", 80.0),
         router=router,
+        auto_level=config.get("auto_level", False),
     )

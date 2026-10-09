@@ -8,13 +8,21 @@ class ExplainTests(unittest.TestCase):
     def kind(self, text, exc=RuntimeError):
         return explain_start_error(exc(text)).kind
 
-    def test_reported_wdmks_error(self):
+    def test_reported_jack_unplugged_error(self):
         raw = ("Error starting stream: Unanticipated host error [PaErrorCode -9999]: 'WdmSyncIoctl: DeviceIoControl "
                "GLE = 0x00000492 (prop_set = {1464EDA5-6A8F-11D1-9AA7-00A0C9223196}, prop_id = 0)' [Windows WDM-KS error 0]")
         e = explain_start_error(RuntimeError(raw))
+        self.assertEqual(e.kind, "jack_unplugged")
+        self.assertEqual(e.code, -9999)
+        self.assertIn("No active connection", e.title)
+        self.assertIn("WdmSyncIoctl", e.technical)
+
+    def test_reported_wdmks_error(self):
+        raw = ("Error starting stream: Unanticipated host error [PaErrorCode -9999]: 'WdmSyncIoctl: DeviceIoControl "
+               "GLE = 0x00000005' [Windows WDM-KS error 0]")
+        e = explain_start_error(RuntimeError(raw))
         self.assertEqual(e.kind, "wdmks")
         self.assertEqual(e.code, -9999)
-        self.assertIn("WdmSyncIoctl", e.technical)
 
     def test_codes(self):
         self.assertEqual(self.kind("PaErrorCode -9985"), "busy")

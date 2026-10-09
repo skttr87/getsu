@@ -1,6 +1,5 @@
 {
-    "app_name": "Getsu",
-    "version": "1.2.8",
+    "version": "1.2.9",
     "input_device_id": null,
     "input_device_name": null,
     "output_device_id": null,
@@ -14,12 +13,10 @@
     "vad_decay_ms": 80.0,
     "vad_onset_threshold": 0.35,
     "vad_onset_snr_db": 10.0,
-    "vad_cold_start_gain": 0.0,
     "vad_floor_gain": 0.06,
     "output_gain": 1.08,
-    "mic_gain": 1.0,
     "mic_boost_db": 0,
-    "mute": false,
+    "auto_level": false,
     "is_swapped": false,
     "original_mic_id": null,
     "auto_route": true

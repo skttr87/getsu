@@ -41,7 +41,14 @@ from src.config import load_config, save_config
 from src.stream import AudioEngine, create_engine_from_config
 from src.router import SmartMicRouter
 from src.rnnoise import RNNoise, FRAME_SIZE, SAMPLE_RATE
-from src.dsp import HighPassFilter, AdaptiveNoiseGate, soft_limit, calculate_levels
+from src.dsp import (
+    HighPassFilter,
+    AdaptiveNoiseGate,
+    soft_limit,
+    calculate_levels,
+    SpeechLeveler,
+    process_mono_frame,
+)
 from src.host_api_resolver import resolve_single, DeviceResolutionError, selection_hint
 from src.audio_errors import explain_start_error
 
@@ -631,10 +638,7 @@ class GetsuGUI:
         """Translates technical PortAudio / driver exceptions into clear, actionable advice."""
         explained = explain_start_error(e)
         print(f"[AUDIO] Stream error [{explained.kind}] code={explained.code}: {explained.technical}")
-        msg = f"{explained.title}. {explained.advice}"
-        if len(msg) > 85:
-            msg = msg[:82] + "..."
-        return msg
+        return f"{explained.title}. {explained.advice}"
 
 
     def _set_voice_test_button_state(self, enabled: bool):
@@ -902,7 +906,9 @@ class GetsuGUI:
             dev_name = in_info['name'].lower()
             is_laptop = any(k in dev_name for k in ["realtek", "array", "built-in", "internal"])
             base_gain = 1.2 if is_laptop else 1.0
-            test_gain = self.config.get("mic_gain", 1.0) * base_gain * boost_mult
+            test_gain = base_gain * boost_mult
+            out_gain = float(self.config.get("output_gain", 1.08))
+            total_gain = out_gain * test_gain
             vad_th = float(self.config.get("vad_threshold", 0.70))
 
             rn = RNNoise()
@@ -916,12 +922,12 @@ class GetsuGUI:
                 frame_ms=10.0,
                 onset_threshold=float(self.config.get("vad_onset_threshold", 0.35)),
                 onset_snr_db=float(self.config.get("vad_onset_snr_db", 10.0)),
-                cold_start_gain=float(self.config.get("vad_cold_start_gain", 0.35)),
                 lookahead=True,
                 floor_gain=float(self.config.get("vad_floor_gain", 0.06)),
                 cooldown_ms=150.0,
             )
             gate.recalibrate()
+            leveler = SpeechLeveler() if self.config.get("auto_level", False) else None
 
             # Phase 1: Record 11 seconds (speakers MUTED, RAM only)
             total_chunks = 1100
@@ -960,24 +966,16 @@ class GetsuGUI:
                     else:
                         mono = indata.copy()
 
-                    # DSP Stage 1: High-Pass Filter (80Hz rumble cut)
-                    mono = hpf.process(mono)
-
-                    # Dual-Stage Metering & unclipped headroom preservation before RNNoise
-                    _, input_rms_db = calculate_levels(mono)
-                    np.clip(mono, -1.0, 1.0, out=mono)
-
-                    # DSP Stage 2: RNNoise neural suppression
-                    frame_rn = mono * 32767.0
-                    frame_rn, sp = rn.process_frame(frame_rn)
-
-                    # DSP Stage 3: Post-RNNoise gain staging
-                    out_gain = float(self.config.get("output_gain", 1.08))
-                    mono = (frame_rn / 32767.0) * out_gain * test_gain
-
-                    # DSP Stage 4: Soft-knee gate & gentle limiter
-                    mono, _ = gate.process(mono, sp, input_rms_db=input_rms_db, in_place=True)
-                    mono = soft_limit(mono, threshold=0.85)
+                    # Unified Single-Frame DSP Pipeline
+                    mono, _, _, _ = process_mono_frame(
+                        frame_mono=mono,
+                        rnnoise=rn,
+                        hpf=hpf,
+                        gate=gate,
+                        total_gain=total_gain,
+                        denoise_enabled=True,
+                        leveler=leveler,
+                    )
                     processed_chunks.append(mono)
 
                     # Update countdown UI once every 100 chunks (~1.0s)

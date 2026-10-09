@@ -3,7 +3,13 @@ Unit Tests for DSP Filter, Noise Gate, and RNNoise Inference.
 """
 import unittest
 import numpy as np
-from src.dsp import HighPassFilter, AdaptiveNoiseGate, calculate_levels
+from src.dsp import (
+    HighPassFilter,
+    AdaptiveNoiseGate,
+    calculate_levels,
+    SpeechLeveler,
+    process_mono_frame,
+)
 from src.rnnoise import RNNoise, FRAME_SIZE, SAMPLE_RATE
 
 
@@ -42,7 +48,6 @@ class TestDSP(unittest.TestCase):
             decay_ms=20.0,
             attack_ms=15.0,
             frame_ms=10.0,
-            cold_start_gain=0.0,
         )
         frame = np.ones(FRAME_SIZE, dtype=np.float32) * 0.5
 
@@ -74,8 +79,8 @@ class TestDSP(unittest.TestCase):
         self.assertEqual(gain, 0.0, "Gate failed to reach complete silence")
         np.testing.assert_array_equal(gated_frame, np.zeros_like(frame))
 
-    def test_adaptive_noise_gate_dual_key_onset_and_cold_start(self):
-        """Verify dual-key onset trigger fast-opens on low VAD with energy jump and applies cold start gain."""
+    def test_adaptive_noise_gate_dual_key_onset_and_continuity(self):
+        """Verify dual-key onset trigger fast-opens on low VAD with energy jump."""
         gate = AdaptiveNoiseGate(
             threshold=0.70,
             close_threshold=0.45,
@@ -85,7 +90,6 @@ class TestDSP(unittest.TestCase):
             frame_ms=10.0,
             onset_threshold=0.30,
             onset_snr_db=7.0,
-            cold_start_gain=0.70,
         )
         frame = np.ones(FRAME_SIZE, dtype=np.float32) * 0.1
 
@@ -97,10 +101,9 @@ class TestDSP(unittest.TestCase):
         # Frame 6: Early consonant onset ('h', 's', 't') -> prob 0.35 (< 0.70 threshold), but -35 dB (> -50 + 7 dB)
         gated, gain = gate.process(frame, speech_prob=0.35, input_rms_db=-35.0)
         self.assertTrue(gate.is_open, "Dual-key onset trigger should open gate on consonant energy rise")
-        # Cold start gain (0.70) + 1 frame attack ramp
-        self.assertGreaterEqual(gain, 0.70, "Cold start gain should be at least 0.70 on initial frame")
+        self.assertGreater(gain, 0.0, "Gate should ramp open on initial frame")
 
-        # Frame 7: Loud voiced vowel follows (prob 0.85, -20 dB) -> Full open
+        # Frame 7: Loud voiced vowel follows (prob 0.85, -20 dB) -> Smooth ramp towards 1.0
         gated, gain = gate.process(frame, speech_prob=0.85, input_rms_db=-20.0)
         self.assertGreaterEqual(gain, 0.90)
 
@@ -209,7 +212,7 @@ class TestDSP(unittest.TestCase):
     def test_adaptive_noise_gate_raised_cosine_s_curve_ramping(self):
         """Verify noise gate uses smooth Raised-Cosine (Hann) S-curve ramping without step discontinuities."""
         gate = AdaptiveNoiseGate()
-        self.assertEqual(gate.cold_start_gain, 0.35)
+        self.assertEqual(gate.floor_gain, 0.0)
         self.assertEqual(gate.onset_snr_db, 10.0)
         self.assertEqual(gate.attack_rate, 1.0 - np.exp(-10.0 / 28.0))
 
@@ -242,8 +245,8 @@ class TestDSP(unittest.TestCase):
         # Frame 3: Continuing voice
         f_speech2 = np.ones(FRAME_SIZE, dtype=np.float32) * 0.75
         out3, g3 = gate.process(f_speech2.copy(), speech_prob=0.95, input_rms_db=-20.0)
-        # Out3 is the actual first speech frame, delivered at smooth high gain (>= 0.65)
-        self.assertGreaterEqual(g3, 0.65)
+        # Out3 is the actual first speech frame, delivered at smooth high gain (>= 0.50)
+        self.assertGreaterEqual(g3, 0.50)
         self.assertAlmostEqual(float(np.max(out3)), 0.75 * g3, places=2)
 
     def test_adaptive_noise_gate_rearm_cooldown_blocks_background_chatter(self):
@@ -359,7 +362,54 @@ class TestDSP(unittest.TestCase):
         gate.process(frame, speech_prob=0.60, input_rms_db=-40.0)
         self.assertTrue(gate.is_open, "High-energy near-field speech must break through cooldown")
 
+    def test_speech_leveler_freezes_during_silence(self):
+        """Verify leveler estimate freezes during silence and low speech confidence (zero noise pumping)."""
+        leveler = SpeechLeveler(target_rms_db=-24.0, max_boost_db=9.0, voicing_threshold=0.60)
+        frame = np.zeros(FRAME_SIZE, dtype=np.float32)
+
+        # Feed silence with speech_prob 0.10
+        _, gain = leveler.process(frame, speech_prob=0.10, input_rms_db=-65.0)
+        self.assertEqual(gain, 1.0)
+        self.assertEqual(leveler.voiced_rms_db, -24.0)
+
+        # Feed noise with speech_prob 0.40 (below 0.60)
+        _, gain = leveler.process(frame, speech_prob=0.40, input_rms_db=-40.0)
+        self.assertEqual(gain, 1.0)
+        self.assertEqual(leveler.voiced_rms_db, -24.0)
+
+    def test_speech_leveler_boosts_quiet_speech_up_to_clamp(self):
+        """Verify leveler adapts upward on quiet speech and respects max boost clamp (+9.0 dB = ~2.82x)."""
+        leveler = SpeechLeveler(target_rms_db=-24.0, max_boost_db=9.0, voicing_threshold=0.60, max_slew_up_db_per_sec=100.0)
+        frame = np.ones(FRAME_SIZE, dtype=np.float32) * 0.05
+
+        # Feed 100 frames (~1s) of quiet speech at -35 dBFS
+        for _ in range(100):
+            out, gain = leveler.process(frame.copy(), speech_prob=0.90, input_rms_db=-35.0)
+
+        # Gain must rise and be clamped to <= 2.82x (+9.0 dB)
+        self.assertGreater(gain, 1.5)
+        self.assertLessEqual(gain, 2.83)
+
+    def test_unified_process_mono_frame_pipeline(self):
+        """Verify process_mono_frame executes full 7-stage chain without crashes."""
+        gate = AdaptiveNoiseGate(lookahead=False, calibrate_startup=False)
+        frame = np.ones(FRAME_SIZE, dtype=np.float32) * 0.1
+        out, sp, peak, rms = process_mono_frame(
+            frame_mono=frame.copy(),
+            rnnoise=None,
+            hpf=None,
+            gate=gate,
+            total_gain=1.0,
+            denoise_enabled=False,
+            leveler=None,
+        )
+        self.assertEqual(len(out), FRAME_SIZE)
+        self.assertIsInstance(sp, float)
+        self.assertIsInstance(peak, float)
+        self.assertIsInstance(rms, float)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

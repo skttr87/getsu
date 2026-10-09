@@ -7,10 +7,9 @@ import json
 import copy
 from typing import Dict, Any
 
-APP_VERSION: str = "1.2.8"
+APP_VERSION: str = "1.2.9"
 
 DEFAULT_CONFIG: Dict[str, Any] = {
-    "app_name": "Getsu",
     "version": APP_VERSION,
 
     "input_device_id": None,
@@ -26,12 +25,10 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "vad_decay_ms": 80.0,           # Smooth natural fade to pure silence
     "vad_onset_threshold": 0.35,    # Low-threshold trigger for initial unvoiced consonants
     "vad_onset_snr_db": 10.0,        # Required dB rise above noise floor for fast onset
-    "vad_cold_start_gain": 0.0,     # Cold start initial gain (0.0 when floor_gain handles continuous continuity)
     "vad_floor_gain": 0.06,         # Noise gate floor / expander range ~ -24.4 dB, eliminates pop/harsh boundary steps
     "output_gain": 1.08,            # Post-RNNoise make-up gain (+0.7 dB)
-    "mic_gain": 1.0,                # Input multiplier
-    "mic_boost_db": 0,              # Microphone boost step (0, 5, 10, 15 dB)
-    "mute": False,
+    "mic_boost_db": 0,              # Authoritative microphone boost setting (0, 5, 10, 15 dB)
+    "auto_level": False,            # Staged dynamic speech leveler (default False in v1.2.9)
     "is_swapped": False,            # Tracks if Windows default mic is currently CABLE Output
     "original_mic_id": None,        # Stores Windows CoreAudio endpoint GUID string of physical mic
     "auto_route": True,             # Settings toggle: Auto-Route to Apps (switch default mic when active)
@@ -100,9 +97,13 @@ def load_config() -> Dict[str, Any]:
 
         # Automatic Migration: Upgrade legacy configs
         migrated = False
-        if merged.get("vad_cold_start_gain") in (0.70, 0.35):
-            merged["vad_cold_start_gain"] = 0.0
-            migrated = True
+
+        # v1.2.9: Explicitly purge dead and contradictory keys
+        for legacy_key in ("vad_cold_start_gain", "mute", "mic_gain", "app_name"):
+            if legacy_key in merged:
+                merged.pop(legacy_key, None)
+                migrated = True
+
         if merged.get("vad_onset_snr_db") in (4.0, 5.0, 6.0, 7.0, 8.0):
             merged["vad_onset_snr_db"] = 10.0
             migrated = True

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.9] - 2026-10-09
+
+- **Actionable Hardware Jack Disconnect Diagnostics (`0x00000492`)**: Dedicated, hedged error classification for Realtek/Windows open-circuit jack errors (`ERROR_SET_NOT_FOUND`). Replaced misleading audio path advice with clear troubleshooting instructions (checking 3.5mm cable, using a Y-splitter for combo headsets, or trying another microphone).
+- **Text Truncation Removal**: Eliminated the artificial 82-character truncate in `gui.py:_format_audio_error()`. The multi-sentence troubleshooting advice now wraps smoothly inside the status notice without clipping or overlapping the footer.
+- **Unified Core DSP Pipeline (`process_mono_frame`)**: Consolidated frame-level DSP (High-Pass Filter $\to$ Metering $\to$ RNNoise $\to$ Gain Staging $\to$ AdaptiveNoiseGate $\to$ Soft Limiter) into a single authoritative processing function shared by both the live streaming engine and the Voice Test thread, permanently eliminating parameter divergence and volume desync.
+- **Acoustic Speech Leveler (`SpeechLeveler`)**: Introduced dynamic target speech leveling for quiet microphones (Bluetooth TWS earbuds, USB headsets, and laptop mic arrays) targeting $-24.0\text{ dBFS}$ RMS with a $+9.0\text{ dB}$ maximum boost clamp and asymmetric slew rates. Staged safely behind `config["auto_level"]` (default off for v1.2.9).
+- **Dead Code & Config Sanitization**: Fully pruned dormant `vad_cold_start_gain` (superseded by continuous downward expander floor `0.06`), deprecated contradictory `config["mic_gain"]` in favor of authoritative `mic_boost_db`, removed unused `ensure_physical_default_playback()`, and purged unread metadata (`mute`, `app_name`) from `DEFAULT_CONFIG` with an automated migration purge on startup.
+
+---
+
 ## [1.2.8] - 2026-10-08
 
 - **Host-API Tiering & Deduplicated Safe Inputs (`list_selectable_inputs`)**: Enumerate physical recording endpoints using modern Windows CoreAudio (WASAPI) as the authoritative hardware layer, completely pruning synthetic Win32 proxy mappers (`Microsoft Sound Mapper`, `Primary Sound Capture Driver`) across all Windows locales. Virtual cable bridges (`CABLE Output`) are strictly excluded to prevent infinite feedback loops.

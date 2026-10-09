@@ -34,12 +34,19 @@ def explain_start_error(exc: BaseException) -> ExplainedError:
     if type(exc).__name__ == "DeviceResolutionError" or "DeviceResolutionError" in type(exc).__name__:
         return make("no_pair", "No usable microphone and virtual cable pair", text)
 
-    if "wdmsyncioctl" in low or "wdm-ks" in low or "0x00000492" in low:
+    if "0x00000492" in low or "0x80070492" in low:
+        return make(
+            "jack_unplugged",
+            "No active connection on this audio input",
+            "Make sure your mic cable is firmly plugged in (use a 3.5mm Y-splitter if your headset has a single combo plug), or try another microphone entry from the list.",
+        )
+
+    if "wdmsyncioctl" in low or "wdm-ks" in low:
         return make(
             "wdmks",
             "This microphone entry uses an audio path your driver doesn't support",
             "Pick the same microphone again from the list (Getsu now uses the standard Windows audio path). "
-            "If it keeps happening, check that the microphone is plugged into the pink jack.",
+            "If it keeps happening, check that the microphone is plugged in firmly.",
         )
     if code == -9985:
         return make(

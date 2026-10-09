@@ -14,6 +14,7 @@ v1.2.6 gate changes:
 """
 import math
 from collections import deque
+from typing import Tuple, Optional, Any
 import numpy as np
 
 
@@ -167,7 +168,6 @@ class AdaptiveNoiseGate:
         frame_ms: float = 10.0,
         onset_threshold: float = 0.35,
         onset_snr_db: float = 10.0,
-        cold_start_gain: float = 0.35,
         lookahead: bool = False,
         floor_gain: float = 0.0,
         cooldown_ms: float = 150.0,
@@ -188,7 +188,6 @@ class AdaptiveNoiseGate:
         self.onset_snr_db = onset_snr_db
         self.sustain_snr_db = sustain_snr_db
         self.sustain_threshold = sustain_threshold
-        self.cold_start_gain = cold_start_gain
         self.noise_floor_db = self.FLOOR_INIT_DB
         self.lookahead = lookahead
         self.floor_gain = floor_gain
@@ -352,8 +351,6 @@ class AdaptiveNoiseGate:
                 self._frames_since_voiced = 0 if speech_prob >= self.close_threshold else 1000
                 self._burst_voiced = 1 if speech_prob >= self.close_threshold else 0
                 target_gain = 1.0
-                if self.floor_gain <= 0.0 and self.current_gain == 0.0 and self.cold_start_gain > 0.0:
-                    self.current_gain = self.cold_start_gain
             else:
                 target_gain = self.floor_gain
         else:
@@ -482,4 +479,136 @@ def soft_limit(x: np.ndarray, threshold: float = 0.85) -> np.ndarray:
     scale = 1.0 - threshold
     out[over] = np.sign(x[over]) * (threshold + scale * np.tanh((abs_x[over] - threshold) / scale))
     return out
+
+
+class SpeechLeveler:
+    """
+    Dynamic Target Speech Leveler for quiet microphones (Bluetooth TWS, USB headsets, laptop arrays).
+    - Only tracks voiced speech RMS when speech_prob >= voicing_threshold (0.60).
+    - Freezes level estimation during silence, breathing, or background noise (zero noise pumping).
+    - Normalizes speech toward target_rms_db (-24.0 dBFS) with max boost clamp (+9.0 dB).
+    - Asymmetric slew rate: fast recovery downward to avoid clipping, smooth gentle upward ramp.
+    """
+
+    def __init__(
+        self,
+        target_rms_db: float = -24.0,
+        max_boost_db: float = 9.0,
+        voicing_threshold: float = 0.60,
+        frame_ms: float = 10.0,
+        attack_ms: float = 40.0,
+        decay_ms: float = 500.0,
+        max_slew_up_db_per_sec: float = 5.0,
+    ):
+        self.target_rms_db = target_rms_db
+        self.max_boost_mult = 10.0 ** (max_boost_db / 20.0)
+        self.voicing_threshold = voicing_threshold
+        self.frame_ms = frame_ms
+
+        self.alpha_attack = math.exp(-frame_ms / attack_ms)
+        self.alpha_decay = math.exp(-frame_ms / decay_ms)
+        self.max_slew_up = (max_slew_up_db_per_sec * (frame_ms / 1000.0))
+
+        # Initial state: nominal 1.0x gain, running voiced RMS seeded at target
+        self.voiced_rms_db: float = target_rms_db
+        self.current_gain: float = 1.0
+
+    def reset(self):
+        """Reset running leveler estimate back to default target level."""
+        self.voiced_rms_db = self.target_rms_db
+        self.current_gain = 1.0
+
+    def process(self, frame: np.ndarray, speech_prob: float, input_rms_db: float) -> Tuple[np.ndarray, float]:
+        """
+        Calculates and applies leveler gain on a 10ms audio frame.
+        Returns: (processed_frame, current_leveler_gain)
+        """
+        # Voiced speech gating: freeze estimation during silence/noise
+        if speech_prob >= self.voicing_threshold and input_rms_db > -60.0:
+            if input_rms_db > self.voiced_rms_db:
+                self.voiced_rms_db = (
+                    self.alpha_attack * self.voiced_rms_db + (1.0 - self.alpha_attack) * input_rms_db
+                )
+            else:
+                self.voiced_rms_db = (
+                    self.alpha_decay * self.voiced_rms_db + (1.0 - self.alpha_decay) * input_rms_db
+                )
+
+        # Compute desired gain to reach target level
+        error_db = self.target_rms_db - self.voiced_rms_db
+        desired_gain_db = max(0.0, min(20.0 * math.log10(self.max_boost_mult), error_db))
+        desired_gain = 10.0 ** (desired_gain_db / 20.0)
+
+        # Asymmetric slew rate limiting: rapid downward, smooth upward
+        if desired_gain < self.current_gain:
+            # Immediate downward step to protect headroom
+            self.current_gain = desired_gain
+        else:
+            current_gain_db = 20.0 * math.log10(max(1e-4, self.current_gain))
+            current_gain_db = min(desired_gain_db, current_gain_db + self.max_slew_up)
+            self.current_gain = 10.0 ** (current_gain_db / 20.0)
+
+        if self.current_gain != 1.0:
+            return frame * self.current_gain, self.current_gain
+        return frame, 1.0
+
+
+def process_mono_frame(
+    frame_mono: np.ndarray,
+    rnnoise: Optional[Any],
+    hpf: Optional[HighPassFilter],
+    gate: AdaptiveNoiseGate,
+    total_gain: float = 1.0,
+    denoise_enabled: bool = True,
+    leveler: Optional[SpeechLeveler] = None,
+) -> Tuple[np.ndarray, float, float, float]:
+    """
+    Authoritative single-frame (10ms) DSP processing pipeline shared by both the live stream
+    engine and the GUI Voice Test thread.
+
+    Pipeline:
+      1. High-Pass Filter (80Hz rumble cut)
+      2. Dual-Stage Metering & Headroom Pre-clip
+      3. RNNoise Neural Suppression (or energy-derived probability in bypass)
+      4. Optional SpeechLeveler (gated voiced auto-gain)
+      5. Post-RNNoise Gain Staging
+      6. AdaptiveNoiseGate (zero-allocation downward expander)
+      7. Transparent Soft-Limiter
+
+    Returns:
+      (processed_frame, speech_prob, input_peak_db, input_rms_db)
+    """
+    # 1. High-Pass Filter
+    if hpf is not None:
+        frame_mono = hpf.process(frame_mono)
+
+    # 2. Dual-Stage Metering: input levels
+    input_peak_db, input_rms_db = calculate_levels(frame_mono)
+    np.clip(frame_mono, -1.0, 1.0, out=frame_mono)
+
+    # 3. RNNoise Neural Core
+    speech_prob = 0.0
+    if denoise_enabled and rnnoise is not None:
+        frame_rn = frame_mono * 32767.0
+        frame_rn, speech_prob = rnnoise.process_frame(frame_rn)
+        frame_mono = frame_rn / 32767.0
+    else:
+        speech_prob = min(1.0, max(0.0, (input_rms_db + 45.0) / 20.0))
+
+    # 4. Dynamic Speech Leveler (if enabled)
+    if leveler is not None:
+        frame_mono, _ = leveler.process(frame_mono, speech_prob, input_rms_db)
+
+    # 5. Gain Staging
+    if total_gain != 1.0:
+        frame_mono *= total_gain
+
+    # 6. Soft-Knee Adaptive Noise Gate
+    frame_mono, _ = gate.process(frame_mono, speech_prob, input_rms_db=input_rms_db, in_place=True)
+
+    # 7. Soft Saturation Limiter
+    frame_mono = soft_limit(frame_mono, threshold=0.85)
+
+    return frame_mono, speech_prob, input_peak_db, input_rms_db
+
 

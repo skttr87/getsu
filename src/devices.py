@@ -387,26 +387,6 @@ def get_physical_output_device() -> Optional[Dict]:
     return physical_outputs[0]
 
 
-def ensure_physical_default_playback() -> bool:
-    """
-    Ensures that Windows default playback device is physical speakers/headphones, never CABLE Input.
-    """
-    try:
-        if getattr(sys, 'frozen', False):
-            tool_exe = os.path.join(getattr(sys, '_MEIPASS', ''), "drivers", "vbcable", "AudioRestore.exe")
-            if not os.path.exists(tool_exe):
-                tool_exe = os.path.join(os.path.dirname(sys.executable), "drivers", "vbcable", "AudioRestore.exe")
-        else:
-            tool_exe = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "drivers", "vbcable", "AudioRestore.exe"))
-
-        if os.path.exists(tool_exe):
-            res = subprocess.run([tool_exe, "--ensure-physical"], creationflags=0x08000000, timeout=5)
-            return res.returncode == 0
-        return False
-    except Exception as e:
-        print(f"[WARN] Failed to verify default playback device: {e}")
-        return False
-
 
 def install_vbcable_driver() -> bool:
     """

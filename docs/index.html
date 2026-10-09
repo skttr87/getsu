@@ -508,6 +508,43 @@
       border-radius: 4px;
     }
 
+    /* CLI Table */
+    .table-wrap {
+      overflow-x: auto;
+      margin: 16px 0 24px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+      text-align: left;
+    }
+    th, td {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    th {
+      background: rgba(22, 27, 34, 0.9);
+      color: var(--text);
+      font-weight: 600;
+      font-size: 0.88rem;
+    }
+    tr:last-child td {
+      border-bottom: none;
+    }
+    td code {
+      font-family: var(--mono);
+      color: #79C0FF;
+      background: var(--code-bg);
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid rgba(48, 54, 61, 0.6);
+      font-size: 0.85rem;
+    }
+
     @media (max-width: 820px) {
       .hero-grid {
         grid-template-columns: 1fr;
@@ -538,6 +575,7 @@
       <div class="nav-links">
         <a href="#blocks">What It Blocks</a>
         <a href="#how-it-works">How It Works</a>
+        <a href="#cli">CLI Cleaner</a>
         <a href="#limits">Limits</a>
         <a href="#faq">FAQ</a>
         <a href="https://github.com/skttr87/getsu" target="_blank">GitHub</a>
@@ -712,7 +750,101 @@
       </p>
       <p style="color: var(--muted); font-size: 0.95rem;">
         <em>Note: The installer bundles the standard VB-Audio Virtual Cable driver. You can untick it during setup if you already have it installed.</em>
+    </section>
+
+    <!-- Headless CLI Batch Cleaner -->
+    <section id="cli">
+      <h2>Headless Audio Batch Cleaner (getsu-cli)</h2>
+      <p>
+        Getsu v1.3.0 includes <code>getsu-cli.exe</code>, a high-performance console companion tool designed for terminal power users, batch audio post-production, and automated CI pipelines. It executes completely decoupled from the desktop app, allowing you to clean recorded files while Getsu filters your live microphone in the background.
       </p>
+
+      <div class="setup-grid" style="margin-top: 18px;">
+        <div class="setup-card">
+          <h3>⚡ Quick Clean</h3>
+          <p style="color: var(--muted); font-size: 0.9rem; margin-bottom: 8px;">Clean single audio files or specify custom output destinations:</p>
+          <div class="diagram-box" style="margin: 4px 0 8px; padding: 10px 14px; font-size: 0.82rem;">
+# Automatically outputs to recording_cleaned.wav
+getsu-cli --clean recording.wav
+
+# Specify custom destination path
+getsu-cli --clean in.wav D:\output\clean.wav
+          </div>
+        </div>
+
+        <div class="setup-card">
+          <h3>📁 Batch Directory</h3>
+          <p style="color: var(--muted); font-size: 0.9rem; margin-bottom: 8px;">Process all WAV, MP3, FLAC, and OGG files in a folder:</p>
+          <div class="diagram-box" style="margin: 4px 0 8px; padding: 10px 14px; font-size: 0.82rem;">
+# Cleans all audio files in directory
+getsu-cli --clean D:\recordings\podcast\
+          </div>
+        </div>
+
+        <div class="setup-card">
+          <h3>🎧 Stereo & Music Mode</h3>
+          <p style="color: var(--muted); font-size: 0.9rem; margin-bottom: 8px;">Linked-stereo gating and natural musical sustain:</p>
+          <div class="diagram-box" style="margin: 4px 0 8px; padding: 10px 14px; font-size: 0.82rem;">
+# Coupled linked-stereo gating
+getsu-cli --clean track.wav --stereo
+
+# Preserves singing vibrato & instrument sustain
+getsu-cli --clean vocals.wav --music-mode
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top: 20px;">
+        <h3 style="font-size: 1.05rem; margin-bottom: 8px;">CLI Options & Flags</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 25%;">Option / Flag</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>--clean &lt;path&gt;</code></td>
+                <td>Input audio file or folder to clean (<em>required</em>).</td>
+              </tr>
+              <tr>
+                <td><code>--stereo</code></td>
+                <td>Coupled linked-stereo gating tracking master RMS/speech probability across channels (zero stereo wobble).</td>
+              </tr>
+              <tr>
+                <td><code>--music-mode</code></td>
+                <td>Bypasses RNNoise and extends hangover to 800ms with a gentle 250ms decay for singing and acoustic instruments.</td>
+              </tr>
+              <tr>
+                <td><code>--auto-level</code></td>
+                <td>Dynamically normalizes quiet speech levels toward -24 dBFS.</td>
+              </tr>
+              <tr>
+                <td><code>--gain &lt;float&gt;</code></td>
+                <td>Makeup gain boost in decibels (e.g. <code>--gain 3.5</code>).</td>
+              </tr>
+              <tr>
+                <td><code>--report-json &lt;path&gt;</code></td>
+                <td>Exports frame-by-frame telemetry JSON log for automated acoustic profiling.</td>
+              </tr>
+              <tr>
+                <td><code>--no-progress</code></td>
+                <td>Suppresses console progress bar (ideal for headless CI/CD scripts).</td>
+              </tr>
+              <tr>
+                <td><code>--no-stats</code></td>
+                <td>Suppresses summary statistics table.</td>
+              </tr>
+              <tr>
+                <td><code>--check-devices</code></td>
+                <td>Prints audio endpoints diagnostics report.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </section>
 
     <!-- Limits (Honest & Transparent) -->

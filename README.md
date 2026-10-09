@@ -91,6 +91,71 @@ Getsu automatically routes clean audio to any app set to your **"Default"** micr
 
 ---
 
+## 💻 Headless Audio Batch Cleaner (`getsu-cli`)
+
+Getsu includes a dedicated console companion tool, **`getsu-cli.exe`**, designed for synchronous command-line processing, audio batch cleaning, podcast post-production, and automated CI pipelines.
+
+> [!TIP]
+> **Independent Execution**: `getsu-cli` runs synchronously in any terminal (PowerShell, Command Prompt, Windows Terminal) and can process files in the background even while the Getsu desktop application (`getsu.exe`) is actively running.  
+> *(If you selected "Add Getsu CLI to system PATH" during installation, you can run `getsu-cli` from any directory).*
+
+### Common CLI Commands
+
+#### 1. Clean a Single Audio File
+```powershell
+# Automatically outputs to recording_cleaned.wav
+getsu-cli --clean recording.wav
+
+# Or specify a custom output path
+getsu-cli --clean recording.wav D:\audio\cleaned.wav
+```
+
+#### 2. Clean an Entire Folder / Directory
+Processes all audio files (`.wav`, `.mp3`, `.flac`, `.ogg`) inside the directory:
+```powershell
+getsu-cli --clean D:\recordings\podcast\
+```
+
+#### 3. Linked-Stereo Gating (`--stereo`)
+For multi-channel podcasts and stereo recordings. Tracks a synchronized master energy envelope across Left and Right channels, eliminating stereo panning image wobble:
+```powershell
+getsu-cli --clean interview_stereo.wav --stereo
+```
+
+#### 4. Music & Performance Mode (`--music-mode`)
+Bypasses the neural model and extends gate sustain to 800ms with a gentle 250ms decay, preserving natural room decay and instrument/singing vibrato:
+```powershell
+getsu-cli --clean vocal_take.wav --music-mode
+```
+
+#### 5. Makeup Gain & Voiced Speech Leveling
+```powershell
+# Add +4.0 dB of clean makeup gain
+getsu-cli --clean quiet_mic.wav --gain 4.0
+
+# Automatically normalize quiet speaker levels toward -24 dBFS
+getsu-cli --clean quiet_mic.wav --auto-level
+```
+
+### CLI Options & Flags Reference
+
+| Option / Flag | Description |
+| :--- | :--- |
+| `--clean <path>` | Path to input audio file or folder to clean (*required*). |
+| `[output_path]` | Destination WAV path or directory (*optional, defaults to `[name]_cleaned.wav`*). |
+| `--stereo` | Coupled linked-stereo gating for multi-channel audio files. |
+| `--music-mode` | Bypasses RNNoise and extends hangover to 800ms for music/singing. |
+| `--auto-level` | Dynamically normalizes quiet speech levels toward $-24\text{ dBFS}$. |
+| `--gain <dB>` | Post-processing makeup gain boost in decibels (e.g. `--gain 3.0`). |
+| `--no-rnnoise` | Bypass neural noise reduction (uses 80Hz rumble filter and noise gate only). |
+| `--no-gate` | Bypass noise gate (uses neural noise reduction only). |
+| `--report-json <file>` | Exports frame-by-frame telemetry JSON log for automated acoustic profiling. |
+| `--no-progress` | Suppresses the dynamic console progress bar (ideal for headless CI/CD scripts). |
+| `--no-stats` | Suppresses the terminal summary statistics table. |
+| `--check-devices` | Prints system audio endpoints and diagnostics report. |
+
+---
+
 ## ⚠️ Limits & Transparency Notes
 
 Every software has engineering trade-offs. Here is what to expect upfront:

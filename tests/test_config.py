@@ -41,6 +41,33 @@ class TestConfig(unittest.TestCase):
                 self.assertEqual(loaded["vad_threshold"], 0.92)
                 self.assertFalse(loaded["rnnoise_enabled"])
 
+    def test_music_mode_default_and_migration(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            test_cfg_path = os.path.join(tmp_dir, "config.json")
+            with patch("src.config.CONFIG_FILE", test_cfg_path):
+                # Write config missing music_mode
+                legacy = {"version": "1.2.9", "vad_threshold": 0.70}
+                with open(test_cfg_path, "w", encoding="utf-8") as f:
+                    json.dump(legacy, f)
+
+                loaded = load_config()
+                self.assertIn("music_mode", loaded)
+                self.assertFalse(loaded["music_mode"])
+
+    def test_legacy_keys_purged(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            test_cfg_path = os.path.join(tmp_dir, "config.json")
+            with patch("src.config.CONFIG_FILE", test_cfg_path):
+                # Write config containing legacy keys
+                legacy = {"version": "1.2.9", "mute": True, "app_name": "Getsu", "vad_cold_start_gain": 0.0}
+                with open(test_cfg_path, "w", encoding="utf-8") as f:
+                    json.dump(legacy, f)
+
+                loaded = load_config()
+                self.assertNotIn("mute", loaded)
+                self.assertNotIn("app_name", loaded)
+                self.assertNotIn("vad_cold_start_gain", loaded)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -11,7 +11,10 @@ __pycache__/
 
 # Distribution / packaging
 dist/
-build/
+build/*
+!build/getsu.spec
+!build/version_info.txt
+!build/version_info_cli.txt
 *.egg-info/
 *.spec.bak
 
@@ -29,6 +32,7 @@ ENV/
 
 # Local audio test recordings & samples
 *.wav
+sound-sample/
 
 # Logs
 *.log

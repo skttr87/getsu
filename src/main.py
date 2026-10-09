@@ -12,10 +12,15 @@ import argparse
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # Fast Single-Instance Micro-Checker (exits in <5ms if Getsu is already running)
-if not any(arg in sys.argv for arg in ("--check-devices", "--install-driver", "-h", "--help")):
+if not any(arg in sys.argv for arg in ("--check-devices", "--install-driver", "-h", "--help", "--cli", "--clean", "--batch")):
     from src.single_instance import activate_existing_instance
     if activate_existing_instance():
         sys.exit(0)
+
+# Direct delegate to Headless CLI Cleaner if invoked with --clean or --batch
+if any(arg in sys.argv for arg in ("--clean", "--batch")):
+    from src.cli_cleaner import main as cli_cleaner_main
+    sys.exit(cli_cleaner_main())
 
 from src.devices import (
     print_device_report,

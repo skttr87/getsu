@@ -15,6 +15,7 @@ from src.devices import (
     check_vbcable_status,
     install_vbcable_driver,
 )
+import sounddevice as sd
 from src.config import save_config
 
 
@@ -87,8 +88,6 @@ class TrayApp:
 
     def _toggle_mute(self, icon, item):
         self.engine.toggle_mute()
-        self.config['mute'] = self.engine.is_muted
-        save_config(self.config)
         self._update_icon_image()
 
     def _select_input_device(self, dev_id: int):
@@ -100,6 +99,10 @@ class TrayApp:
             try:
                 self.engine.start()
                 self.config['input_device_id'] = dev_id
+                try:
+                    self.config['input_device_name'] = sd.query_devices(dev_id)['name']
+                except Exception:
+                    pass
                 save_config(self.config)
             except Exception as e:
                 print(f"[UI] Failed to switch microphone to [{dev_id}]: {e}. Rolling back to [{prev_id}].")
@@ -120,6 +123,10 @@ class TrayApp:
             try:
                 self.engine.start()
                 self.config['output_device_id'] = dev_id
+                try:
+                    self.config['output_device_name'] = sd.query_devices(dev_id)['name']
+                except Exception:
+                    pass
                 save_config(self.config)
             except Exception as e:
                 print(f"[UI] Failed to switch output destination to [{dev_id}]: {e}. Rolling back to [{prev_id}].")

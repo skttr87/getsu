@@ -7,7 +7,7 @@ import json
 import copy
 from typing import Dict, Any
 
-APP_VERSION: str = "1.2.9"
+APP_VERSION: str = "1.3.0"
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "version": APP_VERSION,
@@ -29,6 +29,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "output_gain": 1.08,            # Post-RNNoise make-up gain (+0.7 dB)
     "mic_boost_db": 0,              # Authoritative microphone boost setting (0, 5, 10, 15 dB)
     "auto_level": False,            # Staged dynamic speech leveler (default False in v1.2.9)
+    "music_mode": False,            # Performance / Music mode (bypasses RNNoise, 800ms natural sustain)
     "is_swapped": False,            # Tracks if Windows default mic is currently CABLE Output
     "original_mic_id": None,        # Stores Windows CoreAudio endpoint GUID string of physical mic
     "auto_route": True,             # Settings toggle: Auto-Route to Apps (switch default mic when active)
@@ -112,6 +113,9 @@ def load_config() -> Dict[str, Any]:
             migrated = True
         if "vad_floor_gain" not in data or data.get("vad_floor_gain") in (None, 0.02, 0.03, 0.035, 0.04):
             merged["vad_floor_gain"] = 0.06
+            migrated = True
+        if "music_mode" not in data:
+            merged["music_mode"] = False
             migrated = True
 
         # v1.2.6 migration (handles stale close thresholds, hangovers, and version bump)

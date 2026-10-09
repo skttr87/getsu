@@ -1,5 +1,5 @@
 {
-    "version": "1.2.9",
+    "version": "1.3.0",
     "input_device_id": null,
     "input_device_name": null,
     "output_device_id": null,
@@ -17,6 +17,7 @@
     "output_gain": 1.08,
     "mic_boost_db": 0,
     "auto_level": false,
+    "music_mode": false,
     "is_swapped": false,
     "original_mic_id": null,
     "auto_route": true

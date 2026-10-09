@@ -215,6 +215,12 @@ class AdaptiveNoiseGate:
         self._cal_elapsed = 0
         self._cal_buffer: list = []
 
+        # Near-field voiced speech anchor state (eliminates distant cubicle chatter)
+        self.user_anchor_db: float = -24.0
+        self.nearfield_margin_db: float = 14.0
+        self._voiced_anchor_buffer: deque = deque(maxlen=150)
+        self._frames_since_nearfield: int = 1000
+
     # ------------------------------------------------------------------ control
 
     def reset(self):
@@ -229,6 +235,9 @@ class AdaptiveNoiseGate:
         self.frames_since_close = self._IDLE_FRAMES
         self._burst_voiced = 0
         self._frames_since_voiced = 1000
+        self._frames_since_nearfield = 1000
+        self.user_anchor_db = -24.0
+        self._voiced_anchor_buffer.clear()
         self._flutter_events.clear()
         if self._delay_buffer is not None:
             self._delay_buffer.fill(0.0)
@@ -239,6 +248,9 @@ class AdaptiveNoiseGate:
         self._cal_elapsed = 0
         self._cal_buffer = []
         self._calibrated = not self._calibrate_startup
+        self.user_anchor_db = -24.0
+        self._voiced_anchor_buffer.clear()
+        self._frames_since_nearfield = 1000
 
     # ------------------------------------------------------------------ helpers
 
@@ -325,6 +337,21 @@ class AdaptiveNoiseGate:
 
         start_gain = self.current_gain
 
+        # 1. Voiced Speech Anchor Tracking (adapts to primary near-field user speaking level)
+        if input_rms_db is not None and speech_prob >= 0.80:
+            snr = input_rms_db - self.noise_floor_db
+            if snr >= 15.0:
+                self._voiced_anchor_buffer.append(input_rms_db)
+                if len(self._voiced_anchor_buffer) >= 10:
+                    self.user_anchor_db = float(np.clip(np.percentile(self._voiced_anchor_buffer, 90), -36.0, -12.0))
+
+        # 2. Near-Field Qualification
+        is_nearfield = (input_rms_db is None) or (input_rms_db >= (self.user_anchor_db - self.nearfield_margin_db))
+        if is_nearfield and speech_prob >= self.close_threshold:
+            self._frames_since_nearfield = 0
+        else:
+            self._frames_since_nearfield += 1
+
         if not self.is_open:
             self.frames_since_close += 1
             in_cooldown = self.frames_since_close <= self._current_cooldown_frames()
@@ -336,8 +363,6 @@ class AdaptiveNoiseGate:
             # Dual-Key Trigger evaluation:
             # 1. Standard high-confidence VAD trigger
             # 2. Fast onset trigger: energy rise >= onset_snr_db above noise floor with early speech cue
-            # (Inhibited during post-close cooldown to eliminate background chatter decay aborts/clicks,
-            #  except for high-energy near-field speech SNR >= onset_snr_db + 8.0 dB, speech_prob >= 0.55 which breaks through immediately)
             is_onset = False
             if input_rms_db is not None:
                 snr = input_rms_db - self.noise_floor_db
@@ -345,7 +370,11 @@ class AdaptiveNoiseGate:
                 if can_trigger_onset and snr >= self.onset_snr_db and speech_prob >= self.onset_threshold:
                     is_onset = True
 
-            if speech_prob >= self.threshold or is_onset:
+            # Near-field qualifying check:
+            # Guarded by nearfield qualification or warm hangover buffer to protect soft phrase beginnings
+            is_qualified = is_nearfield or (self._frames_since_nearfield <= 40) or (len(self._voiced_anchor_buffer) < 10 and (input_rms_db is None or input_rms_db >= -38.0))
+
+            if (speech_prob >= self.threshold or is_onset) and is_qualified:
                 self.is_open = True
                 self.frames_since_speech = 0
                 self._frames_since_voiced = 0 if speech_prob >= self.close_threshold else 1000
@@ -371,7 +400,13 @@ class AdaptiveNoiseGate:
                 self.frames_since_speech = 0
                 if voiced:
                     self._burst_voiced += 1
-                target_gain = 1.0
+                # Primary near-field voice receives full 1.0x gain
+                if is_nearfield or (self._frames_since_nearfield <= 40):
+                    target_gain = 1.0
+                else:
+                    # Distant cubicle chatter in sentence pauses: downward expander attenuates bleed
+                    exp_db = input_rms_db - (self.user_anchor_db - self.nearfield_margin_db) if input_rms_db is not None else -14.0
+                    target_gain = min(0.15, max(self.floor_gain, 0.15 * (10.0 ** (exp_db / 20.0))))
             else:
                 self.frames_since_speech += 1
                 if self.frames_since_speech <= self.hangover_frames:
@@ -465,6 +500,19 @@ def calculate_levels(frame: np.ndarray):
     return peak_db, rms_db
 
 
+def soft_preclip(frame: np.ndarray, knee: float = 0.75) -> np.ndarray:
+    """
+    Smooths hard ADC rail flat-topping to protect RNNoise Bark-band features.
+    Uses hyperbolic tangent saturation above knee (default 0.75), eliminating
+    square-wave splatter from unshielded plosives and breath blasts.
+    """
+    mask = np.abs(frame) > knee
+    if np.any(mask):
+        excess = np.abs(frame[mask]) - knee
+        frame[mask] = np.sign(frame[mask]) * (knee + (1.0 - knee) * np.tanh(excess / (1.0 - knee)))
+    return frame
+
+
 def soft_limit(x: np.ndarray, threshold: float = 0.85) -> np.ndarray:
     """
     Smooth transparent soft-saturation limiter.
@@ -481,12 +529,82 @@ def soft_limit(x: np.ndarray, threshold: float = 0.85) -> np.ndarray:
     return out
 
 
+class TransientSuppressor:
+    """
+    Zero-latency In-Speech Transient De-Clicker.
+    Attenuates sharp mechanical keyboard switch clicks (fast rise time, high HF energy)
+    and impulsive desk thumps occurring during active speech by 6-10 dB,
+    using smooth S-curve / Hann envelope windowing to eliminate harmonic step clicks.
+    """
+
+    def __init__(
+        self,
+        threshold_crest: float = 4.5,
+        max_attenuation_db: float = 8.0,
+        sample_rate: int = 48000,
+    ):
+        self.threshold_crest = threshold_crest
+        self.max_attenuation_db = max_attenuation_db
+        self.sample_rate = sample_rate
+        self.min_gain = float(10.0 ** (-max_attenuation_db / 20.0))
+        self._prev_sample = 0.0
+
+    def reset(self):
+        """Reset internal filter memory."""
+        self._prev_sample = 0.0
+
+    def process(self, frame: np.ndarray, speech_prob: float = 1.0) -> np.ndarray:
+        """
+        Detects high-frequency impulsive spikes and smoothly suppresses them.
+        """
+        n = len(frame)
+        if n == 0:
+            return frame
+
+        # High-frequency derivative across frame
+        diff = np.diff(frame, prepend=self._prev_sample)
+        self._prev_sample = float(frame[-1])
+
+        # Energy of high-frequency differential
+        rms_diff = float(np.sqrt(np.mean(diff ** 2)))
+        if rms_diff < 1e-4:
+            return frame
+
+        # Instantaneous HF crest factor
+        abs_diff = np.abs(diff)
+        crest = abs_diff / (rms_diff + 1e-6)
+        spike_mask = crest >= self.threshold_crest
+        if not np.any(spike_mask):
+            return frame
+
+        gain_env = np.ones(n, dtype=frame.dtype)
+        spike_indices = np.where(spike_mask)[0]
+
+        radius = 24  # 0.5 ms each side = 1.0 ms dip at 48kHz
+        for s_idx in spike_indices:
+            peak_val = crest[s_idx]
+            att_db = min(self.max_attenuation_db, 6.0 + (peak_val - self.threshold_crest) * 0.8)
+            spike_gain = float(10.0 ** (-att_db / 20.0))
+
+            i_start = max(0, s_idx - radius)
+            i_end = min(n, s_idx + radius + 1)
+            win_len = i_end - i_start
+
+            t = np.linspace(0.0, np.pi, win_len, dtype=np.float32)
+            bell = np.sin(t) ** 2
+            local_env = 1.0 - (1.0 - spike_gain) * bell
+            gain_env[i_start:i_end] = np.minimum(gain_env[i_start:i_end], local_env)
+
+        return frame * gain_env
+
+
 class SpeechLeveler:
     """
     Dynamic Target Speech Leveler for quiet microphones (Bluetooth TWS, USB headsets, laptop arrays).
     - Only tracks voiced speech RMS when speech_prob >= voicing_threshold (0.60).
     - Freezes level estimation during silence, breathing, or background noise (zero noise pumping).
     - Normalizes speech toward target_rms_db (-24.0 dBFS) with max boost clamp (+9.0 dB).
+    - De-stacks manual mic boost: shifts target level by mic_boost_db to protect headroom.
     - Asymmetric slew rate: fast recovery downward to avoid clipping, smooth gentle upward ramp.
     """
 
@@ -518,9 +636,16 @@ class SpeechLeveler:
         self.voiced_rms_db = self.target_rms_db
         self.current_gain = 1.0
 
-    def process(self, frame: np.ndarray, speech_prob: float, input_rms_db: float) -> Tuple[np.ndarray, float]:
+    def process(
+        self,
+        frame: np.ndarray,
+        speech_prob: float,
+        input_rms_db: float,
+        mic_boost_db: float = 0.0,
+    ) -> Tuple[np.ndarray, float]:
         """
         Calculates and applies leveler gain on a 10ms audio frame.
+        Dynamically adjusts effective target level by mic_boost_db to prevent gain compounding.
         Returns: (processed_frame, current_leveler_gain)
         """
         # Voiced speech gating: freeze estimation during silence/noise
@@ -534,8 +659,9 @@ class SpeechLeveler:
                     self.alpha_decay * self.voiced_rms_db + (1.0 - self.alpha_decay) * input_rms_db
                 )
 
-        # Compute desired gain to reach target level
-        error_db = self.target_rms_db - self.voiced_rms_db
+        # De-stack target by user manual mic boost
+        effective_target_db = self.target_rms_db - mic_boost_db
+        error_db = effective_target_db - self.voiced_rms_db
         desired_gain_db = max(0.0, min(20.0 * math.log10(self.max_boost_mult), error_db))
         desired_gain = 10.0 ** (desired_gain_db / 20.0)
 
@@ -561,6 +687,8 @@ def process_mono_frame(
     total_gain: float = 1.0,
     denoise_enabled: bool = True,
     leveler: Optional[SpeechLeveler] = None,
+    transient_suppressor: Optional[TransientSuppressor] = None,
+    mic_boost_db: float = 0.0,
 ) -> Tuple[np.ndarray, float, float, float]:
     """
     Authoritative single-frame (10ms) DSP processing pipeline shared by both the live stream
@@ -568,12 +696,13 @@ def process_mono_frame(
 
     Pipeline:
       1. High-Pass Filter (80Hz rumble cut)
-      2. Dual-Stage Metering & Headroom Pre-clip
+      2. Dual-Stage Metering & Headroom Pre-clip (soft-knee ADC plosive protection)
       3. RNNoise Neural Suppression (or energy-derived probability in bypass)
-      4. Optional SpeechLeveler (gated voiced auto-gain)
-      5. Post-RNNoise Gain Staging
-      6. AdaptiveNoiseGate (zero-allocation downward expander)
-      7. Transparent Soft-Limiter
+      4. In-Speech Transient De-Clicking (mechanical keyboard / desk thump clamp)
+      5. Optional SpeechLeveler (de-stacked voiced auto-gain)
+      6. Post-RNNoise Gain Staging
+      7. AdaptiveNoiseGate (zero-allocation downward expander)
+      8. Transparent Soft-Limiter
 
     Returns:
       (processed_frame, speech_prob, input_peak_db, input_rms_db)
@@ -582,8 +711,9 @@ def process_mono_frame(
     if hpf is not None:
         frame_mono = hpf.process(frame_mono)
 
-    # 2. Dual-Stage Metering: input levels
+    # 2. Dual-Stage Metering & Headroom Pre-clip
     input_peak_db, input_rms_db = calculate_levels(frame_mono)
+    frame_mono = soft_preclip(frame_mono, knee=0.75)
     np.clip(frame_mono, -1.0, 1.0, out=frame_mono)
 
     # 3. RNNoise Neural Core
@@ -595,19 +725,25 @@ def process_mono_frame(
     else:
         speech_prob = min(1.0, max(0.0, (input_rms_db + 45.0) / 20.0))
 
-    # 4. Dynamic Speech Leveler (if enabled)
-    if leveler is not None:
-        frame_mono, _ = leveler.process(frame_mono, speech_prob, input_rms_db)
+    # 4. In-Speech Transient Suppression
+    if transient_suppressor is not None:
+        frame_mono = transient_suppressor.process(frame_mono, speech_prob)
 
-    # 5. Gain Staging
+    # 5. Dynamic Speech Leveler (if enabled, de-stacking manual mic boost)
+    if leveler is not None:
+        frame_mono, _ = leveler.process(frame_mono, speech_prob, input_rms_db, mic_boost_db=mic_boost_db)
+
+    # 6. Gain Staging
     if total_gain != 1.0:
         frame_mono *= total_gain
 
-    # 6. Soft-Knee Adaptive Noise Gate
+    # 7. Soft-Knee Adaptive Noise Gate
     frame_mono, _ = gate.process(frame_mono, speech_prob, input_rms_db=input_rms_db, in_place=True)
 
-    # 7. Soft Saturation Limiter
+    # 8. Soft Saturation Limiter
     frame_mono = soft_limit(frame_mono, threshold=0.85)
+
+    return frame_mono, speech_prob, input_peak_db, input_rms_db
 
     return frame_mono, speech_prob, input_peak_db, input_rms_db
 

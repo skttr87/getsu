@@ -2,7 +2,7 @@
 ; ==============================================================
 
 #define MyAppName "Getsu"
-#define MyAppVersion "1.2.9"
+#define MyAppVersion "1.3.0"
 #define MyAppPublisher "skttr87"
 
 #define MyAppURL "https://github.com/skttr87/getsu"
@@ -18,6 +18,7 @@ AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
 AppMutex=Local\Getsu_SingleInstance_Mutex_8F9A
 SetupMutex=Getsu_Setup_Instance_Mutex
+ChangesEnvironment=yes
 DefaultDirName={autopf}\Getsu
 AppendDefaultDirName=yes
 DisableDirPage=no
@@ -53,6 +54,12 @@ FinishedLabel=Setup has finished installing [name] on your computer.%n%nNotice: 
 [Tasks]
 Name: "installvbcable"; Description: "Install VB-Audio Virtual Cable (Recommended: routes clean audio to all voice apps and games)"; GroupDescription: "Virtual Audio Components:"; Flags: checkedonce
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "addtopath"; Description: "Add Getsu CLI to system PATH (enables running 'getsu-cli --clean' in any terminal)"; GroupDescription: "Command-Line Tools:"; Flags: unchecked
+
+[Registry]
+Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; \
+    ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; \
+    Tasks: addtopath; Check: NeedsAddPath(ExpandConstant('{app}'))
 
 [Files]
 ; Compiled application files and bundled internal dependencies (preserve existing user config.json on upgrade)
@@ -310,18 +317,40 @@ begin
   end;
 end;
 
+function NeedsAddPath(Param: string): boolean;
+var
+  OrigPath: string;
+begin
+  if not RegQueryStringValue(HKEY_LOCAL_MACHINE, 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'Path', OrigPath) then
+    Result := True
+  else
+    Result := Pos(';' + UpperCase(Param) + ';', ';' + UpperCase(OrigPath) + ';') = 0;
+end;
+
 // Execute driver uninstaller before Getsu files are removed, then clean up leftover files
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   ResultCode: Integer;
   DriverSetupExe: String;
   AudioRestoreExe: String;
-  AppDir: String;
+  AppDir, OrigPath, CleanPath: String;
 begin
   AppDir := ExpandConstant('{app}');
 
   if CurUninstallStep = usUninstall then
   begin
+    // PATH environment variable cleanup
+    if RegQueryStringValue(HKEY_LOCAL_MACHINE, 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'Path', OrigPath) then
+    begin
+      CleanPath := OrigPath;
+      if Pos(';' + UpperCase(AppDir), ';' + UpperCase(CleanPath)) > 0 then
+      begin
+        StringChangeEx(CleanPath, ';' + AppDir, '', True);
+        StringChangeEx(CleanPath, AppDir + ';', '', True);
+        StringChangeEx(CleanPath, AppDir, '', True);
+        RegWriteStringValue(HKEY_LOCAL_MACHINE, 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'Path', CleanPath);
+      end;
+    end;
     AudioRestoreExe := AddBackslash(AppDir) + 'drivers\vbcable\AudioRestore.exe';
 
     // Ensure microphone endpoint is physical and getsu is dead before file deletion

@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.3.0] - 2026-10-10
+
+- **Dual-Binary Architecture & Batch CLI Engine (`getsu-cli.exe` & `getsu.exe`)**:
+  - Introduced dedicated console-subsystem binary (`getsu-cli.exe`, `console=True`) alongside the GUI app (`getsu.exe`, `console=False`), ensuring full synchronous execution in PowerShell/cmd and reliable `$LASTEXITCODE` returns.
+  - Decoupled CLI batch cleaning from GUI single-instance mutex locks (`activate_existing_instance()`), allowing real-time desktop filtering and offline batch file cleaning to run simultaneously without interference.
+  - Production-grade batch cleaner with universal format decoding (`miniaudio`), automatic 48 kHz resampling, sample-accurate duration trimming, 2-frame zero-flush latency extraction, and TPDF-dithered 16-bit PCM output.
+  - Coupled Linked-Stereo Gating (`--stereo`): Synchronized master gain envelope across multi-channel audio eliminating stereo panning image wobble.
+- **Adaptive Near-Field Voice Anchoring ($L_{\text{user}}$)**:
+  - Dynamic Voiced Speech Anchor tracking the 90th percentile of user speaking frames; classifies distant cubicle background chatter $> 14\text{ dB}$ below the anchor as far-field bleed and routes it to downward expansion ($\le 0.15$ gain) rather than tripping open the gate.
+  - Strictly preserves whispers and soft phrase starts with a 400ms near-field hangover.
+  - De-stacks manual mic boost and dynamic speech leveling (`SpeechLeveler`), shifting target level by `mic_boost_db` to protect headroom.
+- **In-Speech Transient De-Clicking & Pre-RNNoise Saturation Guard**:
+  - Zero-latency `TransientSuppressor` attenuates high-frequency ($> 2.5\text{ kHz}$) mechanical keyboard switch clicks and desk thumps by $6\text{–}10\text{ dB}$ using smooth S-curve / Hann windowing.
+  - Pre-RNNoise `soft_preclip()` saturation curve rounds off ADC rail flat-topping ("P-pops") to protect neural Bark-band features.
+  - One-click **Music & Performance Mode** (`music_mode`) bypassing RNNoise with an extended $800\text{ ms}$ natural hangover and $250\text{ ms}$ decay for singing vibrato and acoustic instruments.
+- **Proportional Hysteresis & Dynamic Gate Synchronization**:
+  - Coupled `vad_threshold` and `vad_close_threshold` proportionally during live slider adjustments, eliminating inverted hysteresis anomalies where low sensitivity settings caused premature gate dropouts.
+- **GUI Viewport & System Tray Parity**:
+  - Expanded dynamic notice headroom to +26px in `src/gui.py`, preventing multi-line status wrap pills from crowding the non-scrollable window layout.
+  - Synchronized friendly device names alongside IDs in `src/tray.py`, and isolated runtime `mute` to prevent ephemeral state pollution in `config.json`.
+- **Packaging & Windows PATH Integration**:
+  - Inno Setup `setup.iss` integration with `ChangesEnvironment=yes`, optional PATH registration task (`addtopath`), and clean uninstall routines.
+  - Updated PyInstaller spec and `scripts/publish.py` pipeline auditing both `getsu.exe` and `getsu-cli.exe` binaries before release.
+
+---
+
 ## [1.2.9] - 2026-10-09
 
 - **Actionable Hardware Jack Disconnect Diagnostics (`0x00000492`)**: Dedicated, hedged error classification for Realtek/Windows open-circuit jack errors (`ERROR_SET_NOT_FOUND`). Replaced misleading audio path advice with clear troubleshooting instructions (checking 3.5mm cable, using a Y-splitter for combo headsets, or trying another microphone).

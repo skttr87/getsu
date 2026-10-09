@@ -8,6 +8,8 @@ from src.dsp import (
     AdaptiveNoiseGate,
     calculate_levels,
     SpeechLeveler,
+    TransientSuppressor,
+    soft_preclip,
     process_mono_frame,
 )
 from src.rnnoise import RNNoise, FRAME_SIZE, SAMPLE_RATE
@@ -409,7 +411,75 @@ class TestDSP(unittest.TestCase):
         self.assertIsInstance(rms, float)
 
 
+    def test_soft_preclip_preserves_linear_and_saturates_peaks(self):
+        """Verify soft_preclip leaves signals <= 0.75 identical, and tanh-compresses > 0.75."""
+        linear_val = np.array([0.0, 0.5, -0.74], dtype=np.float32)
+        out_linear = soft_preclip(linear_val.copy(), knee=0.75)
+        np.testing.assert_allclose(out_linear, linear_val, rtol=1e-5)
+
+        hot_val = np.array([1.2, -1.5, 0.9], dtype=np.float32)
+        out_hot = soft_preclip(hot_val.copy(), knee=0.75)
+        self.assertLess(out_hot[0], 1.0)
+        self.assertGreater(out_hot[0], 0.75)
+        self.assertGreater(out_hot[1], -1.0)
+        self.assertLess(out_hot[1], -0.75)
+
+    def test_transient_suppressor_attenuates_mechanical_switch_spike(self):
+        """Verify TransientSuppressor clamps sharp high-frequency transient spike during speech by >= 6 dB."""
+        suppressor = TransientSuppressor(threshold_crest=4.5, max_attenuation_db=8.0)
+        # Create 10ms frame of smooth vocal tone (400 Hz)
+        t = np.linspace(0, 0.01, FRAME_SIZE, False)
+        voice = 0.2 * np.sin(2 * np.pi * 400 * t).astype(np.float32)
+        
+        # Inject sharp mechanical keyboard impulse at sample 240
+        dirty_voice = voice.copy()
+        dirty_voice[240] += 0.65
+        
+        cleaned = suppressor.process(dirty_voice.copy(), speech_prob=0.90)
+        
+        # Transient peak at 240 must be attenuated by >= 6.0 dB (~0.5x or less)
+        orig_peak = abs(dirty_voice[240])
+        clean_peak = abs(cleaned[240])
+        attenuation_db = 20.0 * np.log10(orig_peak / clean_peak)
+        self.assertGreaterEqual(attenuation_db, 6.0, f"Transient attenuation {attenuation_db:.1f} dB was < 6.0 dB")
+
+    def test_voiced_speech_anchor_adapts_and_rejects_distant_bleed(self):
+        """Verify adaptive anchor seeds and down-expands far-field chatter > 14dB below anchor."""
+        gate = AdaptiveNoiseGate(lookahead=False, calibrate_startup=False)
+        frame = np.ones(FRAME_SIZE, dtype=np.float32) * 0.1
+        
+        # Seed anchor with strong primary user voice at -20 dBFS
+        for _ in range(15):
+            gate.process(frame.copy(), speech_prob=0.90, input_rms_db=-20.0)
+        
+        self.assertAlmostEqual(gate.user_anchor_db, -20.0, delta=2.0)
+        
+        # Wait until hangover expires and gate closes
+        for _ in range(50):
+            gate.process(frame.copy() * 0.001, speech_prob=0.05, input_rms_db=-65.0)
+        self.assertFalse(gate.is_open)
+        
+        # Now introduce distant chatter in silence: input RMS -38 dBFS (18 dB below anchor),
+        # speech_prob 0.72. Anchor margin is 14 dB (threshold is -34 dBFS).
+        # It must NOT open the gate as full near-field speech (is_open might stay false or gain <= 0.15).
+        _, gain = gate.process(frame.copy() * 0.01, speech_prob=0.72, input_rms_db=-38.0)
+        self.assertLessEqual(gain, 0.20, "Distant chatter must be suppressed / downward expanded")
+
+    def test_speech_leveler_destacks_mic_boost(self):
+        """Verify leveler target shifts down by mic_boost_db to avoid compounding gain."""
+        leveler = SpeechLeveler(target_rms_db=-24.0, max_boost_db=9.0, voicing_threshold=0.60, max_slew_up_db_per_sec=100.0)
+        frame = np.ones(FRAME_SIZE, dtype=np.float32) * 0.05
+        
+        # When user dials in +10 dB mic boost, effective target is -34 dBFS.
+        # Quiet speech at -30 dBFS is already above effective target (-30 > -34), so desired gain is 0 dB.
+        for _ in range(50):
+            _, gain = leveler.process(frame.copy(), speech_prob=0.90, input_rms_db=-30.0, mic_boost_db=10.0)
+        
+        self.assertEqual(gain, 1.0, "Leveler must not add boost when manual mic boost already covers target")
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
 

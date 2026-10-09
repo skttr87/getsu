@@ -57,6 +57,7 @@ DOCS_SITEMAP = REPO_ROOT / "docs" / "sitemap.xml"
 SETUP_ISS = REPO_ROOT / "setup.iss"
 SPEC_FILE = REPO_ROOT / "build" / "getsu.spec"
 VERSION_INFO_TXT = REPO_ROOT / "build" / "version_info.txt"
+VERSION_INFO_CLI_TXT = REPO_ROOT / "build" / "version_info_cli.txt"
 DIST_GETSU_DIR = REPO_ROOT / "dist" / "getsu"
 DIST_INSTALLER_DIR = REPO_ROOT / "dist" / "installer"
 
@@ -326,25 +327,26 @@ def sync_codebase_versions(version: str) -> bool:
             print(f"[INFO] Synchronized {SETUP_ISS.relative_to(REPO_ROOT)} to v{version}")
             modified = True
 
-    # 4. build/version_info.txt
-    if VERSION_INFO_TXT.exists():
-        vi_text = VERSION_INFO_TXT.read_text(encoding="utf-8")
-        orig_vi = vi_text
-        try:
-            parts = [int(p) for p in version.split(".")][:3]
-            while len(parts) < 3:
-                parts.append(0)
-            tuple_str = f"({parts[0]}, {parts[1]}, {parts[2]}, 0)"
-            vi_text = re.sub(r'filevers=\([^)]+\)', f'filevers={tuple_str}', vi_text)
-            vi_text = re.sub(r'prodvers=\([^)]+\)', f'prodvers={tuple_str}', vi_text)
-            vi_text = re.sub(r"StringStruct\('FileVersion',\s*'[^']+'\)", f"StringStruct('FileVersion', '{version}.0')", vi_text)
-            vi_text = re.sub(r"StringStruct\('ProductVersion',\s*'[^']+'\)", f"StringStruct('ProductVersion', '{version}')", vi_text)
-            if vi_text != orig_vi:
-                VERSION_INFO_TXT.write_text(vi_text, encoding="utf-8")
-                print(f"[INFO] Synchronized {VERSION_INFO_TXT.relative_to(REPO_ROOT)} to v{version}")
-                modified = True
-        except Exception as e:
-            print(f"[WARN] Could not update version_info.txt: {e}")
+    # 4. build/version_info.txt & build/version_info_cli.txt
+    for vi_path in (VERSION_INFO_TXT, VERSION_INFO_CLI_TXT):
+        if vi_path.exists():
+            vi_text = vi_path.read_text(encoding="utf-8")
+            orig_vi = vi_text
+            try:
+                parts = [int(p) for p in version.split(".")][:3]
+                while len(parts) < 3:
+                    parts.append(0)
+                tuple_str = f"({parts[0]}, {parts[1]}, {parts[2]}, 0)"
+                vi_text = re.sub(r'filevers=\([^)]+\)', f'filevers={tuple_str}', vi_text)
+                vi_text = re.sub(r'prodvers=\([^)]+\)', f'prodvers={tuple_str}', vi_text)
+                vi_text = re.sub(r"StringStruct\('FileVersion',\s*'[^']+'\)", f"StringStruct('FileVersion', '{version}.0')", vi_text)
+                vi_text = re.sub(r"StringStruct\('ProductVersion',\s*'[^']+'\)", f"StringStruct('ProductVersion', '{version}')", vi_text)
+                if vi_text != orig_vi:
+                    vi_path.write_text(vi_text, encoding="utf-8")
+                    print(f"[INFO] Synchronized {vi_path.relative_to(REPO_ROOT)} to v{version}")
+                    modified = True
+            except Exception as e:
+                print(f"[WARN] Could not update {vi_path.name}: {e}")
 
     # 5. docs/index.html & docs/sitemap.xml
     docs_mod = update_docs_files(version)
@@ -421,6 +423,12 @@ def verify_dist_integrity(version: str):
     # Check PE Version on getsu.exe
     verify_pe_metadata(getsu_exe, expected_version=version, expected_filename="getsu.exe")
 
+    # Check getsu-cli.exe
+    getsu_cli_exe = DIST_GETSU_DIR / "getsu-cli.exe"
+    if not getsu_cli_exe.is_file():
+        raise RuntimeError("Staged CLI executable dist/getsu/getsu-cli.exe is missing!")
+    verify_pe_metadata(getsu_cli_exe, expected_version=version, expected_filename="getsu-cli.exe")
+
 
 def build_installer(version: str):
     """Compiles PyInstaller canonical spec and Inno Setup installer."""
@@ -475,7 +483,7 @@ def commit_and_push_git(version: str, commit_msg: str = None, dry_run: bool = Fa
             print("[DRY-RUN] Skipping git add, commit, and push.")
             return
 
-        run_cmd([git_exe, "add", "-u"])
+        run_cmd([git_exe, "add", "-A"])
         # Commit if changes were staged
         staged = run_cmd([git_exe, "diff", "--staged", "--name-only"]).stdout.strip()
         if staged:

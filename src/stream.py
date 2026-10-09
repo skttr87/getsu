@@ -15,6 +15,7 @@ from src.dsp import (
     calculate_levels,
     soft_limit,
     SpeechLeveler,
+    TransientSuppressor,
     process_mono_frame,
 )
 from src.host_api_resolver import resolve_pair, DeviceResolutionError, ResolvedPair
@@ -46,6 +47,7 @@ class AudioEngine:
         hpf_cutoff_hz: float = 80.0,
         router: Optional[Any] = None,
         auto_level: bool = False,
+        mic_boost_db: float = 0.0,
     ):
         self.input_device = input_device
         self.output_device = output_device
@@ -59,6 +61,7 @@ class AudioEngine:
         self.vad_onset_snr_db = vad_onset_snr_db
         self.vad_floor_gain = vad_floor_gain
         self.mic_gain = mic_gain
+        self.mic_boost_db = float(mic_boost_db)
         self.output_gain = output_gain
         self.hpf_cutoff_hz = hpf_cutoff_hz
         self.router = router
@@ -84,6 +87,7 @@ class AudioEngine:
             self.denoise_enabled = False
 
         self.hpf = HighPassFilter(cutoff_hz=self.hpf_cutoff_hz, sample_rate=float(SAMPLE_RATE))
+        self.transient_suppressor = TransientSuppressor()
         self.gate = AdaptiveNoiseGate(
             threshold=self.vad_threshold,
             close_threshold=self.vad_close_threshold,
@@ -176,6 +180,8 @@ class AudioEngine:
                 total_gain=total_gain,
                 denoise_enabled=bool(rn is not None),
                 leveler=self.leveler,
+                transient_suppressor=self.transient_suppressor,
+                mic_boost_db=self.mic_boost_db,
             )
 
             # 3. Post-gate output metrics and clip protection
@@ -360,7 +366,11 @@ class AudioEngine:
         """Live thread-safe adjustment of VAD sensitivity without restarting stream."""
         self.vad_threshold = float(threshold)
         self.gate.threshold = float(threshold)
-        print(f"[ENGINE] VAD threshold updated to: {self.vad_threshold:.2f}")
+        # Scale close threshold proportionally to maintain canonical 0.743 hysteresis ratio
+        new_close = round(max(0.20, self.vad_threshold * (0.52 / 0.70)), 2)
+        self.gate.close_threshold = new_close
+        self.vad_close_threshold = new_close
+        print(f"[ENGINE] VAD threshold updated to: {self.vad_threshold:.2f} (close: {new_close:.2f})")
 
     def toggle_denoise(self) -> bool:
         """Toggles RNNoise on/off."""
@@ -456,7 +466,10 @@ def create_engine_from_config(
     else:
         vad_threshold = 0.70 if (cfg_th is None or cfg_th in (0.75, 0.70)) else cfg_th
 
-    vad_hangover_ms = config.get("vad_hangover_ms", 320.0)
+    music_mode = config.get("music_mode", False)
+    denoise_enabled = config.get("denoise_enabled", True) if not music_mode else False
+    vad_hangover_ms = 800.0 if music_mode else config.get("vad_hangover_ms", 320.0)
+    vad_decay_ms = 250.0 if music_mode else config.get("vad_decay_ms", 80.0)
     vad_close_threshold = config.get("vad_close_threshold", 0.52)
 
     boost_db = config.get("mic_boost_db", 0)
@@ -466,12 +479,12 @@ def create_engine_from_config(
     return AudioEngine(
         input_device=input_device_id,
         output_device=output_device_id,
-        denoise_enabled=config.get("denoise_enabled", True),
+        denoise_enabled=denoise_enabled,
         high_pass_enabled=config.get("high_pass_filter", True),
         vad_threshold=vad_threshold,
         vad_close_threshold=vad_close_threshold,
         vad_hangover_ms=vad_hangover_ms,
-        vad_decay_ms=config.get("vad_decay_ms", 80.0),
+        vad_decay_ms=vad_decay_ms,
         vad_onset_threshold=config.get("vad_onset_threshold", 0.35),
         vad_onset_snr_db=config.get("vad_onset_snr_db", 10.0),
         vad_floor_gain=config.get("vad_floor_gain", 0.06),
@@ -480,4 +493,5 @@ def create_engine_from_config(
         hpf_cutoff_hz=config.get("hpf_cutoff_hz", 80.0),
         router=router,
         auto_level=config.get("auto_level", False),
+        mic_boost_db=float(boost_db),
     )

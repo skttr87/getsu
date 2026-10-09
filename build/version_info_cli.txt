@@ -1,6 +1,6 @@
 # UTF-8
 #
-# Windows File Version Info for Getsu
+# Windows File Version Info for Getsu CLI
 #
 VSVersionInfo(
   ffi=FixedFileInfo(
@@ -20,14 +20,13 @@ VSVersionInfo(
           '040904B0',
           [
             StringStruct('CompanyName', 'skttr87'),
-            StringStruct('FileDescription', 'Getsu - Real-Time AI Noise Cancellation'),
+            StringStruct('FileDescription', 'Getsu - AI Noise Cancellation Batch Audio CLI'),
             StringStruct('FileVersion', '1.3.0.0'),
-            StringStruct('InternalName', 'getsu'),
+            StringStruct('InternalName', 'getsu-cli'),
             StringStruct('LegalCopyright', 'Copyright (c) 2026 Ihsan (@skttr87)'),
-            StringStruct('OriginalFilename', 'getsu.exe'),
-            StringStruct('ProductName', 'Getsu AI Noise Cancellation'),
+            StringStruct('OriginalFilename', 'getsu-cli.exe'),
+            StringStruct('ProductName', 'Getsu AI Noise Cancellation CLI'),
             StringStruct('ProductVersion', '1.3.0')
-
           ]
         )
       ]
@@ -35,3 +34,4 @@ VSVersionInfo(
     VarFileInfo([VarStruct('Translation', [1033, 1200])])
   ]
 )
+

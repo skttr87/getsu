@@ -47,6 +47,7 @@ from src.dsp import (
     soft_limit,
     calculate_levels,
     SpeechLeveler,
+    TransientSuppressor,
     process_mono_frame,
 )
 from src.host_api_resolver import resolve_single, DeviceResolutionError, selection_hint
@@ -327,6 +328,7 @@ class GetsuGUI:
         if self.engine:
             new_gain = self._compute_current_gain()
             self.engine.mic_gain = new_gain
+            self.engine.mic_boost_db = float(boost_db)
             print(f"[GUI] Live Microphone Gain updated to: {new_gain:.2f}x (+{boost_db} dB)")
 
     def _update_boost_buttons_ui(self):
@@ -674,6 +676,24 @@ class GetsuGUI:
         finally:
             self._release_state_lock()
 
+    def on_music_mode_toggled(self, sender, app_data):
+        """Live toggle for Music & Performance Mode (bypasses RNNoise, extends hangover to 800ms)."""
+        enabled = bool(app_data)
+        self.config["music_mode"] = enabled
+        save_config(self.config)
+        print(f"[GUI] Music & Performance Mode: {'ENABLED' if enabled else 'DISABLED'}")
+        if self.engine:
+            if enabled:
+                self.engine.denoise_enabled = False
+                self.engine.gate.hangover_frames = int(800.0 / 10.0)
+                self.engine.gate.decay_rate = math.exp(-10.0 / 250.0)
+            else:
+                self.engine.denoise_enabled = self.config.get("denoise_enabled", True)
+                hangover = float(self.config.get("vad_hangover_ms", 320.0))
+                decay = float(self.config.get("vad_decay_ms", 80.0))
+                self.engine.gate.hangover_frames = int(hangover / 10.0)
+                self.engine.gate.decay_rate = math.exp(-10.0 / decay)
+
     def on_vad_slider_changed(self, sender, app_data):
         """Live thread-safe adjustment of VAD sensitivity without restarting stream."""
         new_val = round(float(app_data), 2)
@@ -911,13 +931,17 @@ class GetsuGUI:
             total_gain = out_gain * test_gain
             vad_th = float(self.config.get("vad_threshold", 0.70))
 
-            rn = RNNoise()
+            music_mode = self.config.get("music_mode", False)
+            rn = None if music_mode else RNNoise()
             hpf = HighPassFilter(cutoff_hz=80.0, sample_rate=float(SAMPLE_RATE))
+            ts = TransientSuppressor()
+            hangover_ms = 800.0 if music_mode else float(self.config.get("vad_hangover_ms", 320.0))
+            decay_ms = 250.0 if music_mode else float(self.config.get("vad_decay_ms", 80.0))
             gate = AdaptiveNoiseGate(
                 threshold=vad_th,
                 close_threshold=float(self.config.get("vad_close_threshold", 0.52)),
-                hangover_ms=float(self.config.get("vad_hangover_ms", 320.0)),
-                decay_ms=float(self.config.get("vad_decay_ms", 80.0)),
+                hangover_ms=hangover_ms,
+                decay_ms=decay_ms,
                 attack_ms=28.0,
                 frame_ms=10.0,
                 onset_threshold=float(self.config.get("vad_onset_threshold", 0.35)),
@@ -973,8 +997,10 @@ class GetsuGUI:
                         hpf=hpf,
                         gate=gate,
                         total_gain=total_gain,
-                        denoise_enabled=True,
+                        denoise_enabled=bool(rn is not None),
                         leveler=leveler,
+                        transient_suppressor=ts,
+                        mic_boost_db=float(boost_db),
                     )
                     processed_chunks.append(mono)
 
@@ -1635,6 +1661,16 @@ class GetsuGUI:
                 tag="chk_auto_route"
             )
 
+            dpg.add_spacer(height=self.s(4))
+
+            # --- MUSIC & PERFORMANCE MODE CHECKBOX ---
+            dpg.add_checkbox(
+                label="Music & Singing Mode (Bypasses AI filter, 800ms sustain)",
+                default_value=self.config.get("music_mode", False),
+                callback=self.on_music_mode_toggled,
+                tag="chk_music_mode"
+            )
+
             dpg.add_spacer(height=self.s(6))
 
             # --- SINGLE ACTION BUTTON: START / STOP ---
@@ -1863,7 +1899,7 @@ class GetsuGUI:
         try:
             rect_max = dpg.get_item_rect_max("footer_sponsor_row")
             diff = dpg.get_viewport_height() - dpg.get_viewport_client_height()
-            auto_fit_h = int(rect_max[1] + self.s(16)) + diff
+            auto_fit_h = int(rect_max[1] + self.s(26)) + diff
             if abs(auto_fit_h - dpg.get_viewport_height()) > 2:
                 dpg.set_viewport_height(auto_fit_h)
             dpg.render_dearpygui_frame()

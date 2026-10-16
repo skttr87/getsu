@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/skttr87/getsu/releases/latest"><img src="https://img.shields.io/github/v/release/skttr87/getsu?style=for-the-badge&color=28a745&logo=windows" alt="Latest Release" /></a>
+  <a href="https://github.com/skttr87/getsu/releases/latest"><img src="https://img.shields.io/badge/Release-v1.3.1-28a745?style=for-the-badge&logo=windows" alt="Latest Release" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License" /></a>
   <img src="https://img.shields.io/badge/Platform-Windows_10%2F11-0078D6?style=for-the-badge&logo=windows" alt="Platform" />
   <img src="https://img.shields.io/badge/100%25-Free%20%26%20Offline-brightgreen?style=for-the-badge" alt="Privacy" />
@@ -55,7 +55,7 @@ Getsu combines an **80Hz Butterworth rumble filter**, the **Mozilla RNNoise neur
 ## 🚀 Quick Start (3 Steps)
 
 ### 1. Download & Install
-[![Download Latest Release](https://img.shields.io/github/v/release/skttr87/getsu?label=Download%20Latest%20Installer&color=28a745&style=flat-square&logo=windows)](https://github.com/skttr87/getsu/releases/latest)  
+[![Download Latest Release](https://img.shields.io/badge/Download%20Latest%20Installer-v1.3.1-28a745?style=flat-square&logo=windows)](https://github.com/skttr87/getsu/releases/latest)  
 Download and run the latest **[Getsu Setup Installer (Releases)](https://github.com/skttr87/getsu/releases/latest)**.  
 *(The installer automatically sets up the required virtual audio driver in the background).*
 

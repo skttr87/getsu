@@ -348,7 +348,27 @@ def sync_codebase_versions(version: str) -> bool:
             except Exception as e:
                 print(f"[WARN] Could not update {vi_path.name}: {e}")
 
-    # 5. docs/index.html & docs/sitemap.xml
+    # 5. README.md badges
+    if CHANGELOG_MD.parent.joinpath("README.md").exists():
+        readme_path = CHANGELOG_MD.parent / "README.md"
+        readme_text = readme_path.read_text(encoding="utf-8")
+        orig_readme = readme_text
+        readme_text = re.sub(
+            r'https://img\.shields\.io/badge/Release-v[^-\s]+-',
+            f'https://img.shields.io/badge/Release-v{version}-',
+            readme_text
+        )
+        readme_text = re.sub(
+            r'https://img\.shields\.io/badge/Download%20Latest%20Installer-v[^-\s]+-',
+            f'https://img.shields.io/badge/Download%20Latest%20Installer-v{version}-',
+            readme_text
+        )
+        if readme_text != orig_readme:
+            readme_path.write_text(readme_text, encoding="utf-8")
+            print(f"[INFO] Synchronized {readme_path.relative_to(REPO_ROOT)} badges to v{version}")
+            modified = True
+
+    # 6. docs/index.html & docs/sitemap.xml
     docs_mod = update_docs_files(version)
     if docs_mod:
         modified = True

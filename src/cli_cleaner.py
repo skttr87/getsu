@@ -13,6 +13,12 @@ from typing import Optional, List, Dict, Any
 import numpy as np
 import miniaudio
 
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 from src.rnnoise import RNNoise, FRAME_SIZE, SAMPLE_RATE
 from src.dsp import (
     HighPassFilter,
@@ -32,7 +38,7 @@ def print_progress_bar(current: int, total: int, prefix: str = "", bar_length: i
         return
     fraction = min(1.0, current / total)
     filled = int(round(bar_length * fraction))
-    bar = "█" * filled + "░" * (bar_length - filled)
+    bar = "#" * filled + "-" * (bar_length - filled)
     percent = fraction * 100.0
     sys.stdout.write(f"\r{prefix} |{bar}| {percent:5.1f}% [{current}/{total}]")
     sys.stdout.flush()

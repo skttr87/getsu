@@ -8,7 +8,14 @@ import sys
 import time
 import wave
 import datetime
+import argparse
 from typing import Optional, Tuple, Dict, List
+
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 import numpy as np
 import sounddevice as sd
@@ -96,13 +103,22 @@ def draw_vu_meter(db: float, width: int = 24) -> str:
     clamped = max(-60.0, min(0.0, db))
     frac = (clamped + 60.0) / 60.0
     filled = int(round(frac * width))
-    bar = "█" * filled + "░" * (width - filled)
+    bar = "#" * filled + "-" * (width - filled)
     return bar
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Getsu Bluetooth Voice Recorder & Acoustic Sampler")
+    parser.add_argument("--duration", type=float, default=15.0, help="Recording duration in seconds (default: 15.0)")
+    parser.add_argument("--auto", action="store_true", help="Auto-start recording without waiting for interactive confirmation")
+    parser.add_argument("--no-playback", action="store_true", help="Skip interactive playback prompt at the end")
+    parser.add_argument("--play", action="store_true", help="Automatically play back recording after capture")
+    args = parser.parse_args()
+
+    record_duration = args.duration
+
     print("=" * 68)
-    print("  Getsu Bluetooth Voice Recorder & Acoustic Sampler (30s)")
+    print(f"  Getsu Bluetooth Voice Recorder & Acoustic Sampler ({record_duration:.0f}s)")
     print("=" * 68)
 
     # 1. Device Resolution
@@ -116,9 +132,10 @@ def main():
         print(f"    Native Rate : {int(dev_info['default_samplerate'])} Hz")
         print(f"    Channels    : {dev_info['max_input_channels']}")
         
-        confirm = input("\nUse this device? [Y/n]: ").strip().lower()
-        if confirm == 'n':
-            dev_idx, dev_meta = select_device_interactive()
+        if not args.auto:
+            confirm = input("\nUse this device? [Y/n]: ").strip().lower()
+            if confirm == 'n':
+                dev_idx, dev_meta = select_device_interactive()
     else:
         print("\n[!] No Bluetooth headset automatically identified.")
         dev_idx, dev_meta = select_device_interactive()
@@ -141,23 +158,26 @@ def main():
 
     print("\n" + "-" * 68)
     print(f"Target File  : {output_path}")
-    print(f"Duration     : {RECORD_DURATION:.1f} seconds")
+    print(f"Duration     : {record_duration:.1f} seconds")
     print(f"Sample Rate  : {samplerate} Hz (Mono 16-bit PCM)")
     print("-" * 68)
 
     # 2. Wait for user readiness
-    input("\n>>> Put on your Bluetooth headset, then press [ENTER] when ready to record... ")
+    if not args.auto:
+        input("\n>>> Put on your Bluetooth headset, then press [ENTER] when ready to record... ")
+    else:
+        print("\n>>> Bluetooth headset detected. Preparing recording...")
 
     # 3. 3-Second Visual Countdown
     print("\nStarting in:")
     for count in range(3, 0, -1):
         print(f"   [{count}] ...", flush=True)
         time.sleep(1.0)
-    print("   [● RECORDING - Speak naturally into your Bluetooth headset!]\n")
+    print("   [* RECORDING - Speak naturally into your Bluetooth headset!]\n")
 
     # 4. Recording Loop with Live Metering
     block_samples = int(samplerate * BLOCK_DURATION)
-    total_blocks = int(RECORD_DURATION / BLOCK_DURATION)
+    total_blocks = int(record_duration / BLOCK_DURATION)
     recorded_blocks: List[np.ndarray] = []
 
     try:
@@ -181,11 +201,11 @@ def main():
                 
                 status_tag = "Speaking" if rms_db > -35.0 else "Quiet"
                 sys.stdout.write(
-                    f"\r[{elapsed:4.1f}s / {RECORD_DURATION:.0f}s] [{vu_bar}] {rms_db:5.1f} dBFS  ({status_tag:8s}) "
+                    f"\r[{elapsed:4.1f}s / {record_duration:.0f}s] [{vu_bar}] {rms_db:5.1f} dBFS  ({status_tag:8s}) "
                 )
                 sys.stdout.flush()
 
-        print("\n\n[✓] Recording complete!")
+        print("\n\n[OK] Recording complete!")
     except KeyboardInterrupt:
         print("\n\n[!] Recording stopped early by user.")
     except Exception as e:
@@ -211,11 +231,11 @@ def main():
     print(f"  Overall RMS Energy: {overall_rms:.2f} dBFS")
     
     if peak_db >= -0.5:
-        print("  ⚠️ Clipping Notice : Audio reached digital ceiling (potential digital clipping).")
+        print("  [!] Clipping Notice : Audio reached digital ceiling (potential digital clipping).")
     elif overall_rms < -40.0:
-        print("  ⚠️ Low Volume      : Voice signal is quiet. Consider boosting microphone gain.")
+        print("  [!] Low Volume      : Voice signal is quiet. Consider boosting microphone gain.")
     else:
-        print("  ✓ Signal Quality   : Healthy speech energy profile.")
+        print("  [OK] Signal Quality   : Healthy speech energy profile.")
 
     # 6. Save to 16-bit PCM WAV File
     pcm_int16 = np.clip(full_audio * 32767.0, -32768, 32767).astype(np.int16)
@@ -226,12 +246,18 @@ def main():
         wf.writeframes(pcm_int16.tobytes())
 
     file_size_kb = os.path.getsize(output_path) / 1024.0
-    print(f"\n[✓] Saved WAV Sample : {output_path} ({file_size_kb:.1f} KB)")
+    print(f"\n[OK] Saved WAV Sample : {output_path} ({file_size_kb:.1f} KB)")
 
     # 7. Optional Immediate Playback Check
     try:
-        playback_check = input("\nPlay back this recording to verify audio quality? [Y/n]: ").strip().lower()
-        if playback_check != 'n':
+        should_play = False
+        if args.play:
+            should_play = True
+        elif not args.no_playback:
+            playback_check = input("\nPlay back this recording to verify audio quality? [Y/n]: ").strip().lower()
+            should_play = (playback_check != 'n')
+
+        if should_play:
             print("\nPlaying back sample through system default playback device...")
             # If mono, play as 2-channel duplicate for clear stereo listening
             playback_audio = np.column_stack((full_audio, full_audio))

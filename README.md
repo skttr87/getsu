@@ -20,7 +20,7 @@
 ---
 
 > [!NOTE]
-> **Getsu** comes from two Acehnese words: **get** (*"good"*) and **su** (*"sound"*).
+> **Getsu** comes from two Acehnese words: **gèt** (*"good"*) and **su** (*"sound"*).
 
 ---
 

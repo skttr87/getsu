@@ -26,7 +26,20 @@ _STOP_TOKENS = frozenset({"r", "hd", "input", "audio", "device", "high", "defini
 
 # Jack "roles" let a WDM-KS name like "Mic in at front panel (black)" find
 # "Microphone (Realtek(R) Audio)" even though the names share no words.
-_ROLES = {"mic": {"mic", "microphone"}, "line": {"line"}, "mix": {"mix"}}
+_ROLES = {
+    "mic": {
+        "mic", "microphone",                       # en, fr
+        "микрофон",                                # ru
+        "mikrofon",                                # de, id
+        "micrófono", "microfono",                  # es (accented and plain)
+        "microfone",                               # pt
+    },
+    "line": {"line"},
+    "mix": {"mix"},
+}
+
+# Words are matched Unicode-aware and case-folded, so Cyrillic and accented names keep their words.
+_WORD_RE = re.compile(r"\w+")
 
 
 class DeviceResolutionError(RuntimeError):
@@ -60,11 +73,20 @@ def _rank(host_name: str) -> int:
     return len(PREFERRED_HOST_APIS)
 
 
+def _words(name: str) -> List[str]:
+    return [w.casefold() for w in _WORD_RE.findall(name or "")]
+
+
 def _tokens(name: str) -> set:
-    return {t for t in re.findall(r"[a-z0-9]+", name.lower()) if t not in _STOP_TOKENS}
+    return {t for t in _words(name) if t not in _STOP_TOKENS}
 
 
 def _similarity(a: str, b: str) -> float:
+    # MME cuts names at 31 characters, so a long name that is a prefix of another is the same endpoint.
+    la, lb = (a or "").casefold().strip(), (b or "").casefold().strip()
+    short, long_ = (la, lb) if len(la) <= len(lb) else (lb, la)
+    if len(short) >= 20 and long_.startswith(short):
+        return 1.0
     ta, tb = _tokens(a), _tokens(b)
     if not ta or not tb:
         return 0.0
@@ -73,7 +95,7 @@ def _similarity(a: str, b: str) -> float:
 
 def _role(name: str) -> Optional[str]:
     """'mic' / 'line' / 'mix' when the name clearly indicates exactly one jack type, else None."""
-    words = set(re.findall(r"[a-z0-9]+", name.lower()))
+    words = set(_words(name))
     found = [r for r, keys in _ROLES.items() if words & keys]
     return found[0] if len(found) == 1 else None
 

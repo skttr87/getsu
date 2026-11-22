@@ -171,13 +171,19 @@ def resolve_pair(
     hostapis: Sequence[dict],
     input_idx: int,
     output_idx: int,
+    only_api: Optional[str] = None,
 ) -> ResolvedPair:
+    """
+    only_api: restrict the search to host APIs whose name contains this text (for example "DIRECTSOUND").
+    """
     _check_index(devices, input_idx, output_idx)
 
     orig_in = devices[input_idx]
     orig_host = hostapis[orig_in["hostapi"]]["name"]
     original_unusable = _is_avoided(orig_host)
     api_order = _api_order(hostapis)
+    if only_api:
+        api_order = [i for i in api_order if only_api.upper() in hostapis[i]["name"].upper()]
 
     for api_idx in api_order:
         inp, how, ambiguous = _find_input(devices, hostapis, api_idx, input_idx, original_unusable)
@@ -249,6 +255,37 @@ def resolve_single(
         f"No usable replacement for '{dev['name']}' found outside WDM-KS. "
         "Check that the device is plugged in and enabled in Windows Sound settings."
     )
+
+
+def reresolve_index(devices: Sequence[dict], hostapis: Sequence[dict], name: Optional[str], stored_idx: int) -> int:
+    """
+    Device indices can change when PortAudio is re-initialised, so a saved index may point at another device.
+    Returns the index of the input endpoint called `name` (same host API as the stored index first). Keeps
+    stored_idx when it already names that endpoint, or when nothing matches.
+    """
+    if not name:
+        return stored_idx
+    valid = 0 <= stored_idx < len(devices)
+    if valid and devices[stored_idx]["name"] == name and devices[stored_idx]["max_input_channels"] > 0:
+        return stored_idx
+    inputs = [i for i, d in enumerate(devices) if d["max_input_channels"] > 0]
+    pools: List[List[int]] = []
+    if valid:
+        pools.append([i for i in inputs if devices[i]["hostapi"] == devices[stored_idx]["hostapi"]])
+    pools.append(inputs)
+    for pool in pools:
+        exact = [i for i in pool if devices[i]["name"] == name]
+        if exact:
+            return exact[0]
+    for pool in pools:
+        best, best_score = None, 0.0
+        for i in pool:
+            score = _similarity(name, devices[i]["name"])
+            if score > best_score:
+                best, best_score = i, score
+        if best is not None and best_score >= MATCH_THRESHOLD:
+            return best
+    return stored_idx
 
 
 # ----------------------------------------------------------------------------- dropdown helpers

@@ -1081,6 +1081,54 @@ class InputDownmixer:
             self._inverted = False
 
 
+class DryBlend:
+    """
+    Optional RNNoise dry blend. Keeps a copy of the pre-RNNoise frame (after high-pass and pre-clip),
+    delayed by the pipeline latency (delay_frames x 10 ms), and mixes it back at mix_db while the gate is open.
+    The delay matches the measured RNNoise + lookahead latency (about 1440 samples at 48 kHz), so the dry
+    path lines up with the processed path and does not comb-filter.
+    Storage is a preallocated ring of frames; push() performs two copies and no allocation.
+    """
+
+    DEFAULT_DELAY_FRAMES = 3
+
+    def __init__(self, mix_db: float = -24.0, delay_frames: int = DEFAULT_DELAY_FRAMES, frame_len: int = 480):
+        self.mix_db = float(mix_db)
+        self.gain = 10.0 ** (self.mix_db / 20.0)
+        self._alloc(int(frame_len), int(delay_frames))
+
+    def _alloc(self, frame_len: int, delay_frames: int):
+        self._ring = np.zeros((delay_frames, frame_len), dtype=np.float32)
+        self._idx = 0
+        self._out = np.zeros(frame_len, dtype=np.float32)
+        self._scaled = np.zeros(frame_len, dtype=np.float32)
+
+    def reset(self):
+        self._ring.fill(0.0)
+        self._idx = 0
+
+    def push(self, frame: np.ndarray) -> np.ndarray:
+        """Store frame and return the frame from delay_frames calls ago (internal buffer, reused)."""
+        if frame.shape[0] != self._out.shape[0]:
+            self._alloc(frame.shape[0], self._ring.shape[0])
+        slot = self._ring[self._idx]
+        np.copyto(self._out, slot)
+        np.copyto(slot, frame)
+        self._idx = (self._idx + 1) % self._ring.shape[0]
+        return self._out
+
+    def mix_into(self, frame: np.ndarray, dry: np.ndarray, gate_gain: float, gate_floor: float):
+        """frame += dry * gain * openness, where openness is 0 at the gate floor and 1 when fully open."""
+        if gate_floor >= 1.0:
+            return
+        openness = min(1.0, max(0.0, (gate_gain - gate_floor) / (1.0 - gate_floor)))
+        w = self.gain * openness
+        if w <= 0.0:
+            return
+        np.multiply(dry, w, out=self._scaled)
+        frame += self._scaled
+
+
 _tls = threading.local()
 
 
@@ -1104,6 +1152,7 @@ def process_mono_frame(
     transient_suppressor: Optional[TransientSuppressor] = None,
     mic_boost_db: float = 0.0,
     preclip_knee: float = PRECLIP_KNEE_DEFAULT,
+    dry_blend: Optional[DryBlend] = None,
 ) -> Tuple[np.ndarray, float, float, float]:
     """
     Authoritative single-frame (10ms) DSP processing pipeline shared by both the live stream
@@ -1130,6 +1179,7 @@ def process_mono_frame(
     input_peak_db, input_rms_db = calculate_levels(frame_mono)
     frame_mono = soft_preclip(frame_mono, knee=preclip_knee)
     np.clip(frame_mono, -1.0, 1.0, out=frame_mono)
+    dry_delayed = dry_blend.push(frame_mono) if dry_blend is not None else None
 
     # 3. RNNoise Neural Core (scaled into a per-thread scratch buffer, result written back in place)
     speech_prob = 0.0
@@ -1153,7 +1203,11 @@ def process_mono_frame(
         frame_mono *= total_gain
 
     # 7. Soft-Knee Adaptive Noise Gate
-    frame_mono, _ = gate.process(frame_mono, speech_prob, input_rms_db=input_rms_db, in_place=True)
+    frame_mono, gate_gain = gate.process(frame_mono, speech_prob, input_rms_db=input_rms_db, in_place=True)
+
+    # 7b. Optional RNNoise dry blend (only while the gate is open; only when RNNoise produced the wet path)
+    if dry_delayed is not None and denoise_enabled and rnnoise is not None:
+        dry_blend.mix_into(frame_mono, dry_delayed, gate_gain, gate.floor_gain)
 
     # 8. Soft Saturation Limiter (in place)
     frame_mono = soft_limit(frame_mono, threshold=0.85, out=frame_mono)

@@ -18,6 +18,7 @@ from src.dsp import (
     process_mono_frame,
     PRECLIP_KNEE_DEFAULT,
     InputDownmixer,
+    DryBlend,
 )
 from src.host_api_resolver import resolve_pair, DeviceResolutionError, ResolvedPair
 from src.audio_errors import explain_start_error, ExplainedError
@@ -52,10 +53,14 @@ class AudioEngine:
         preclip_knee: float = PRECLIP_KNEE_DEFAULT,
         stereo_downmix: str = InputDownmixer.MODE_AUTO,
         vad_floor_tilt_hz: float = 0.0,
+        rnnoise_dry_mix_db: Optional[float] = None,
     ):
         self.input_device = input_device
         self.output_device = output_device
         self.vad_floor_tilt_hz = float(vad_floor_tilt_hz)
+        self._dry_blend: Optional[DryBlend] = (
+            DryBlend(mix_db=float(rnnoise_dry_mix_db)) if rnnoise_dry_mix_db is not None else None
+        )
         self.preclip_knee = float(preclip_knee)
         self._downmixer = InputDownmixer(frame_len=FRAME_SIZE, sample_rate=int(SAMPLE_RATE), mode=stereo_downmix)
         self.denoise_enabled = denoise_enabled
@@ -190,6 +195,7 @@ class AudioEngine:
                 transient_suppressor=self.transient_suppressor,
                 mic_boost_db=self.mic_boost_db,
                 preclip_knee=self.preclip_knee,
+                dry_blend=self._dry_blend,
             )
 
             # 3. Post-gate output metrics and clip protection
@@ -519,4 +525,5 @@ def create_engine_from_config(
         preclip_knee=float(config.get("preclip_knee", PRECLIP_KNEE_DEFAULT)),
         stereo_downmix=config.get("stereo_downmix", InputDownmixer.MODE_AUTO),
         vad_floor_tilt_hz=float(config.get("vad_floor_tilt_hz", 0.0) or 0.0),
+        rnnoise_dry_mix_db=config.get("rnnoise_dry_mix_db"),
     )

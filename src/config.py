@@ -36,6 +36,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "preclip_knee": 0.95,           # Soft pre-clip knee before RNNoise (1.0 = stage off)
     "stereo_downmix": "auto",       # "auto": use the live channel for dead or inverted stereo mics; "average": (L+R)/2
     "vad_floor_tilt_hz": 0.0,       # 0 = off. Above 0: closed-gate path is low-passed at this frequency (more HF cut)
+    "rnnoise_dry_mix_db": None,     # null = off. A number (e.g. -24) mixes the delayed pre-RNNoise signal back while the gate is open
 }
 
 import sys

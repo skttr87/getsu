@@ -276,5 +276,70 @@ class GateTiltTests(unittest.TestCase):
         self.assertEqual(DEFAULT_CONFIG["vad_floor_tilt_hz"], 0.0)
 
 
+class _IdentityRNN:
+    """Passes the frame through unchanged and reports a fixed speech probability."""
+
+    def __init__(self, prob=0.95):
+        self.prob = prob
+
+    def process_frame(self, frame):
+        return frame * 1.0, self.prob
+
+
+class DryBlendTests(unittest.TestCase):
+
+    def test_push_returns_frame_from_delay_frames_ago(self):
+        from src.dsp import DryBlend
+        db = DryBlend(mix_db=-24.0, delay_frames=3, frame_len=480)
+        seen = []
+        for i in range(6):
+            out = db.push(np.full(480, float(i + 1), dtype=np.float32))
+            seen.append(float(out[0]))
+        self.assertEqual(seen, [0.0, 0.0, 0.0, 1.0, 2.0, 3.0])
+
+    def test_gain_is_minus_24_db(self):
+        from src.dsp import DryBlend
+        self.assertAlmostEqual(DryBlend(mix_db=-24.0).gain, 10 ** (-24 / 20), places=9)
+
+    def _run(self, dry_blend, speech_prob, frames, seed=21):
+        rng = np.random.default_rng(seed)
+        gate = AdaptiveNoiseGate(lookahead=True, floor_gain=0.06, calibrate_startup=False)
+        inputs = []
+        outs = []
+        for _ in range(frames):
+            fr = (0.1 * rng.standard_normal(480)).astype(np.float32)
+            inputs.append(fr.copy())
+            out, _, _, _ = process_mono_frame(fr.copy(), _IdentityRNN(speech_prob), None, gate, 1.0, True, None, None,
+                                              0.0, dry_blend=dry_blend)
+            outs.append(np.array(out, dtype=np.float32))
+        return inputs, outs
+
+    def test_mix_is_delayed_dry_scaled_while_gate_open(self):
+        from src.dsp import DryBlend
+        # Output-only comparison: the gate decisions do not depend on the dry path
+        inputs, wet = self._run(None, 0.95, 80)
+        _, mixed = self._run(DryBlend(mix_db=-24.0, delay_frames=3), 0.95, 80)
+        w = 10 ** (-24 / 20)
+        for t in range(70, 80):
+            diff = mixed[t].astype(np.float64) - wet[t].astype(np.float64)
+            expected = w * inputs[t - 3].astype(np.float64)
+            np.testing.assert_allclose(diff, expected, rtol=1e-4, atol=1e-6)
+
+    def test_no_mix_while_gate_closed(self):
+        from src.dsp import DryBlend
+        _, wet = self._run(None, 0.0, 40)
+        _, mixed = self._run(DryBlend(mix_db=-24.0, delay_frames=3), 0.0, 40)
+        for t in range(40):
+            np.testing.assert_array_equal(mixed[t], wet[t])
+
+    def test_engine_default_is_off_and_config_enables(self):
+        from src.stream import AudioEngine
+        with patch("src.stream.sd") as sd_mock:
+            sd_mock.query_devices.return_value = {"max_input_channels": 2, "max_output_channels": 2, "name": "x"}
+            self.assertIsNone(AudioEngine(0, 1)._dry_blend)
+            self.assertIsNotNone(AudioEngine(0, 1, rnnoise_dry_mix_db=-24.0)._dry_blend)
+        self.assertIsNone(DEFAULT_CONFIG["rnnoise_dry_mix_db"])
+
+
 if __name__ == "__main__":
     unittest.main()

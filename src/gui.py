@@ -112,6 +112,7 @@ TITLE_BORDER_COLOR = 0x002E2C2C
 # Window geometry (logical pixels, scaled with self.s()): 420 px wide, 24 px side gutters.
 WINDOW_W = 420
 CONTENT_PAD = 24
+CONTENT_W = WINDOW_W - 2 * CONTENT_PAD  # 372 px between the gutters
 VB_MODAL_W = 396  # VB-Cable install dialog: 396 px so it fits the 420 px window
 
 # Features whose backend lands in a later task. Their controls are built but hidden.
@@ -1796,7 +1797,7 @@ class GetsuGUI:
             content = rows * self.s(52) + max(0, rows - 1) + self.s(16)
             return min(vp_h, self.s(56) + content)
         if name == "settings":
-            return min(vp_h, self.s(56) + self.s(4 * 56) + self.s(24))
+            return min(vp_h, self.s(56) + self.s(4 * 56 + 3) + self.s(24))
         return min(vp_h, self.s(56 + 252 + 24))
 
     def _close_panels(self):
@@ -1878,14 +1879,13 @@ class GetsuGUI:
                     dpg.draw_polyline(icons.to_px(icons.CHEVRON, 0, self.s(22), self.s(16)), color=COL_TEXT_3,
                                       thickness=float(self.s(2)), parent="mic_chev")
             self._click_targets["mic_row"] = self._open_mic_panel_from_row
-            if FEATURE_EARBUD_HINT:
-                with dpg.group(horizontal=True, tag="hint_row", show=False):
-                    dpg.add_spacer(width=self.s(16))
-                    dpg.add_text("Earbud mic drops audio to call quality.", color=COL_TEXT_2, tag="hint_text")
-                    dpg.bind_item_font("hint_text", self.font_notice)
-                    dpg.add_button(label="Use built-in mic", tag="btn_use_builtin", callback=self._use_builtin_mic)
-                    dpg.bind_item_theme("btn_use_builtin", self.theme_link_btn)
-            if FEATURE_MODES:
+            with dpg.group(horizontal=True, tag="hint_row", show=FEATURE_EARBUD_HINT):
+                dpg.add_spacer(width=self.s(16))
+                dpg.add_text("Earbud mic drops audio to call quality.", color=COL_TEXT_2, tag="hint_text")
+                dpg.bind_item_font("hint_text", self.font_notice)
+                dpg.add_button(label="Use built-in mic", tag="btn_use_builtin", callback=self._use_builtin_mic)
+                dpg.bind_item_theme("btn_use_builtin", self.theme_link_btn)
+            with dpg.group(tag="mode_block", show=FEATURE_MODES):
                 with dpg.group(horizontal=True):
                     dpg.add_spacer(width=self.s(16))
                     dpg.add_drawlist(width=width - self.s(32), height=1, tag="mode_divider")
@@ -1945,23 +1945,28 @@ class GetsuGUI:
             dpg.bind_item_font(tag, self.font_btn)
 
     def _build_footer(self, width: int):
-        # Width of "Sponsored by " plus the link button (its text and frame padding), so the group ends at the right edge.
-        link_w = self._text_w("Kopi Reman", self.font_small) + self.s(12)
-        right_w = self._text_w("Sponsored by", self.font_small) + self.s(4) + link_w
-        with dpg.table(header_row=False, policy=dpg.mvTable_SizingFixedFit, tag="footer_row"):
-            dpg.add_table_column(init_width_or_weight=max(1, width - right_w))
-            dpg.add_table_column(init_width_or_weight=right_w)
-            with dpg.table_row():
-                dpg.add_text("Created by Ihsan", color=COL_TEXT_3, tag="footer_creator_text")
-                with dpg.group(horizontal=True):
-                    dpg.add_text("Sponsored by", color=COL_TEXT_3, tag="footer_sponsor_text")
-                    dpg.add_spacer(width=self.s(4))
-                    dpg.add_button(label="Kopi Reman", callback=lambda: webbrowser.open("https://www.instagram.com/kopireman/"),
-                                   width=link_w, tag="sponsor_link_btn")
-                    dpg.bind_item_theme("sponsor_link_btn", self.theme_link_btn)
-        for tag in ("footer_creator_text", "footer_sponsor_text", "sponsor_link_btn"):
-            dpg.bind_item_font(tag, self.font_small)
+        """Creator on the left, sponsor link on the right. The gap between them is set from the rendered widths (_place_footer)."""
+        with dpg.group(horizontal=True, tag="footer_row"):
+            dpg.add_text("Created by Ihsan", color=COL_TEXT_3, tag="footer_creator_text")
+            dpg.bind_item_font("footer_creator_text", self.font_small)
+            dpg.add_spacer(width=0, tag="footer_gap")
+            with dpg.group(horizontal=True, tag="footer_sponsor"):
+                dpg.add_text("Sponsored by", color=COL_TEXT_3, tag="footer_sponsor_text")
+                dpg.bind_item_font("footer_sponsor_text", self.font_small)
+                dpg.add_spacer(width=self.s(4))
+                dpg.add_button(label="Kopi Reman", callback=lambda: webbrowser.open("https://www.instagram.com/kopireman/"),
+                               tag="sponsor_link_btn")
+                dpg.bind_item_theme("sponsor_link_btn", self.theme_link_btn)
+                dpg.bind_item_font("sponsor_link_btn", self.font_small)
 
+    def _place_footer(self):
+        """Right-aligns the sponsor group: the gap is the content width minus the two groups as rendered."""
+        try:
+            left = dpg.get_item_rect_size("footer_creator_text")[0]
+            right = dpg.get_item_rect_size("footer_sponsor")[0]
+            dpg.configure_item("footer_gap", width=max(0, self.s(CONTENT_W) - left - right))
+        except Exception as e:
+            print(f"[WARN] Footer layout failed: {e}")
     # --- panels -----------------------------------------------------------
 
     def _build_panel_shell(self, name: str):
@@ -2012,7 +2017,7 @@ class GetsuGUI:
             self._sheet_head("Settings", lambda: self._close_panels())
             with dpg.group(horizontal=True):
                 dpg.add_spacer(width=self.s(24))
-                with dpg.child_window(tag="settings_card", width=width, height=self.s(4 * 56), border=False):
+                with dpg.child_window(tag="settings_card", width=width, height=self.s(4 * 56 + 3), border=False):
                     self._bind_list("settings_card")
                     self._settings_row_slider(width)
                     self._divider(width)
@@ -2026,9 +2031,8 @@ class GetsuGUI:
                     self._settings_row_switch("music_mode", "Music & Singing mode", None,
                                               bool(self.config.get("music_mode", False)),
                                               self._on_music_mode_switch)
-                    if FEATURE_LEARN_ROOM:
-                        self._divider(width)
-                        self._settings_row_learn(width)
+                    self._divider(width, show=FEATURE_LEARN_ROOM)
+                    self._settings_row_learn(width, show=FEATURE_LEARN_ROOM)
         else:
             self._sheet_head("How to use Getsu", None)
             with dpg.group(horizontal=True):
@@ -2044,8 +2048,8 @@ class GetsuGUI:
         if self.theme_list and dpg.does_item_exist(tag):
             dpg.bind_item_theme(tag, self.theme_list)
 
-    def _divider(self, width: int):
-        with dpg.group(horizontal=True):
+    def _divider(self, width: int, show: bool = True):
+        with dpg.group(horizontal=True, show=show):
             dpg.add_spacer(width=self.s(16))
             dpg.add_drawlist(width=width - self.s(16), height=1)
             dpg.draw_line((0, 0), (width - self.s(32), 0), color=COL_SEPARATOR, thickness=1.0, parent=dpg.last_item())
@@ -2100,8 +2104,8 @@ class GetsuGUI:
                 dpg.add_spacer(height=self.s(15))
             self._make_switch(name, switch_group, on, callback)
 
-    def _settings_row_learn(self, width: int):
-        with dpg.group(horizontal=True):
+    def _settings_row_learn(self, width: int, show: bool = False):
+        with dpg.group(horizontal=True, show=show):
             dpg.add_spacer(width=self.s(16))
             dpg.add_text("Learn my room", color=COL_TEXT)
             dpg.add_button(label="Learn", enabled=False, tag="btn_room_learn")
@@ -2583,6 +2587,7 @@ class GetsuGUI:
         Fits the viewport to the content: client width 420 logical px, height = footer bottom plus 16 px,
         capped at 640 px and at the work area. The frame (title bar, borders) is added back to both sizes.
         """
+        self._place_footer()
         try:
             frame_w = dpg.get_viewport_width() - dpg.get_viewport_client_width()
             dpg.set_viewport_width(self.s(WINDOW_W) + frame_w)

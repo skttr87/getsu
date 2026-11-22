@@ -172,7 +172,7 @@ def selective_suspend_lines() -> List[str]:
         if v is None:
             out.append(f"USB selective suspend {plug}: not reported")
         else:
-            state = "enabled (device may be suspended)" if v else "disabled"
+            state = "enabled: USB audio can be suspended" if v else "disabled"
             out.append(f"USB selective suspend {plug}: {v} ({state})")
     return out
 

@@ -34,6 +34,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "original_mic_id": None,        # Stores Windows CoreAudio endpoint GUID string of physical mic
     "auto_route": True,             # Settings toggle: Auto-Route to Apps (switch default mic when active)
     "preclip_knee": 0.95,           # Soft pre-clip knee before RNNoise (1.0 = stage off)
+    "stereo_downmix": "auto",       # "auto": use the live channel for dead or inverted stereo mics; "average": (L+R)/2
 }
 
 import sys
@@ -121,6 +122,9 @@ def load_config() -> Dict[str, Any]:
         # Configs saved without the pre-clip knee key get the current default (0.95).
         if "preclip_knee" not in data:
             merged["preclip_knee"] = 0.95
+            migrated = True
+        if "stereo_downmix" not in data:
+            merged["stereo_downmix"] = "auto"
             migrated = True
 
         # v1.2.6 migration (handles stale close thresholds, hangovers, and version bump)

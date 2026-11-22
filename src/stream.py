@@ -17,6 +17,7 @@ from src.dsp import (
     TransientSuppressor,
     process_mono_frame,
     PRECLIP_KNEE_DEFAULT,
+    InputDownmixer,
 )
 from src.host_api_resolver import resolve_pair, DeviceResolutionError, ResolvedPair
 from src.audio_errors import explain_start_error, ExplainedError
@@ -49,10 +50,12 @@ class AudioEngine:
         auto_level: bool = False,
         mic_boost_db: float = 0.0,
         preclip_knee: float = PRECLIP_KNEE_DEFAULT,
+        stereo_downmix: str = InputDownmixer.MODE_AUTO,
     ):
         self.input_device = input_device
         self.output_device = output_device
         self.preclip_knee = float(preclip_knee)
+        self._downmixer = InputDownmixer(frame_len=FRAME_SIZE, sample_rate=int(SAMPLE_RATE), mode=stereo_downmix)
         self.denoise_enabled = denoise_enabled
         self.high_pass_enabled = high_pass_enabled
         self.vad_threshold = vad_threshold
@@ -161,7 +164,7 @@ class AudioEngine:
 
             # 1. Stereo Downmixing with safe multi-channel array guard
             if indata.ndim > 1 and indata.shape[1] >= 2:
-                frame_mono = (indata[:, 0] + indata[:, 1]) * 0.5
+                frame_mono = self._downmixer.process(indata)
             elif indata.ndim > 1:
                 frame_mono = indata[:, 0].copy()
             else:
@@ -510,4 +513,5 @@ def create_engine_from_config(
         auto_level=config.get("auto_level", False),
         mic_boost_db=float(boost_db),
         preclip_knee=float(config.get("preclip_knee", PRECLIP_KNEE_DEFAULT)),
+        stereo_downmix=config.get("stereo_downmix", InputDownmixer.MODE_AUTO),
     )

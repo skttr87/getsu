@@ -16,7 +16,7 @@ Zero-Mistake Automated Publish Pipeline:
 5. Clean Build & Native Binary Verification:
    - PyInstaller canonical spec build
    - Verifies dist/getsu/getsu.exe exists and PE ProductVersion matches
-   - Verifies rnnoise.dll native binary exists and is >= 1.5 MB (SIMD build: 1,712,640 bytes)
+   - Verifies rnnoise.dll native binary exists and is >= 3.5 MB (SIMD build: 3,854,848 bytes)
    - Inno Setup installer compilation (ISCC.exe setup.iss)
    - Verifies dist/installer/Getsu-v{version}-Setup.exe exists and is >= 20 MB
    - Verifies installer Windows PE metadata (ProductVersion, FileVersion, OriginalFilename)
@@ -436,8 +436,8 @@ def verify_dist_integrity(version: str):
         raise RuntimeError("CRITICAL: rnnoise.dll was NOT found in dist/getsu! Check getsu.spec datas.")
 
     rnnoise_size = rnnoise_path.stat().st_size
-    if rnnoise_size < 1_500_000:
-        raise RuntimeError(f"CRITICAL: rnnoise.dll is undersized ({rnnoise_size} bytes). Expected ~1.7 MB.")
+    if rnnoise_size < 3_500_000:
+        raise RuntimeError(f"CRITICAL: rnnoise.dll is undersized ({rnnoise_size} bytes). Expected ~3.9 MB.")
     print(f"[AUDIT] [OK] rnnoise.dll confirmed: {rnnoise_size:,} bytes at {rnnoise_path.relative_to(REPO_ROOT)}")
 
     # Check PE Version on getsu.exe

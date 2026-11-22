@@ -73,12 +73,16 @@ class TestClassifyByBusType(FakeEndpointStore):
         self.endpoint(name, DeviceBusType.USB, EndpointFormFactor.HEADSET)
         self.assertEqual(classify_device(name, True), DeviceKind.USB_HEADSET)
 
-    def test_usb_form_factors_headset_class_are_usb_headset(self):
-        for ff in (EndpointFormFactor.HEADSET, EndpointFormFactor.HEADPHONES,
-                   EndpointFormFactor.MICROPHONE, EndpointFormFactor.HANDSET):
+    def test_usb_headset_class_form_factors_are_usb_headset(self):
+        for ff in (EndpointFormFactor.HEADSET, EndpointFormFactor.HEADPHONES, EndpointFormFactor.HANDSET):
             name = f"usb device ff{ff}"
             self.endpoint(name, DeviceBusType.USB, ff)
             self.assertEqual(classify_device(name, True), DeviceKind.USB_HEADSET, f"form factor {ff}")
+
+    def test_usb_microphone_form_factor_is_usb_mic(self):
+        name = "Микрофон (USB Audio)"
+        self.endpoint(name, DeviceBusType.USB, EndpointFormFactor.MICROPHONE)
+        self.assertEqual(classify_device(name, True), DeviceKind.USB_MIC)
 
     def test_usb_speakers_are_other(self):
         self.endpoint("USB Speakers", DeviceBusType.USB, EndpointFormFactor.SPEAKERS, is_input=False)
@@ -92,9 +96,25 @@ class TestClassifyByBusType(FakeEndpointStore):
         self.endpoint("Microphone (Realtek(R) Audio)", DeviceBusType.INTERNAL_HD, EndpointFormFactor.MICROPHONE)
         self.assertEqual(classify_device("Microphone (Realtek(R) Audio)", True), DeviceKind.BUILT_IN)
 
-    def test_intel_audio_microphone_is_built_in(self):
-        self.endpoint("Микрофон (Встроенный)", DeviceBusType.INTEL_AUDIO, None)
+    def test_hd_audio_without_form_factor_is_built_in(self):
+        self.endpoint("Микрофон (Встроенный)", DeviceBusType.INTERNAL_HD, None)
         self.assertEqual(classify_device("Микрофон (Встроенный)", True), DeviceKind.BUILT_IN)
+
+    def test_intel_audio_microphone_is_built_in(self):
+        self.endpoint("Microphone Array (Intel)", DeviceBusType.INTEL_AUDIO, EndpointFormFactor.MICROPHONE)
+        self.assertEqual(classify_device("Microphone Array (Intel)", True), DeviceKind.BUILT_IN)
+
+    def test_hd_audio_headset_jack_is_wired_headset(self):
+        self.endpoint("Headset Microphone (Realtek)", DeviceBusType.INTERNAL_HD, EndpointFormFactor.HEADSET)
+        self.assertEqual(classify_device("Headset Microphone (Realtek)", True), DeviceKind.WIRED_HEADSET)
+
+    def test_hd_audio_headphone_jack_output_is_wired_headset(self):
+        self.endpoint("Headphones (Realtek)", DeviceBusType.INTERNAL_HD, EndpointFormFactor.HEADPHONES, is_input=False)
+        self.assertEqual(classify_device("Headphones (Realtek)", False), DeviceKind.WIRED_HEADSET)
+
+    def test_intel_audio_headset_jack_is_wired_headset(self):
+        self.endpoint("Headset (Intel)", DeviceBusType.INTEL_AUDIO, EndpointFormFactor.HEADSET)
+        self.assertEqual(classify_device("Headset (Intel)", True), DeviceKind.WIRED_HEADSET)
 
     def test_hd_audio_line_level_is_line_in(self):
         self.endpoint("Line In (Realtek)", DeviceBusType.INTERNAL_HD, EndpointFormFactor.LINE_LEVEL)
@@ -117,6 +137,10 @@ class TestClassifyByBusType(FakeEndpointStore):
 
     def test_empty_name_is_other(self):
         self.assertEqual(classify_device("", True), DeviceKind.OTHER)
+
+    def test_name_with_dot_is_classified_by_name(self):
+        self.endpoint("Speakers (2.1 Audio)", DeviceBusType.INTERNAL_HD, EndpointFormFactor.SPEAKERS, is_input=False)
+        self.assertEqual(classify_device("Speakers (2.1 Audio)", False), DeviceKind.BUILT_IN)
 
     def test_direction_is_passed_to_readers(self):
         self.endpoint("Speakers (Realtek(R) Audio)", DeviceBusType.INTERNAL_HD, EndpointFormFactor.SPEAKERS, is_input=False)
@@ -170,14 +194,27 @@ class TestFormFactorDecoding(unittest.TestCase):
 
 class TestKindLabel(unittest.TestCase):
 
-    def test_labels(self):
+    def test_input_labels(self):
         self.assertEqual(kind_label("bluetooth_headset"), "Bluetooth headset")
         self.assertEqual(kind_label("usb_headset"), "USB headset")
+        self.assertEqual(kind_label("usb_mic"), "USB microphone")
+        self.assertEqual(kind_label("wired_headset"), "Wired headset")
         self.assertEqual(kind_label("built_in"), "Built-in microphone")
         self.assertEqual(kind_label("line_in"), "Line in")
         self.assertEqual(kind_label("virtual"), "Virtual device")
         self.assertEqual(kind_label("other"), "Microphone")
         self.assertEqual(kind_label("nonsense"), "Microphone")
+
+    def test_output_labels(self):
+        self.assertEqual(kind_label("bluetooth_headset", is_input=False), "Bluetooth headphones")
+        self.assertEqual(kind_label("usb_headset", is_input=False), "USB headset")
+        self.assertEqual(kind_label("usb_mic", is_input=False), "USB device")
+        self.assertEqual(kind_label("wired_headset", is_input=False), "Wired headphones")
+        self.assertEqual(kind_label("built_in", is_input=False), "Built-in speakers")
+        self.assertEqual(kind_label("line_in", is_input=False), "Line out")
+        self.assertEqual(kind_label("virtual", is_input=False), "Virtual device")
+        self.assertEqual(kind_label("other", is_input=False), "Speakers")
+        self.assertEqual(kind_label("nonsense", is_input=False), "Speakers")
 
 
 class TestAutoSelectInput(FakeEndpointStore):
@@ -194,6 +231,11 @@ class TestAutoSelectInput(FakeEndpointStore):
         self._sd_patch.stop()
         super().tearDown()
 
+    def set_default(self, index):
+        """Windows default recording endpoint (WASAPI) and PortAudio default both point at index."""
+        self.sd.query_hostapis.return_value = [{'name': 'Windows WASAPI', 'default_input_device': index}]
+        self.sd.default.device = (index, -1)
+
     def run_select(self, inputs):
         with patch("src.devices.get_input_devices", return_value=inputs):
             return auto_select_input_device()
@@ -201,33 +243,84 @@ class TestAutoSelectInput(FakeEndpointStore):
     def test_usb_headset_beats_windows_default_and_built_in(self):
         self.endpoint("Microphone (Realtek(R) Audio)", DeviceBusType.INTERNAL_HD, EndpointFormFactor.MICROPHONE)
         self.endpoint("Микрофон гарнитуры (Jabra EVOLVE 20 MS)", DeviceBusType.USB, EndpointFormFactor.HEADSET)
-        self.sd.query_hostapis.return_value = [{'name': 'Windows WASAPI', 'default_input_device': 0}]
+        self.set_default(0)
         inputs = [
             {'index': 0, 'name': "Microphone (Realtek(R) Audio)"},
             {'index': 2, 'name': "Микрофон гарнитуры (Jabra EVOLVE 20 MS)"},
         ]
         self.assertEqual(self.run_select(inputs)['index'], 2)
 
-    def test_bluetooth_and_usb_headsets_keep_device_order(self):
+    def test_bluetooth_default_plus_usb_headset_picks_usb_headset(self):
         self.endpoint("Headset (HUAWEI FreeBuds SE 4 ANC)", DeviceBusType.BLUETOOTH_HFP, EndpointFormFactor.HEADSET)
         self.endpoint("USB Headset", DeviceBusType.USB, EndpointFormFactor.HEADSET)
+        self.set_default(1)
         inputs = [
             {'index': 1, 'name': "Headset (HUAWEI FreeBuds SE 4 ANC)"},
             {'index': 3, 'name': "USB Headset"},
         ]
+        self.assertEqual(self.run_select(inputs)['index'], 3)
+
+    def test_wired_headset_beats_usb_microphone_and_default(self):
+        self.endpoint("Studio Mic", DeviceBusType.USB, EndpointFormFactor.MICROPHONE)
+        self.endpoint("Headset Microphone (Realtek)", DeviceBusType.INTERNAL_HD, EndpointFormFactor.HEADSET)
+        self.set_default(0)
+        inputs = [
+            {'index': 0, 'name': "Studio Mic"},
+            {'index': 1, 'name': "Headset Microphone (Realtek)"},
+        ]
         self.assertEqual(self.run_select(inputs)['index'], 1)
 
-    def test_windows_default_beats_built_in_when_no_headset(self):
+    def test_usb_microphone_beats_windows_default(self):
+        self.endpoint("Microphone (Realtek(R) Audio)", DeviceBusType.INTERNAL_HD, EndpointFormFactor.MICROPHONE)
+        self.endpoint("Studio Mic", DeviceBusType.USB, EndpointFormFactor.MICROPHONE)
+        self.set_default(0)
+        inputs = [
+            {'index': 0, 'name': "Microphone (Realtek(R) Audio)"},
+            {'index': 1, 'name': "Studio Mic"},
+        ]
+        self.assertEqual(self.run_select(inputs)['index'], 1)
+
+    def test_only_bluetooth_is_default_and_built_in_present_picks_bluetooth(self):
+        self.endpoint("Headset (HUAWEI FreeBuds SE 4 ANC)", DeviceBusType.BLUETOOTH_HFP, EndpointFormFactor.HEADSET)
+        self.endpoint("Microphone (Realtek(R) Audio)", DeviceBusType.INTERNAL_HD, EndpointFormFactor.MICROPHONE)
+        self.set_default(0)
+        inputs = [
+            {'index': 0, 'name': "Headset (HUAWEI FreeBuds SE 4 ANC)"},
+            {'index': 1, 'name': "Microphone (Realtek(R) Audio)"},
+        ]
+        self.assertEqual(self.run_select(inputs)['index'], 0)
+
+    def test_bluetooth_without_default_beats_built_in(self):
+        self.endpoint("Headset (HUAWEI FreeBuds SE 4 ANC)", DeviceBusType.BLUETOOTH_HFP, EndpointFormFactor.HEADSET)
+        self.endpoint("Microphone (Realtek(R) Audio)", DeviceBusType.INTERNAL_HD, EndpointFormFactor.MICROPHONE)
+        inputs = [
+            {'index': 1, 'name': "Microphone (Realtek(R) Audio)"},
+            {'index': 0, 'name': "Headset (HUAWEI FreeBuds SE 4 ANC)"},
+        ]
+        self.assertEqual(self.run_select(inputs)['index'], 0)
+
+    def test_built_in_default_is_used_before_bluetooth(self):
+        # Order rule 3: a Windows default that is not Bluetooth wins over Bluetooth and built-in.
+        self.endpoint("Headset (HUAWEI FreeBuds SE 4 ANC)", DeviceBusType.BLUETOOTH_HFP, EndpointFormFactor.HEADSET)
+        self.endpoint("Microphone (Realtek(R) Audio)", DeviceBusType.INTERNAL_HD, EndpointFormFactor.MICROPHONE)
+        self.set_default(1)
+        inputs = [
+            {'index': 0, 'name': "Headset (HUAWEI FreeBuds SE 4 ANC)"},
+            {'index': 1, 'name': "Microphone (Realtek(R) Audio)"},
+        ]
+        self.assertEqual(self.run_select(inputs)['index'], 1)
+
+    def test_windows_default_other_beats_built_in(self):
         self.endpoint("Microphone (Realtek(R) Audio)", DeviceBusType.INTERNAL_HD, EndpointFormFactor.MICROPHONE)
         self.endpoint("Other Mic", DeviceBusType.UNKNOWN)
-        self.sd.query_hostapis.return_value = [{'name': 'Windows WASAPI', 'default_input_device': 1}]
+        self.set_default(1)
         inputs = [
             {'index': 0, 'name': "Microphone (Realtek(R) Audio)"},
             {'index': 1, 'name': "Other Mic"},
         ]
         self.assertEqual(self.run_select(inputs)['index'], 1)
 
-    def test_portaudio_default_beats_built_in(self):
+    def test_portaudio_default_is_used_when_wasapi_default_missing(self):
         self.endpoint("Microphone (Realtek(R) Audio)", DeviceBusType.INTERNAL_HD, EndpointFormFactor.MICROPHONE)
         self.endpoint("Other Mic", DeviceBusType.UNKNOWN)
         self.sd.default.device = (1, -1)
@@ -236,6 +329,16 @@ class TestAutoSelectInput(FakeEndpointStore):
             {'index': 1, 'name': "Other Mic"},
         ]
         self.assertEqual(self.run_select(inputs)['index'], 1)
+
+    def test_virtual_default_is_never_selected(self):
+        self.endpoint("CABLE Output (VB-Audio Virtual Cable)", DeviceBusType.VIRTUAL)
+        self.endpoint("Microphone (Realtek(R) Audio)", DeviceBusType.INTERNAL_HD, EndpointFormFactor.MICROPHONE)
+        self.set_default(1)
+        inputs = [
+            {'index': 0, 'name': "Microphone (Realtek(R) Audio)"},
+            {'index': 1, 'name': "CABLE Output (VB-Audio Virtual Cable)"},
+        ]
+        self.assertEqual(self.run_select(inputs)['index'], 0)
 
     def test_built_in_chosen_when_no_default_and_no_headset(self):
         self.endpoint("Microphone (Realtek(R) Audio)", DeviceBusType.INTERNAL_HD, EndpointFormFactor.MICROPHONE)
@@ -285,8 +388,10 @@ class TestLaptopMicrophone(FakeEndpointStore):
     def test_other_kinds_are_not_laptop_microphone(self):
         self.endpoint("USB Mic", DeviceBusType.USB, EndpointFormFactor.MICROPHONE)
         self.endpoint("Headset (FreeBuds)", DeviceBusType.BLUETOOTH_HFP, EndpointFormFactor.HEADSET)
+        self.endpoint("Headset Microphone (Realtek)", DeviceBusType.INTERNAL_HD, EndpointFormFactor.HEADSET)
         self.assertFalse(is_laptop_microphone("USB Mic"))
         self.assertFalse(is_laptop_microphone("Headset (FreeBuds)"))
+        self.assertFalse(is_laptop_microphone("Headset Microphone (Realtek)"))
         self.assertFalse(is_laptop_microphone("Unknown Mic"))
         self.assertFalse(is_laptop_microphone(""))
 

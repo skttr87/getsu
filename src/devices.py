@@ -100,8 +100,8 @@ VIRTUAL_INPUT_BLACKLIST = [
     "virtual cable",
 ]
 
-# Product names of virtual software microphones/speakers. Used only when the bus type is UNKNOWN.
-# Not verified on this PC (none installed), so the bus type is not known to identify them.
+# Product names of virtual software devices (not hardware). Used only when the bus type is UNKNOWN, to recognise
+# a virtual device. Never used to prefer one device over another. Not verified on this PC (none installed).
 VIRTUAL_PRODUCT_FALLBACK = [
     "voicemeeter",
     "rtx voice",
@@ -115,25 +115,42 @@ class DeviceKind:
     """Device kinds returned by classify_device(). Derived from Windows bus enumerator and endpoint form factor."""
     BLUETOOTH_HEADSET = "bluetooth_headset"
     USB_HEADSET = "usb_headset"
+    USB_MIC = "usb_mic"
+    WIRED_HEADSET = "wired_headset"
     BUILT_IN = "built_in"
     LINE_IN = "line_in"
     VIRTUAL = "virtual"
     OTHER = "other"
 
 
-_KIND_LABELS = {
+_INPUT_LABELS = {
     DeviceKind.BLUETOOTH_HEADSET: "Bluetooth headset",
     DeviceKind.USB_HEADSET: "USB headset",
+    DeviceKind.USB_MIC: "USB microphone",
+    DeviceKind.WIRED_HEADSET: "Wired headset",
     DeviceKind.BUILT_IN: "Built-in microphone",
     DeviceKind.LINE_IN: "Line in",
     DeviceKind.VIRTUAL: "Virtual device",
     DeviceKind.OTHER: "Microphone",
 }
 
+_OUTPUT_LABELS = {
+    DeviceKind.BLUETOOTH_HEADSET: "Bluetooth headphones",
+    DeviceKind.USB_HEADSET: "USB headset",
+    DeviceKind.USB_MIC: "USB device",
+    DeviceKind.WIRED_HEADSET: "Wired headphones",
+    DeviceKind.BUILT_IN: "Built-in speakers",
+    DeviceKind.LINE_IN: "Line out",
+    DeviceKind.VIRTUAL: "Virtual device",
+    DeviceKind.OTHER: "Speakers",
+}
 
-def kind_label(kind: str) -> str:
-    """Display label for a device kind. Unknown kinds get the generic 'Microphone' label."""
-    return _KIND_LABELS.get(kind, "Microphone")
+
+def kind_label(kind: str, is_input: bool = True) -> str:
+    """Display label for a device kind, worded for a microphone (is_input) or a playback device.
+    Unknown kinds get the generic label for the direction."""
+    labels = _INPUT_LABELS if is_input else _OUTPUT_LABELS
+    return labels.get(kind, "Microphone" if is_input else "Speakers")
 
 
 def _bus_type(name: str, is_input: bool) -> str:
@@ -180,8 +197,10 @@ def classify_device(name: str, is_input: bool = True) -> str:
     Classifies an endpoint by Windows data only (no brand or product names):
     - bus enumerator BTHHFENUM / BTHENUM / BTHLEENUM -> bluetooth_headset
     - bus enumerator SWD, or a virtual cable name when the bus is unknown -> virtual
-    - bus enumerator USB with a headset-type form factor (Headset, Headphones, Microphone, Handset) -> usb_headset
-    - bus enumerator HDAUDIO / INTELAUDIO -> line_in when the form factor is LineLevel, otherwise built_in
+    - bus enumerator USB with form factor Headset, Headphones or Handset -> usb_headset
+    - bus enumerator USB with form factor Microphone -> usb_mic
+    - bus enumerator HDAUDIO / INTELAUDIO: LineLevel -> line_in; Headset or Headphones (3.5 mm jack) -> wired_headset;
+      anything else -> built_in
     - anything else (including an unknown enumerator) -> other
     is_input selects the capture (True) or render (False) endpoint with this friendly name.
     """
@@ -195,16 +214,18 @@ def classify_device(name: str, is_input: bool = True) -> str:
     if bus in (DeviceBusType.BLUETOOTH_HFP, DeviceBusType.BLUETOOTH_A2DP, DeviceBusType.BLUETOOTH_LE):
         return DeviceKind.BLUETOOTH_HEADSET
     if bus == DeviceBusType.USB:
-        headset_form_factors = (
-            EndpointFormFactor.HEADPHONES,
-            EndpointFormFactor.MICROPHONE,
-            EndpointFormFactor.HEADSET,
-            EndpointFormFactor.HANDSET,
-        )
-        return DeviceKind.USB_HEADSET if _form_factor(name, is_input) in headset_form_factors else DeviceKind.OTHER
+        form_factor = _form_factor(name, is_input)
+        if form_factor in (EndpointFormFactor.HEADSET, EndpointFormFactor.HEADPHONES, EndpointFormFactor.HANDSET):
+            return DeviceKind.USB_HEADSET
+        if form_factor == EndpointFormFactor.MICROPHONE:
+            return DeviceKind.USB_MIC
+        return DeviceKind.OTHER
     if bus in (DeviceBusType.INTERNAL_HD, DeviceBusType.INTEL_AUDIO):
-        if _form_factor(name, is_input) == EndpointFormFactor.LINE_LEVEL:
+        form_factor = _form_factor(name, is_input)
+        if form_factor == EndpointFormFactor.LINE_LEVEL:
             return DeviceKind.LINE_IN
+        if form_factor in (EndpointFormFactor.HEADSET, EndpointFormFactor.HEADPHONES):
+            return DeviceKind.WIRED_HEADSET
         return DeviceKind.BUILT_IN
     return DeviceKind.OTHER
 
@@ -371,26 +392,9 @@ def validate_device_index(device_id: Optional[int], is_input: bool = True) -> Op
         return None
 
 
-def auto_select_input_device() -> Dict:
-    """
-    Select best input microphone:
-    1. Bluetooth or USB headset (classify_device kind, device enumeration order)
-    2. Windows default WASAPI recording endpoint
-    3. PortAudio default input
-    4. Built-in microphone (classify_device kind built_in)
-    5. First available input
-    """
-    inputs = get_input_devices()
-    if not inputs:
-        all_in = [d for d in get_all_devices() if d['inputs'] > 0]
-        return all_in[0] if all_in else {'index': 0, 'name': 'Default Mic'}
-
-    # 1. Headset-class device, from bus type and form factor
-    for d in inputs:
-        if classify_device(d['name'], is_input=True) in (DeviceKind.BLUETOOTH_HEADSET, DeviceKind.USB_HEADSET):
-            return d
-
-    # 2. Windows default input from WASAPI host API
+def _windows_default_input(inputs: List[Dict]) -> Optional[Dict]:
+    """Windows default recording endpoint among inputs: the WASAPI default, then the PortAudio default.
+    Returns None when neither is in the list."""
     try:
         for api in sd.query_hostapis():
             if 'WASAPI' in api['name'] and api['default_input_device'] >= 0:
@@ -408,18 +412,68 @@ def auto_select_input_device() -> Dict:
     except Exception:
         pass
 
-    # 3. PortAudio general default
     default_in_idx = sd.default.device[0]
     for d in inputs:
         if d['index'] == default_in_idx:
             return d
+    return None
 
-    # 4. Built-in laptop / motherboard mic
-    for d in inputs:
-        if classify_device(d['name'], is_input=True) == DeviceKind.BUILT_IN:
-            return d
 
-    return inputs[0]
+def auto_select_input_device() -> Dict:
+    """
+    Select best input microphone (virtual devices are never selected):
+    1. USB headset or wired headset (device enumeration order)
+    2. USB microphone
+    3. Windows default input, unless it is a Bluetooth headset. A Bluetooth microphone switches the headset
+       to hands-free mode and drops all audio to call quality.
+    4. Bluetooth headset
+    5. Built-in microphone
+    6. Other input, then the first input
+    """
+    inputs = get_input_devices()
+    if not inputs:
+        all_in = [d for d in get_all_devices() if d['inputs'] > 0]
+        return all_in[0] if all_in else {'index': 0, 'name': 'Default Mic'}
+
+    physical = [d for d in inputs if classify_device(d['name'], is_input=True) != DeviceKind.VIRTUAL]
+    if not physical:
+        return inputs[0]
+    kinds = {d['index']: classify_device(d['name'], is_input=True) for d in physical}
+
+    def first_of(*wanted: str) -> Optional[Dict]:
+        for d in physical:
+            if kinds[d['index']] in wanted:
+                return d
+        return None
+
+    # 1. Headset (USB or wired)
+    chosen = first_of(DeviceKind.USB_HEADSET, DeviceKind.WIRED_HEADSET)
+    if chosen is not None:
+        return chosen
+
+    # 2. USB microphone
+    chosen = first_of(DeviceKind.USB_MIC)
+    if chosen is not None:
+        return chosen
+
+    # 3. Windows default input, unless it is a Bluetooth headset
+    default = _windows_default_input(physical)
+    if default is not None and kinds.get(default['index']) != DeviceKind.BLUETOOTH_HEADSET:
+        return default
+
+    # 4. Bluetooth headset
+    chosen = first_of(DeviceKind.BLUETOOTH_HEADSET)
+    if chosen is not None:
+        return chosen
+
+    # 5. Built-in laptop / motherboard mic
+    chosen = first_of(DeviceKind.BUILT_IN)
+    if chosen is not None:
+        return chosen
+
+    # 6. Other input, then the first input
+    chosen = first_of(DeviceKind.OTHER)
+    return chosen if chosen is not None else physical[0]
 
 
 def auto_select_output_device() -> Tuple[Dict, str]:

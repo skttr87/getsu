@@ -3,23 +3,13 @@ Display labels for microphones: the title, the device kind, and the subtitle.
 
 Windows endpoint names look like "<endpoint word> (<device name>)", for example
 "Microphone (Realtek(R) Audio)" or "Headset (HUAWEI FreeBuds SE 4 ANC)". The part inside the
-outer parentheses is shown as the title. The kind comes from the bus enumerator that Windows
-reports for the endpoint (no device names or vendor IDs are used here).
+outer parentheses is shown as the title. The kind is the one devices.classify_device() returns
+(bus enumerator and endpoint form factor reported by Windows; no device names or vendor IDs).
 """
 import re
-from typing import Dict, Optional
+from typing import Dict
 
-KIND_BLUETOOTH = "bt"
-KIND_USB = "usb"
-KIND_BUILTIN = "builtin"
-KIND_OTHER = "other"
-
-KIND_LABELS = {
-    KIND_BLUETOOTH: "Bluetooth headset",
-    KIND_USB: "USB headset",
-    KIND_BUILTIN: "Built-in microphone",
-    KIND_OTHER: "Microphone",
-}
+from src.devices import DeviceKind, kind_label
 
 _NAME_RE = re.compile(r"^([^()]+?)\s*\((.+)\)\s*$")
 
@@ -32,22 +22,11 @@ def split_name(full: str) -> Dict[str, str]:
     return {"title": full, "prefix": ""}
 
 
-def kind_from_bus_type(bus_type: Optional[str]) -> str:
-    """Map a Windows bus enumerator name (router.native_get_device_bus_type) to a device kind."""
-    if bus_type == "BTHHFENUM":
-        return KIND_BLUETOOTH
-    if bus_type == "USB":
-        return KIND_USB
-    if bus_type in ("HDAUDIO", "INTELAUDIO"):
-        return KIND_BUILTIN
-    return KIND_OTHER
-
-
 def base_subtitle(name: str, kind: str) -> str:
-    """Type label. For an unknown type the endpoint word ("Line In") is more useful than a generic label."""
-    if kind == KIND_OTHER:
-        return split_name(name)["prefix"] or KIND_LABELS[KIND_OTHER]
-    return KIND_LABELS[kind]
+    """Type label for a microphone. For an unknown type the endpoint word ("Line In") is more useful than a generic label."""
+    if kind == DeviceKind.OTHER:
+        return split_name(name)["prefix"] or kind_label(DeviceKind.OTHER, is_input=True)
+    return kind_label(kind, is_input=True)
 
 
 def subtitle(name: str, kind: str, all_entries: Dict[str, str]) -> str:
@@ -55,7 +34,7 @@ def subtitle(name: str, kind: str, all_entries: Dict[str, str]) -> str:
     Subtitle for one microphone. The endpoint word is added only when another entry would show the
     same title with the same type label, so duplicates can be told apart.
 
-    all_entries maps every detected full name to its kind.
+    all_entries maps every detected full name to its kind (DeviceKind value).
     """
     title = split_name(name)["title"]
     base = base_subtitle(name, kind)

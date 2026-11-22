@@ -40,8 +40,9 @@ from src.devices import (
 )
 from src.config import load_config, save_config
 from src.stream import AudioEngine, create_engine_from_config
-from src.router import SmartMicRouter, clear_device_bus_type_cache, native_get_device_bus_type_cached
-from src.device_labels import split_name, subtitle, kind_from_bus_type
+from src.router import SmartMicRouter, clear_device_bus_type_cache
+from src.devices import classify_device, DeviceKind
+from src.device_labels import split_name, subtitle
 from src import ui_icons as icons
 from src import ui_hit
 from src.rnnoise import RNNoise, FRAME_SIZE, SAMPLE_RATE
@@ -121,6 +122,18 @@ VB_MODAL_W = 396  # VB-Cable install dialog: 396 px so it fits the 420 px window
 FEATURE_MODES = False          # Game / Meeting / Session / Music segments (backend: M2.4)
 FEATURE_EARBUD_HINT = False    # "Earbud mic drops audio to call quality." (earbud work: M5.x)
 FEATURE_LEARN_ROOM = False     # "Learn my room" row in Settings (backend: M2.3)
+
+# Icon shape for each device kind: bt = earbuds, headset, builtin = laptop, mic = microphone.
+# The kind comes from devices.classify_device(); usb_mic uses the microphone, wired headsets the headset.
+_GLYPH_FOR_KIND = {
+    DeviceKind.BLUETOOTH_HEADSET: "bt",
+    DeviceKind.USB_HEADSET: "headset",
+    DeviceKind.WIRED_HEADSET: "headset",
+    DeviceKind.BUILT_IN: "builtin",
+    DeviceKind.USB_MIC: "mic",
+    DeviceKind.LINE_IN: "mic",
+    DeviceKind.OTHER: "mic",
+}
 
 MODE_NAMES = ("Game", "Meeting", "Session", "Music")
 MODE_DESCRIPTIONS = {
@@ -1457,7 +1470,7 @@ class GetsuGUI:
             dpg.bind_item_font(f"{key}_text", font)
 
     def _tile_draw(self, drawlist: str, kind: str, bg, fg, size: int):
-        """Rounded tile with a white input-device glyph (kind: bt, usb, builtin, other or nomic)."""
+        """Rounded tile with a white input-device glyph (glyph: bt, headset, builtin, mic or nomic)."""
         dpg.delete_item(drawlist, children_only=True)
         y0 = self.s(14)  # the tile sits in the middle of the 60 px microphone row
         dpg.draw_rectangle((0, y0), (size, y0 + size), color=bg, fill=bg, rounding=self.s(8), parent=drawlist)
@@ -1473,7 +1486,7 @@ class GetsuGUI:
             poly(icons.BUD_RIGHT, closed=True)
             poly(icons.BUD_STEM_LEFT)
             poly(icons.BUD_STEM_RIGHT)
-        elif kind == "usb":
+        elif kind == "headset":
             poly(icons.HEADSET_BAND)
             poly(icons.HEADSET_LEFT, closed=True)
             poly(icons.HEADSET_RIGHT, closed=True)
@@ -1595,13 +1608,7 @@ class GetsuGUI:
     def _mic_entries(self) -> List[Dict]:
         """One entry per detected microphone: label (for selection), title, subtitle, kind, full name."""
         raw_of = {label: self.device_raw.get(label, label) for label in self.device_map}
-        kinds = {}
-        for label, raw in raw_of.items():
-            try:
-                bus = native_get_device_bus_type_cached(raw, True)
-            except Exception:
-                bus = None
-            kinds[raw] = kind_from_bus_type(bus)
+        kinds = {raw: classify_device(raw, is_input=True) for raw in raw_of.values()}
         entries = []
         for label, idx in self.device_map.items():
             raw = raw_of[label]
@@ -1613,6 +1620,7 @@ class GetsuGUI:
                 "title": split_name(raw)["title"],
                 "subtitle": subtitle(raw, kind, kinds),
                 "kind": kind,
+                "glyph": _GLYPH_FOR_KIND.get(kind, "mic"),
             })
         return entries
 
@@ -1625,18 +1633,19 @@ class GetsuGUI:
         chosen = next((e for e in entries if e["label"] == current), entries[0] if entries else None)
         width = self.s(268)
         if chosen is None:
-            title, sub, kind = "No microphone", "Getsu selects it as soon as you plug one in", "nomic"
+            title, sub, glyph = "No microphone", "Getsu selects it as soon as you plug one in", "nomic"
             dpg.configure_item("mic_chev", show=False)
             dpg.configure_item("mic_row", show=True)
         else:
-            title, sub, kind = chosen["title"], chosen["subtitle"], chosen["kind"]
+            title, sub, glyph = chosen["title"], chosen["subtitle"], chosen["glyph"]
             dpg.configure_item("mic_chev", show=True)
         dpg.set_value("mic_row_title", self._fit_text(title, self.font_header, width))
         dpg.set_value("mic_row_sub", self._fit_text(sub, self.font_notice, width))
-        bg = COL_ACCENT if kind != "nomic" else (99, 99, 102)
-        self._tile_draw("mic_tile", kind, bg, COL_WHITE, self.s(32))
+        bg = COL_ACCENT if glyph != "nomic" else (99, 99, 102)
+        self._tile_draw("mic_tile", glyph, bg, COL_WHITE, self.s(32))
         if FEATURE_EARBUD_HINT:
-            bt_on = bool(chosen and chosen["kind"] == "bt" and any(e["kind"] == "builtin" for e in entries))
+            bt_on = bool(chosen and chosen["kind"] == DeviceKind.BLUETOOTH_HEADSET
+                         and any(e["kind"] == DeviceKind.BUILT_IN for e in entries))
             dpg.configure_item("hint_row", show=bt_on)
         if self._open_panel_name == "mics":
             self._rebuild_mic_list()
@@ -1667,7 +1676,7 @@ class GetsuGUI:
                     dpg.add_spacer(width=self.s(16))
                     icon_dl = f"{tag}_icon"
                     dpg.add_drawlist(width=self.s(16), height=row_h, tag=icon_dl)
-                    self._draw_device_glyph(icon_dl, entry["kind"], self.s(0), self.s(18), self.s(16), COL_TEXT_2)
+                    self._draw_device_glyph(icon_dl, entry["glyph"], self.s(0), self.s(18), self.s(16), COL_TEXT_2)
                     dpg.add_spacer(width=self.s(12))
                     with dpg.child_window(width=label_w, height=row_h, border=False, no_scrollbar=True):
                         self._bind_flat(f"{tag}_label")
@@ -1945,7 +1954,7 @@ class GetsuGUI:
 
     def _use_builtin_mic(self, sender=None, app_data=None):
         entries = self._mic_entries()
-        builtin = next((e for e in entries if e["kind"] == "builtin"), None)
+        builtin = next((e for e in entries if e["kind"] == DeviceKind.BUILT_IN), None)
         if builtin is not None:
             self.on_input_changed(None, builtin["label"])
             self._refresh_mic_widgets()

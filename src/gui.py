@@ -47,6 +47,7 @@ from src import ui_icons as icons
 from src import ui_hit
 from src import win_theme
 from src import autostart
+from src import ui_type
 from src.rnnoise import RNNoise, FRAME_SIZE, SAMPLE_RATE
 from src.dsp import (
     HighPassFilter,
@@ -114,13 +115,35 @@ TITLE_CAPTION_COLOR = 0x001E1C1C
 TITLE_TEXT_COLOR = 0x00A6A1A1
 TITLE_BORDER_COLOR = 0x002E2C2C
 
+# Type scale in CSS px, the design size of the mockup. build_ui converts each step with ui_type.font_px(),
+# which applies the bundled font's line-height factor and the monitor DPI scale (DearPyGui sizes fonts by
+# line height, see ui_type). Steam-like proportions at 125 %: capitals of row labels about 13 px tall.
+TYPE_STATE = 20     # state title ("Noise cancellation on"), SemiBold
+TYPE_TITLE = 18     # panel titles and the first-run card title, SemiBold
+TYPE_ROW = 15       # microphone name in the card and in the list, SemiBold
+TYPE_BODY = 15      # body text and settings labels
+TYPE_BUTTON = 15    # buttons, SemiBold
+TYPE_SUB = 13       # secondary and sub text, segmented labels (SemiBold)
+TYPE_FOOTER = 13    # footer line
+TYPE_SMALL = 12     # small labels (help step numbers)
+
 # Window geometry (logical pixels, scaled with self.s()): 420 px wide, 24 px side gutters.
-WINDOW_W = 420
+WINDOW_W = 460       # widened from 420: hero notices up to 382 px wide and the microphone name column need it
 CONTENT_PAD = 24
-CONTENT_W = WINDOW_W - 2 * CONTENT_PAD  # 372 px between the gutters
-HERO_H = 212  # logical px: hero block and first-run card share this slot (the hero content ends at the meter)
-SETTINGS_ROW_H = 64  # logical px: one settings row; a two-line detail fits
-SET_LABEL_W = 210    # label column of a settings row (the detail wraps inside it)
+CONTENT_W = WINDOW_W - 2 * CONTENT_PAD  # 412 px between the gutters
+POWER_D = 96         # power button diameter (was 104: the text carries more weight next to it)
+HERO_TOP = 24        # space above the power button
+HERO_H = 217         # logical px: hero block and first-run card share this slot. The hero content (power button,
+                     # state, sub line, meter) measures 217 px with the text line boxes, so the meter is not clipped
+ACTION_H = 48        # action buttons (Hear myself, Show settings, Install cable, Not now, Got it)
+MIC_ROW_H = 68       # microphone row in the card and rows of the microphone list (name + sub line, 16 px padding)
+MIC_TEXT_W = CONTENT_W - 92        # name and sub line width in the card (tile, gaps, chevron, right padding)
+MIC_LIST_TEXT_W = CONTENT_W - 88   # name and sub line width in the microphone list (icon, tick, gaps)
+SHEET_HEAD_H = 56    # logical px: panel title row with Done
+HELP_STEP_H = 64     # one help step: title, description and (step 3) the chip line
+HELP_BODY_H = 280    # help steps (3 x 64 + 3 x 12) and the Got it button
+SETTINGS_ROW_H = 80  # logical px: one settings row; a two-line detail with 14 px above and below
+SET_LABEL_W = 234    # label column of a settings row (the detail wraps inside it); 16 + 234 + 146 + 16 = 412
 SET_CTRL_W = 146     # control column of a settings row: slider, boost segments, switch
 VAD_MIN, VAD_MAX = 0.40, 0.90  # Sensitivity range (vad_threshold)
 BOOST_DBS = (0, 5, 10, 15)     # mic boost segments, left to right
@@ -392,6 +415,7 @@ class GetsuGUI:
         self._btn_state: Dict[str, tuple] = {}   # icon button tag -> (enabled, hovered), drives theme and icon colour
         self._btn_enabled: Dict[str, bool] = {}  # icon button tag -> enabled (clicks are ignored when False)
         self._btn_glyphs: Dict[str, str] = {}    # icon button tag -> glyph name (registry of icon buttons)
+        self._btn_content: Dict[str, tuple] = {}  # icon button tag -> (width, icon, gap, font) for centring labels
         self._btn_heights: Dict[str, int] = {}
         self._btn_hovered: Dict[str, bool] = {}
         self._setup_dismissed = False            # "Not now" hides the first-run card for this session
@@ -1588,7 +1612,7 @@ class GetsuGUI:
     def _tile_draw(self, drawlist: str, kind: str, bg, fg, size: int):
         """Rounded tile with a white input-device glyph (glyph: bt, headset, builtin, mic or nomic)."""
         dpg.delete_item(drawlist, children_only=True)
-        y0 = self.s(14)  # the tile sits in the middle of the 60 px microphone row
+        y0 = (self.s(MIC_ROW_H) - size) // 2  # the tile sits in the middle of the microphone row
         dpg.draw_rectangle((0, y0), (size, y0 + size), color=bg, fill=bg, rounding=self.s(8), parent=drawlist)
         self._draw_device_glyph(drawlist, kind, 0, y0, size, fg)
 
@@ -1622,7 +1646,7 @@ class GetsuGUI:
             return
         dl = "power_drawlist"
         dpg.delete_item(dl, children_only=True)
-        size = self.s(104)
+        size = self.s(POWER_D)
         c = size / 2.0
         if self.is_running:
             fill, glyph = COL_ACCENT, COL_WHITE
@@ -1643,7 +1667,7 @@ class GetsuGUI:
 
     def _set_sub(self, text: str, color, dot_on: bool):
         """Secondary line under the state text: coloured dot plus text, centred."""
-        width = self.s(372)
+        width = self.s(CONTENT_W)
         pad_w = self.s(8) + self.s(6)
         # One line only: a long notice is cut with an ellipsis, and the full text is in the hover tooltip.
         fitted = self._fit_text(text, self.font_notice, width - pad_w - self.s(16))
@@ -1664,7 +1688,7 @@ class GetsuGUI:
         """Derives the hero (power button, state text, sub line, dot) from the engine state and the notice."""
         if not self._ui_built or not dpg.does_item_exist("hero_state_text"):
             return
-        width = self.s(372)
+        width = self.s(CONTENT_W)
         if self._busy == "starting":
             state, sub_default = "Starting", "Switching apps to your clean voice"
         elif self._busy == "stopping":
@@ -1754,7 +1778,7 @@ class GetsuGUI:
         entries = self._mic_entries()
         current = self._get_selected_input_label()
         chosen = next((e for e in entries if e["label"] == current), entries[0] if entries else None)
-        width = self.s(268)
+        width = self.s(MIC_TEXT_W)
         if chosen is None:
             title, sub, glyph = "No microphone", "Getsu selects it as soon as you plug one in", "nomic"
             dpg.configure_item("mic_chev", show=False)
@@ -1787,9 +1811,10 @@ class GetsuGUI:
         self._panel_targets["mics"] = {}
         entries = self._mic_entries()
         current = self._get_selected_input_label()
-        row_w = self.s(372)
-        row_h = self.s(52)
-        label_w = self.s(284)
+        row_w = self.s(CONTENT_W)
+        row_h = self.s(MIC_ROW_H)
+        label_w = self.s(MIC_LIST_TEXT_W)
+        icon_y = (row_h - self.s(16)) // 2  # the 16 px icons and tick sit in the middle of the row
         for i, entry in enumerate(entries):
             tag = f"mic_row_{i}"
             with dpg.child_window(tag=tag, parent="mic_list", width=row_w, height=row_h, border=False,
@@ -1799,11 +1824,12 @@ class GetsuGUI:
                     dpg.add_spacer(width=self.s(16))
                     icon_dl = f"{tag}_icon"
                     dpg.add_drawlist(width=self.s(16), height=row_h, tag=icon_dl)
-                    self._draw_device_glyph(icon_dl, entry["glyph"], self.s(0), self.s(18), self.s(16), COL_TEXT_2)
+                    self._draw_device_glyph(icon_dl, entry["glyph"], self.s(0), icon_y, self.s(16), COL_TEXT_2)
                     dpg.add_spacer(width=self.s(12))
                     with dpg.child_window(width=label_w, height=row_h, border=False, no_scrollbar=True):
                         self._bind_flat(f"{tag}_label")
-                        dpg.add_spacer(height=self.s(10))
+                        dpg.add_spacer(height=self._block_top(row_h, self._text_h("Ag", self.font_list),
+                                                              self._text_h("Ag", self.font_notice)))
                         dpg.add_text(self._fit_text(entry["title"], self.font_list, label_w), color=COL_TEXT)
                         dpg.bind_item_font(dpg.last_item(), self.font_list)
                         dpg.add_text(self._fit_text(entry["subtitle"], self.font_notice, label_w), color=COL_TEXT_2)
@@ -1813,15 +1839,16 @@ class GetsuGUI:
                     dpg.add_drawlist(width=self.s(16), height=row_h, tag=tick_dl)
                     self._hit_parts[tag] = [icon_dl, tick_dl]
                     if entry["label"] == current:
-                        dpg.draw_polyline(icons.to_px(icons.CHECK, 0, self.s(18), self.s(16)), color=COL_ACCENT,
+                        dpg.draw_polyline(icons.to_px(icons.CHECK, 0, icon_y, self.s(16)), color=COL_ACCENT,
                                           thickness=float(self.s(2)), parent=tick_dl)
             self._panel_targets["mics"][tag] = (lambda lab=entry["label"]: self._select_mic_from_panel(lab))
             if i < len(entries) - 1:
                 div = f"{tag}_div"
+                div_w = self.s(CONTENT_W - 32)
                 with dpg.group(horizontal=True, parent="mic_list"):
                     dpg.add_spacer(width=self.s(16))
-                    dpg.add_drawlist(width=self.s(340), height=1, tag=div)
-                    dpg.draw_line((0, 0), (self.s(340), 0), color=COL_SEPARATOR, thickness=1.0, parent=div)
+                    dpg.add_drawlist(width=div_w, height=1, tag=div)
+                    dpg.draw_line((0, 0), (div_w, 0), color=COL_SEPARATOR, thickness=1.0, parent=div)
         if not entries:
             dpg.add_text("No microphone detected.", color=COL_TEXT_2, parent="mic_list")
 
@@ -1860,6 +1887,10 @@ class GetsuGUI:
         except Exception:
             return self.s(16)
 
+    def _block_top(self, box_h: int, *line_heights: int) -> int:
+        """Top offset in physical pixels that centres a stack of text lines in a box of box_h physical pixels."""
+        return max(0, (box_h - sum(line_heights)) // 2)
+
     def _icon_button(self, tag: str, label: str, glyph: str, width: int, height: int, callback, tip: str = ""):
         """
         Tinted button: icon (16 px) and label (SemiBold 13 px) centred, 7 px apart, on the accent soft fill.
@@ -1876,7 +1907,7 @@ class GetsuGUI:
         with dpg.child_window(tag=tag, width=width, height=height, border=False, no_scrollbar=True,
                               no_scroll_with_mouse=True):
             with dpg.group(horizontal=True):
-                dpg.add_spacer(width=pad)
+                dpg.add_spacer(width=pad, tag=f"{tag}_pad")
                 dpg.add_drawlist(width=icon, height=height, tag=f"{tag}_icon")
                 if label:
                     dpg.add_spacer(width=gap)
@@ -1890,6 +1921,7 @@ class GetsuGUI:
                 dpg.add_text(tip, tag=f"{tag}_tip")
         self._btn_glyphs[tag] = glyph
         self._btn_heights[tag] = height
+        self._btn_content[tag] = (width, icon, gap, font)
         self._btn_enabled.setdefault(tag, True)
         self._btn_hovered[tag] = False
         self._click_targets[tag] = (lambda t=tag, cb=callback: self._run_button(t, cb))
@@ -1907,8 +1939,14 @@ class GetsuGUI:
         self._refresh_button(tag)
 
     def _set_button_label(self, tag: str, text: str):
+        """Changes an icon button's label and centres the icon and label again (the progress labels are longer)."""
         if dpg.does_item_exist(f"{tag}_label"):
             dpg.set_value(f"{tag}_label", text)
+        meta = self._btn_content.get(tag)
+        if meta is not None and dpg.does_item_exist(f"{tag}_pad"):
+            width, icon, gap, font = meta
+            content_w = icon + gap + self._text_w(text, font)
+            dpg.configure_item(f"{tag}_pad", width=max(0, (width - content_w) // 2))
 
     def _set_button_tip(self, tag: str, text: str):
         if dpg.does_item_exist(f"{tag}_tip"):
@@ -2001,7 +2039,7 @@ class GetsuGUI:
         with dpg.child_window(tag="setup_box", width=width, height=height, border=False, no_scrollbar=True,
                               show=False):
             self._bind_flat("setup_box")
-            dpg.add_spacer(height=self.s(8))
+            dpg.add_spacer(height=self.s(16))  # the card starts at the top of the power button
             with dpg.child_window(tag="setup_card", width=width, height=height - self.s(16), border=False,
                                   no_scrollbar=True):
                 self._bind_card("setup_card")
@@ -2019,20 +2057,23 @@ class GetsuGUI:
                     dpg.add_spacer(width=pad)
                     dpg.add_text(SETUP_BODY_OFFER, tag="setup_body", wrap=inner_w, color=COL_TEXT_2)
                     dpg.bind_item_font("setup_body", self.font_body)
-                dpg.add_spacer(height=self.s(12))
+                # The gap before the progress bar and the gap before the buttons are shown by state (see
+                # _apply_setup_card), so each state has one 12 px gap and the card keeps its bottom padding.
+                dpg.add_spacer(height=self.s(12), tag="setup_gap_progress")
                 with dpg.group(horizontal=True):
                     dpg.add_spacer(width=pad)
                     dpg.add_drawlist(width=inner_w, height=self.s(4), tag="setup_progress")
-                dpg.add_spacer(height=self.s(12))
+                dpg.add_spacer(height=self.s(12), tag="setup_gap_buttons")
                 with dpg.group(horizontal=True, tag="setup_buttons"):
                     dpg.add_spacer(width=pad)
-                    dpg.add_button(label="Install cable", tag="setup_install", width=self.s(170), height=self.s(40),
+                    half_w = (inner_w - self.s(8)) // 2
+                    dpg.add_button(label="Install cable", tag="setup_install", width=half_w, height=self.s(ACTION_H),
                                    callback=lambda: self.run_driver_install_thread())
                     dpg.bind_item_theme("setup_install", self.theme_start_btn)
                     dpg.bind_item_font("setup_install", self.font_btn)
                     dpg.add_spacer(width=self.s(8))
-                    dpg.add_button(label="Not now", tag="setup_skip", width=inner_w - self.s(178), height=self.s(40),
-                                   callback=self.on_setup_skip_click)
+                    dpg.add_button(label="Not now", tag="setup_skip", width=inner_w - half_w - self.s(8),
+                                   height=self.s(ACTION_H), callback=self.on_setup_skip_click)
                     dpg.bind_item_theme("setup_skip", self.theme_secondary_btn)
                     dpg.bind_item_font("setup_skip", self.font_btn)
 
@@ -2072,6 +2113,8 @@ class GetsuGUI:
         dpg.set_value("setup_body", body)
         dpg.configure_item("setup_body", color=body_color)
         dpg.configure_item("setup_progress", show=state == "installing")
+        dpg.configure_item("setup_gap_progress", show=state == "installing")
+        dpg.configure_item("setup_gap_buttons", show=state != "installing")
         dpg.configure_item("setup_buttons", show=state != "installing")
         dpg.configure_item("setup_install", label="Try again" if state == "failed" else "Install cable")
         dpg.configure_item("setup_box", show=visible)
@@ -2131,7 +2174,7 @@ class GetsuGUI:
         sheet_h = self._panel_sheet_height(name, vp_h)
         if name == "mics":
             # The list takes the sheet height left after the head; it scrolls only when it is longer.
-            dpg.configure_item("mic_list", height=max(self.s(52), sheet_h - self.s(56) - self.s(24)))
+            dpg.configure_item("mic_list", height=max(self.s(MIC_ROW_H), sheet_h - self.s(SHEET_HEAD_H) - self.s(24)))
         dpg.configure_item(f"panel_{name}", pos=[0, 0], width=vp_w, height=vp_h)
         dpg.show_item(f"panel_{name}")
         dpg.focus_item(f"panel_{name}")  # raise above the main window
@@ -2143,11 +2186,11 @@ class GetsuGUI:
         """Sheet height: head plus content, never more than the viewport. The mic list scrolls when it is longer."""
         if name == "mics":
             rows = max(1, len(self.device_map))
-            content = rows * self.s(52) + max(0, rows - 1) + self.s(16)
-            return min(vp_h, self.s(56) + content)
+            content = rows * self.s(MIC_ROW_H) + max(0, rows - 1) + self.s(24)  # 8 px + 16 px below the list
+            return min(vp_h, self.s(SHEET_HEAD_H) + content)
         if name == "settings":
-            return min(vp_h, self.s(56) + self.s(4 * SETTINGS_ROW_H + 3) + self.s(24))
-        return min(vp_h, self.s(56 + 252 + 24))
+            return min(vp_h, self.s(SHEET_HEAD_H) + self.s(4 * SETTINGS_ROW_H + 3) + self.s(24))
+        return min(vp_h, self.s(SHEET_HEAD_H + HELP_BODY_H + 24))
 
     def _close_panels(self):
         for name in ("mics", "settings", "help"):
@@ -2234,10 +2277,10 @@ class GetsuGUI:
         with dpg.child_window(tag="hero_box", width=width, height=self.s(HERO_H), border=False, no_scrollbar=True,
                               no_scroll_with_mouse=True):
             self._bind_flat("hero_box")
-            dpg.add_spacer(height=self.s(16))
+            dpg.add_spacer(height=self.s(HERO_TOP))
             with dpg.group(horizontal=True):
-                dpg.add_spacer(width=(width - self.s(104)) // 2)
-                dpg.add_drawlist(width=self.s(104), height=self.s(104), tag="power_drawlist")
+                dpg.add_spacer(width=(width - self.s(POWER_D)) // 2)
+                dpg.add_drawlist(width=self.s(POWER_D), height=self.s(POWER_D), tag="power_drawlist")
             self._click_targets["power_drawlist"] = self._on_power_click
             dpg.add_spacer(height=self.s(16))
             self._centered_line("hero_state", self.font_state, COL_TEXT, width)
@@ -2253,31 +2296,32 @@ class GetsuGUI:
                 x = i * self.s(7)
                 dpg.draw_rectangle((x, self.s(15)), (x + self.s(4), self.s(18)), color=COL_FILL_2, fill=COL_FILL_2,
                                    rounding=self.s(2), tag=f"meter_bar_{i}", parent="meter")
-        dpg.add_spacer(height=self.s(20))
 
     def _build_mic_card(self, width: int):
         modes_h = self.s(85) if FEATURE_MODES else 0
         hint_h = self.s(28) if FEATURE_EARBUD_HINT else 0
-        card_h = self.s(60) + hint_h + modes_h
+        row_h = self.s(MIC_ROW_H)
+        card_h = row_h + hint_h + modes_h
         with dpg.child_window(tag="mic_card", width=width, height=card_h, border=False, no_scrollbar=True):
             self._bind_card("mic_card")
-            with dpg.child_window(tag="mic_row", width=width, height=self.s(60), border=False,
+            with dpg.child_window(tag="mic_row", width=width, height=row_h, border=False,
                                   no_scrollbar=True, no_scroll_with_mouse=True):
                 self._bind_flat("mic_row")
                 with dpg.group(horizontal=True):
                     dpg.add_spacer(width=self.s(16))
-                    dpg.add_drawlist(width=self.s(32), height=self.s(60), tag="mic_tile")
+                    dpg.add_drawlist(width=self.s(32), height=row_h, tag="mic_tile")
                     dpg.add_spacer(width=self.s(12))
-                    with dpg.child_window(width=self.s(268), height=self.s(60), border=False, no_scrollbar=True):
+                    with dpg.child_window(width=self.s(MIC_TEXT_W), height=row_h, border=False, no_scrollbar=True):
                         self._bind_flat("mic_label_box")
-                        dpg.add_spacer(height=self.s(12))
+                        dpg.add_spacer(height=self._block_top(row_h, self._text_h("Ag", self.font_header),
+                                                              self._text_h("Ag", self.font_notice)))
                         dpg.add_text("", tag="mic_row_title", color=COL_TEXT)
                         dpg.bind_item_font("mic_row_title", self.font_header)
                         dpg.add_text("", tag="mic_row_sub", color=COL_TEXT_2)
                         dpg.bind_item_font("mic_row_sub", self.font_notice)
-                    dpg.add_drawlist(width=self.s(16), height=self.s(60), tag="mic_chev")
-                    dpg.draw_polyline(icons.to_px(icons.CHEVRON, 0, self.s(22), self.s(16)), color=COL_TEXT_3,
-                                      thickness=float(self.s(2)), parent="mic_chev")
+                    dpg.add_drawlist(width=self.s(16), height=row_h, tag="mic_chev")
+                    dpg.draw_polyline(icons.to_px(icons.CHEVRON, 0, (row_h - self.s(16)) // 2, self.s(16)),
+                                      color=COL_TEXT_3, thickness=float(self.s(2)), parent="mic_chev")
             self._click_targets["mic_row"] = self._open_mic_panel_from_row
             self._hit_parts["mic_row"] = ["mic_tile", "mic_chev"]
             with dpg.group(horizontal=True, tag="hint_row", show=FEATURE_EARBUD_HINT):
@@ -2330,7 +2374,7 @@ class GetsuGUI:
     def _build_actions(self, width: int):
         help_w = self.s(44)
         btn_w = (width - self.s(16) - help_w) // 2
-        btn_h = self.s(44)
+        btn_h = self.s(ACTION_H)
         with dpg.group(horizontal=True):
             self._icon_button("btn_voice_test", "Hear myself", "play", btn_w, btn_h, self.start_voice_test,
                               tip="Record 11 seconds, then hear how others hear you")
@@ -2369,7 +2413,7 @@ class GetsuGUI:
 
     def _build_panel_shell(self, name: str):
         """Modal overlay: scrim (dim) above the window, and a sheet anchored to the bottom. Resized by _open_panel."""
-        vp_w = self.s(420)
+        vp_w = self.s(WINDOW_W)
         vp_h = self.s(640)
         # Not a DearPyGui modal: a modal popup that was closed earlier (the VB-Cable dialog) blocks later modals.
         # The window covers the whole client area, so it takes all input; _on_mouse_click closes it on a scrim click.
@@ -2384,24 +2428,25 @@ class GetsuGUI:
                     dpg.bind_item_theme(f"sheet_{name}", self.theme_sheet)
                 self._panel_body(name)
 
-    def _sheet_head(self, title: str, done_callback):
-        width = self.s(372)
+    def _sheet_head(self, title: str, done_callback, done_tag: str = ""):
+        width = self.s(CONTENT_W)
         dpg.add_spacer(height=self.s(16))
         with dpg.group(horizontal=True):
             dpg.add_spacer(width=self.s(24))
             dpg.add_text(title, color=COL_TEXT)
             dpg.bind_item_font(dpg.last_item(), self.font_title)
-            dpg.add_spacer(width=max(0, width - self._text_w(title, self.font_title) - self.s(60)))
+            dpg.add_spacer(width=max(0, width - self._text_w(title, self.font_title) - self.s(44)))
             if done_callback is not None:
-                dpg.add_button(label="Done", callback=done_callback, width=self.s(44), height=self.s(26))
+                dpg.add_button(label="Done", callback=done_callback, width=self.s(44), height=self.s(26),
+                               tag=done_tag or dpg.generate_uuid())
                 dpg.bind_item_theme(dpg.last_item(), self.theme_link_btn)
                 dpg.bind_item_font(dpg.last_item(), self.font_btn)
         dpg.add_spacer(height=self.s(12))
 
     def _panel_body(self, name: str):
-        width = self.s(372)
+        width = self.s(CONTENT_W)
         if name == "mics":
-            self._sheet_head("Microphone", lambda: self._close_panels())
+            self._sheet_head("Microphone", lambda: self._close_panels(), done_tag="sheet_done_mics")
             with dpg.group(horizontal=True):
                 dpg.add_spacer(width=self.s(24))
                 with dpg.child_window(tag="mic_list", width=width, height=self.s(100), border=False):
@@ -2412,7 +2457,7 @@ class GetsuGUI:
                 dpg.add_text("", tag="input_selection_hint", wrap=width, color=COL_WARNING, show=False)
                 dpg.bind_item_font("input_selection_hint", self.font_notice)
         elif name == "settings":
-            self._sheet_head("Settings", lambda: self._close_panels())
+            self._sheet_head("Settings", lambda: self._close_panels(), done_tag="sheet_done_settings")
             with dpg.group(horizontal=True):
                 dpg.add_spacer(width=self.s(24))
                 with dpg.child_window(tag="settings_card", width=width, height=self.s(4 * SETTINGS_ROW_H + 3),
@@ -2436,10 +2481,11 @@ class GetsuGUI:
             self._sheet_head("How to use Getsu", None)
             with dpg.group(horizontal=True):
                 dpg.add_spacer(width=self.s(24))
-                with dpg.child_window(tag="help_body", width=width, height=self.s(252), border=False):
+                with dpg.child_window(tag="help_body", width=width, height=self.s(HELP_BODY_H), border=False):
                     self._help_steps(width - self.s(34))
                     dpg.add_spacer(height=self.s(4))
-                    dpg.add_button(label="Got it", width=width, height=self.s(40), callback=lambda: self._close_panels())
+                    dpg.add_button(label="Got it", width=width, height=self.s(ACTION_H),
+                                   callback=lambda: self._close_panels())
                     dpg.bind_item_theme(dpg.last_item(), self.theme_start_btn)
                     dpg.bind_item_font(dpg.last_item(), self.font_btn)
 
@@ -2457,32 +2503,34 @@ class GetsuGUI:
 
     def _settings_row_slider(self, width: int):
         self._vad_value = float(self.config.get("vad_threshold", 0.70))
+        row_h = self.s(SETTINGS_ROW_H)
         with dpg.group(horizontal=True):
             dpg.add_spacer(width=self.s(16))
-            with dpg.child_window(width=self.s(SET_LABEL_W), height=self.s(SETTINGS_ROW_H), border=False,
-                                  no_scrollbar=True):
+            with dpg.child_window(width=self.s(SET_LABEL_W), height=row_h, border=False, no_scrollbar=True):
                 self._bind_flat(dpg.last_item())
-                dpg.add_spacer(height=self.s(10))
+                # Label plus a two-line detail, centred in the row.
+                dpg.add_spacer(height=self._block_top(row_h, self._text_h("Ag", self.font_body),
+                                                      2 * self._text_h("Ag", self.font_notice)))
                 dpg.add_text("Sensitivity", color=COL_TEXT)
                 dpg.add_text("Higher ignores more background voices", color=COL_TEXT_2,
                              wrap=self.s(SET_LABEL_W))
                 dpg.bind_item_font(dpg.last_item(), self.font_notice)
             with dpg.group():
-                dpg.add_spacer(height=self.s(17))
+                dpg.add_spacer(height=self._block_top(row_h, self.s(30)))
                 dpg.add_drawlist(width=self.s(SET_CTRL_W), height=self.s(30), tag="slider_vad")
         self._panel_targets.setdefault("settings", {})["slider_vad"] = self._slider_press
         self._draw_slider()
 
     def _settings_row_boost(self, width: int):
+        row_h = self.s(SETTINGS_ROW_H)
         with dpg.group(horizontal=True):
             dpg.add_spacer(width=self.s(16))
-            with dpg.child_window(width=self.s(SET_LABEL_W), height=self.s(SETTINGS_ROW_H), border=False,
-                                  no_scrollbar=True):
+            with dpg.child_window(width=self.s(SET_LABEL_W), height=row_h, border=False, no_scrollbar=True):
                 self._bind_flat(dpg.last_item())
-                dpg.add_spacer(height=self.s(22))
+                dpg.add_spacer(height=self._block_top(row_h, self._text_h("Ag", self.font_body)))
                 dpg.add_text("Mic boost", color=COL_TEXT)
             with dpg.group():
-                dpg.add_spacer(height=self.s(17))
+                dpg.add_spacer(height=self._block_top(row_h, self.s(30)))
                 with dpg.child_window(tag="seg_boost", width=self.s(SET_CTRL_W), height=self.s(30), border=False,
                                       no_scrollbar=True, no_scroll_with_mouse=True):
                     self._bind_flat("seg_boost")
@@ -2504,12 +2552,15 @@ class GetsuGUI:
         self._draw_boost()
 
     def _settings_row_switch(self, name: str, label: str, detail, on: bool, callback):
+        row_h = self.s(SETTINGS_ROW_H)
         with dpg.group(horizontal=True):
             dpg.add_spacer(width=self.s(16))
-            with dpg.child_window(width=self.s(SET_LABEL_W), height=self.s(SETTINGS_ROW_H), border=False,
-                                  no_scrollbar=True):
+            with dpg.child_window(width=self.s(SET_LABEL_W), height=row_h, border=False, no_scrollbar=True):
                 self._bind_flat(dpg.last_item())
-                dpg.add_spacer(height=self.s(10 if detail else 22))
+                lines = [self._text_h("Ag", self.font_body)]
+                if detail:
+                    lines.append(2 * self._text_h("Ag", self.font_notice))  # details wrap to two lines
+                dpg.add_spacer(height=self._block_top(row_h, *lines))
                 dpg.add_text(label, color=COL_TEXT)
                 if detail:
                     dpg.add_text(detail, color=COL_TEXT_2, wrap=self.s(SET_LABEL_W))
@@ -2517,7 +2568,7 @@ class GetsuGUI:
             with dpg.group(horizontal=True):
                 dpg.add_spacer(width=self.s(SET_CTRL_W - 42))
                 with dpg.group() as switch_group:
-                    dpg.add_spacer(height=self.s(19))
+                    dpg.add_spacer(height=self._block_top(row_h, self.s(26)))
             self._make_switch(name, switch_group, on, callback)
 
     def _settings_row_learn(self, width: int, show: bool = False):
@@ -2542,7 +2593,7 @@ class GetsuGUI:
                 dpg.draw_text((self.s(7), self.s(4)), str(number), color=COL_ACCENT, size=self.s(12),
                               parent=f"step_num_{number}")
                 dpg.add_spacer(width=self.s(12))
-                with dpg.child_window(width=text_w, height=self.s(52), border=False, no_scrollbar=True):
+                with dpg.child_window(width=text_w, height=self.s(HELP_STEP_H), border=False, no_scrollbar=True):
                     self._bind_flat(dpg.last_item())
                     dpg.add_text(title, color=COL_TEXT)
                     dpg.bind_item_font(dpg.last_item(), self.font_btn)
@@ -2631,23 +2682,33 @@ class GetsuGUI:
 
         print(f"[GUI] Active Font Engine: {font_family}")
 
-        # Type scale: the mockup's 11-17 px read too small on Windows (owner feedback), so every step is ~15-20 %
-        # larger: 12, 14, 15, 16, 18 and 20 px. SemiBold for titles and buttons.
+        # Type scale: CSS sizes (TYPE_*) converted to DearPyGui sizes. The factor comes from the font file in use,
+        # so a fallback font gets its own factor. Unreadable metrics keep the sizes unconverted.
+        line_factor = 1.0
+        try:
+            line_factor = ui_type.read_line_height_factor(path_regular)
+        except (OSError, ValueError) as e:
+            print(f"[WARN] Font metrics unreadable, sizes are not converted: {e}")
+        print(f"[GUI] Font line-height factor: {line_factor:.4f} (DPI scale {self.dpi_scale:.2f})")
+
+        def fpx(css_px):
+            return ui_type.font_px(css_px, line_factor, self.dpi_scale)
+
         with dpg.font_registry():
             if path_regular and os.path.exists(path_regular):
                 bold_file = path_semibold if (path_semibold and os.path.exists(path_semibold)) else path_bold
                 if not (bold_file and os.path.exists(bold_file)):
                     bold_file = path_regular
-                self.font_body = dpg.add_font(path_regular, self.s(15))
-                self.font_small = dpg.add_font(path_regular, self.s(12))
-                self.font_footer = dpg.add_font(path_regular, self.s(13))
-                self.font_seg = dpg.add_font(bold_file, self.s(13))
-                self.font_notice = dpg.add_font(path_regular, self.s(14))
-                self.font_list = dpg.add_font(path_regular, self.s(16))
-                self.font_header = dpg.add_font(bold_file, self.s(16))
-                self.font_btn = dpg.add_font(bold_file, self.s(15))
-                self.font_title = dpg.add_font(bold_file, self.s(18))
-                self.font_state = dpg.add_font(bold_file, self.s(20))
+                self.font_body = dpg.add_font(path_regular, fpx(TYPE_BODY))
+                self.font_small = dpg.add_font(path_regular, fpx(TYPE_SMALL))
+                self.font_footer = dpg.add_font(path_regular, fpx(TYPE_FOOTER))
+                self.font_seg = dpg.add_font(bold_file, fpx(TYPE_SUB))
+                self.font_notice = dpg.add_font(path_regular, fpx(TYPE_SUB))
+                self.font_list = dpg.add_font(bold_file, fpx(TYPE_ROW))
+                self.font_header = dpg.add_font(bold_file, fpx(TYPE_ROW))
+                self.font_btn = dpg.add_font(bold_file, fpx(TYPE_BUTTON))
+                self.font_title = dpg.add_font(bold_file, fpx(TYPE_TITLE))
+                self.font_state = dpg.add_font(bold_file, fpx(TYPE_STATE))
                 dpg.bind_font(self.font_body)
             else:
                 self.font_body = self.font_small = self.font_notice = None
@@ -2785,31 +2846,8 @@ class GetsuGUI:
                 dpg.add_theme_style(dpg.mvStyleVar_FrameBorderSize, 0.0)
                 dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(10))
 
-        # Main window: no title bar (the OS title bar is drawn in DWM colours), no resize, no move.
-        width = self.s(372)
-        self._click_targets = {}
-        with dpg.window(tag="main_window", no_title_bar=True, no_resize=True, no_move=True,
-                        no_scrollbar=True, no_scroll_with_mouse=True, no_collapse=True):
-            self._build_hero(width)
-            self._build_setup_card(width, self.s(HERO_H))
-            self._build_mic_card(width)
-            dpg.add_spacer(height=self.s(24))
-            self._build_actions(width)
-            dpg.add_spacer(height=self.s(24))
-            self._build_footer(width)
-            dpg.add_spacer(height=self.s(16))
-
-
-        # Panels: built once, shown over the window by _open_panel.
-        for name in ("mics", "settings", "help"):
-            self._build_panel_shell(name)
-
-        if self.font_body:
-            dpg.bind_item_font("hero_state_text", self.font_state)
-            dpg.bind_item_font("hero_sub_text", self.font_notice)
-
-        # Viewport. Width is 420 px; height is fitted to the content after the first frames.
-        vp_w = self.s(420)
+        # Viewport. Width is WINDOW_W; height is fitted to the content after the first frames.
+        vp_w = self.s(WINDOW_W)
         vp_h = self.s(640)
         try:
             class MONITORINFO(ctypes.Structure):
@@ -2857,6 +2895,34 @@ class GetsuGUI:
             hidden_hwnd = user32.FindWindowW(None, "Getsu - AI Noise Cancellation")
             if hidden_hwnd:
                 user32.ShowWindow(hidden_hwnd, SW_HIDE)
+        # DearPyGui builds the font atlas on the first frame. Text is measured by the layout below, so one
+        # frame is drawn here first.
+        dpg.render_dearpygui_frame()
+
+        # Main window: no title bar (the OS title bar is drawn in DWM colours), no resize, no move.
+        width = self.s(CONTENT_W)
+        self._click_targets = {}
+        with dpg.window(tag="main_window", no_title_bar=True, no_resize=True, no_move=True,
+                        no_scrollbar=True, no_scroll_with_mouse=True, no_collapse=True):
+            self._build_hero(width)
+            self._build_setup_card(width, self.s(HERO_H))
+            dpg.add_spacer(height=self.s(20))  # 20 px from the hero or first-run slot to the microphone card
+            self._build_mic_card(width)
+            dpg.add_spacer(height=self.s(24))
+            self._build_actions(width)
+            dpg.add_spacer(height=self.s(24))
+            self._build_footer(width)
+            dpg.add_spacer(height=self.s(16))
+
+
+        # Panels: built once, shown over the window by _open_panel.
+        for name in ("mics", "settings", "help"):
+            self._build_panel_shell(name)
+
+        if self.font_body:
+            dpg.bind_item_font("hero_state_text", self.font_state)
+            dpg.bind_item_font("hero_sub_text", self.font_notice)
+
         dpg.set_primary_window("main_window", True)
 
         # Render frames to settle layout, then fit the viewport height to the content.

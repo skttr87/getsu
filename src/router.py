@@ -21,21 +21,18 @@ try:
 except ImportError:
     from config import save_config
 
-from logging.handlers import RotatingFileHandler
+try:
+    from src.diagnostics import get_file_handler
+except ImportError:
+    from diagnostics import get_file_handler
 
-# Configure file + console logger for routing audit
+# Routing audit logger: shares the getsu.log file handler with the rest of the app, plus console output.
 logger = logging.getLogger("GetsuRouter")
 if not logger.handlers:
     logger.setLevel(logging.INFO)
-    try:
-        appdata_dir = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "Getsu")
-        os.makedirs(appdata_dir, exist_ok=True)
-        log_file = os.path.join(appdata_dir, "getsu.log")
-        fh = RotatingFileHandler(log_file, maxBytes=2 * 1024 * 1024, backupCount=2, encoding="utf-8")
-        fh.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] [ROUTER] %(message)s"))
-        logger.addHandler(fh)
-    except Exception:
-        pass
+    _fh = get_file_handler()
+    if _fh is not None:
+        logger.addHandler(_fh)
     sh = logging.StreamHandler()
     sh.setFormatter(logging.Formatter("[ROUTER] %(message)s"))
     logger.addHandler(sh)

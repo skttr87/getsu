@@ -1240,7 +1240,8 @@ class GetsuGUI:
                         transient_suppressor=ts,
                         mic_boost_db=float(boost_db),
                     )
-                    processed_chunks.append(mono)
+                    # process_mono_frame may return a buffer it reuses for the next frame: keep a copy.
+                    processed_chunks.append(mono.copy())
 
                     # Update countdown UI once every 100 chunks (~1.0s)
                     if chunk_idx % 100 == 0:

@@ -7,6 +7,7 @@ __pycache__/
 # C extensions
 *.obj
 *.dll
+!src/native/*.dll
 *.lib
 
 # Distribution / packaging

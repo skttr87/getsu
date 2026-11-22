@@ -22,6 +22,7 @@ from src.dsp import (
 )
 from src.host_api_resolver import resolve_pair, DeviceResolutionError, ResolvedPair
 from src.audio_errors import explain_start_error, ExplainedError
+from src.diagnostics import info as log_info, log_start_failure
 
 
 
@@ -93,7 +94,7 @@ class AudioEngine:
         try:
             self.rnnoise = RNNoise()
         except Exception as e:
-            print(f"[ENGINE] Warning: Failed to initialize RNNoise neural engine ({e}). Operating in DSP bypass mode.")
+            log_info(f"[ENGINE] Warning: Failed to initialize RNNoise neural engine ({e}). Operating in DSP bypass mode.")
             self.rnnoise = None
             self.denoise_available = False
             self.denoise_enabled = False
@@ -172,7 +173,7 @@ class AudioEngine:
                 continue
             if rate != int(SAMPLE_RATE):
                 self.cable_rate_mismatch = rate
-                print(f"[ENGINE] VB-Cable is set to {rate} Hz (Getsu uses {int(SAMPLE_RATE)} Hz). "
+                log_info(f"[ENGINE] VB-Cable is set to {rate} Hz (Getsu uses {int(SAMPLE_RATE)} Hz). "
                       f"Set both CABLE devices to 48 kHz in Sound settings for best quality.")
                 return
 
@@ -254,7 +255,7 @@ class AudioEngine:
             self.last_start_error = None
         except Exception as e:
             self.last_start_error = explain_start_error(e)
-            print(f"[STREAM] Start failed: {self.last_start_error.title} | {self.last_start_error.technical}")
+            log_start_failure(e, self.last_start_error, self.input_device, self.output_device)
             raise
 
     def _start_impl(self):
@@ -272,20 +273,20 @@ class AudioEngine:
                     pair = resolve_pair(raw_devs, raw_apis, self.input_device, self.output_device)
                     self.resolved_pair = pair
                     if pair.input != self.input_device:
-                        print(f"[STREAM] Realigned input device from [{self.input_device}] to [{pair.input}] ({pair.host_name})")
+                        log_info(f"[STREAM] Realigned input device from [{self.input_device}] to [{pair.input}] ({pair.host_name})")
                         self.input_device = pair.input
                     if pair.output != self.output_device:
-                        print(f"[STREAM] Realigned output device from [{self.output_device}] to [{pair.output}] ({pair.host_name})")
+                        log_info(f"[STREAM] Realigned output device from [{self.output_device}] to [{pair.output}] ({pair.host_name})")
                         self.output_device = pair.output
                     for note in pair.notes:
-                        print(f"[STREAM] {note}")
+                        log_info(f"[STREAM] {note}")
                     if pair.ambiguous:
-                        print("[STREAM] Warning: more than one input could match the selected microphone; "
+                        log_info("[STREAM] Warning: more than one input could match the selected microphone; "
                               "please confirm it in the app.")
             except DeviceResolutionError:
                 raise
             except Exception as e:
-                print(f"[STREAM] Host API resolution failed unexpectedly: {e!r}")
+                log_info(f"[STREAM] Host API resolution failed unexpectedly: {e!r}")
                 try:
                     in_host = sd.query_hostapis()[sd.query_devices(self.input_device)['hostapi']]['name']
                 except Exception:
@@ -337,13 +338,13 @@ class AudioEngine:
 
             latency_setting = 0.035 if is_bluetooth else 'low'
 
-            print(f"[STREAM] Starting low-latency stream...")
-            print(f"         Input  : [{self.input_device}] {in_dev_info['name']} ({self.in_channels} ch)")
-            print(f"         Output : [{self.output_device}] {out_dev_info['name']} ({self.out_channels} ch)")
+            log_info(f"[STREAM] Starting low-latency stream...")
+            log_info(f"         Input  : [{self.input_device}] {in_dev_info['name']} ({self.in_channels} ch)")
+            log_info(f"         Output : [{self.output_device}] {out_dev_info['name']} ({self.out_channels} ch)")
             if is_bluetooth:
-                print(f"         Latency: Bluetooth Jitter Buffer (35ms RF smoothing)")
+                log_info(f"         Latency: Bluetooth Jitter Buffer (35ms RF smoothing)")
             else:
-                print(f"         Blocksize: 10ms (480 samples @ 48kHz) | Est. Latency: ~45ms round-trip")
+                log_info(f"         Blocksize: 10ms (480 samples @ 48kHz) | Est. Latency: ~45ms round-trip")
             
             last_err = None
             for attempt in range(3):
@@ -370,21 +371,21 @@ class AudioEngine:
                         self._stream = None
                     if attempt == 2 or "PaErrorCode -9985" not in str(e):
                         raise last_err
-                    print(f"[STREAM] Device busy (attempt {attempt + 1}/3): {e}. Retrying...")
+                    log_info(f"[STREAM] Device busy (attempt {attempt + 1}/3): {e}. Retrying...")
                     time.sleep(0.10 * (2 ** attempt))
 
 
             self._running = True
             self._last_callback_time = time.monotonic()
-            print(f"[STREAM] Active! DSP + RNNoise running in background.")
+            log_info(f"[STREAM] Active! DSP + RNNoise running in background.")
             if self.router and getattr(self.router, 'config', {}).get("auto_route", True):
                 try:
                     self.router_swap_success = bool(self.router.swap_to_cable())
                     if not self.router_swap_success:
-                        print("[ENGINE] Warning: auto_route swap_to_cable() reported failure.")
+                        log_info("[ENGINE] Warning: auto_route swap_to_cable() reported failure.")
                 except Exception as e:
                     self.router_swap_success = False
-                    print(f"[ENGINE] Failed to swap default microphone: {e}")
+                    log_info(f"[ENGINE] Failed to swap default microphone: {e}")
             else:
                 self.router_swap_success = True
 
@@ -399,9 +400,9 @@ class AudioEngine:
                 self._stream.close()
                 self._stream = None
             if self.overflow_count > 0 or self.underflow_count > 0:
-                print(f"[STREAM] Stopped. Buffer diagnostics: {self.overflow_count} overflows, {self.underflow_count} underflows over {self.total_frames} frames.")
+                log_info(f"[STREAM] Stopped. Buffer diagnostics: {self.overflow_count} overflows, {self.underflow_count} underflows over {self.total_frames} frames.")
             else:
-                print("[STREAM] Audio stream stopped.")
+                log_info("[STREAM] Audio stream stopped.")
 
     def prepare_for_stop(self):
         """
@@ -418,7 +419,7 @@ class AudioEngine:
                     try:
                         self.router.restore_original()
                     except Exception as e:
-                        print(f"[ENGINE] Failed to restore physical microphone: {e}")
+                        log_info(f"[ENGINE] Failed to restore physical microphone: {e}")
             finally:
                 self.stop()
 
@@ -430,24 +431,24 @@ class AudioEngine:
         new_close = round(max(0.20, self.vad_threshold * (0.52 / 0.70)), 2)
         self.gate.close_threshold = new_close
         self.vad_close_threshold = new_close
-        print(f"[ENGINE] VAD threshold updated to: {self.vad_threshold:.2f} (close: {new_close:.2f})")
+        log_info(f"[ENGINE] VAD threshold updated to: {self.vad_threshold:.2f} (close: {new_close:.2f})")
 
     def toggle_denoise(self) -> bool:
         """Toggles RNNoise on/off."""
         self.denoise_enabled = not self.denoise_enabled
-        print(f"[ENGINE] Denoise state: {'ENABLED' if self.denoise_enabled else 'BYPASSED'}")
+        log_info(f"[ENGINE] Denoise state: {'ENABLED' if self.denoise_enabled else 'BYPASSED'}")
         return self.denoise_enabled
 
     def toggle_high_pass(self) -> bool:
         """Toggles 80Hz cooling pad filter."""
         self.high_pass_enabled = not self.high_pass_enabled
-        print(f"[ENGINE] 80Hz Rumble Filter: {'ENABLED' if self.high_pass_enabled else 'DISABLED'}")
+        log_info(f"[ENGINE] 80Hz Rumble Filter: {'ENABLED' if self.high_pass_enabled else 'DISABLED'}")
         return self.high_pass_enabled
 
     def toggle_mute(self) -> bool:
         """Toggles microphone mute."""
         self.is_muted = not self.is_muted
-        print(f"[ENGINE] Microphone Mute: {'MUTED' if self.is_muted else 'ACTIVE'}")
+        log_info(f"[ENGINE] Microphone Mute: {'MUTED' if self.is_muted else 'ACTIVE'}")
         return self.is_muted
 
     def is_active(self) -> bool:
@@ -497,7 +498,7 @@ def create_engine_from_config(
     if valid_in is None:
         fallback_in = auto_select_input_device()
         if fallback_in and isinstance(fallback_in, dict):
-            print(f"[STREAM] Warning: Configured input device [{input_device_id}] invalid or disconnected. Falling back to [{fallback_in['index']}] {fallback_in['name']}")
+            log_info(f"[STREAM] Warning: Configured input device [{input_device_id}] invalid or disconnected. Falling back to [{fallback_in['index']}] {fallback_in['name']}")
             input_device_id = fallback_in['index']
 
     # Validate output device against active hardware
@@ -506,7 +507,7 @@ def create_engine_from_config(
         fallback_out_res = auto_select_output_device()
         fallback_out = fallback_out_res[0] if isinstance(fallback_out_res, tuple) else fallback_out_res
         if fallback_out and isinstance(fallback_out, dict):
-            print(f"[STREAM] Warning: Configured output device [{output_device_id}] invalid or disconnected. Falling back to [{fallback_out['index']}] {fallback_out['name']}")
+            log_info(f"[STREAM] Warning: Configured output device [{output_device_id}] invalid or disconnected. Falling back to [{fallback_out['index']}] {fallback_out['name']}")
             output_device_id = fallback_out['index']
 
     if is_laptop_mic is None:

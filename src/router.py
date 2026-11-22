@@ -313,6 +313,12 @@ def native_get_current_default_playback() -> Tuple[Optional[str], str]:
         _release_com_ptr(pEnum)
 
 
+def _is_endpoint_id(value: Optional[str]) -> bool:
+    """True when value is a CoreAudio endpoint ID such as {0.0.1.00000000}.{GUID}, not a friendly name.
+    Friendly names can contain dots and braces (for example "Speakers (2.1 Audio)"), so they are not checked by character."""
+    return bool(value) and ENDPOINT_GUID_PATTERN.match(value.strip()) is not None
+
+
 def native_get_device_bus_type(device_id_or_name: Optional[str] = None, is_input: bool = True) -> str:
     """
     Direct in-process query retrieving the hardware driver bus enumerator name (PKEY_Device_EnumeratorName).
@@ -335,7 +341,7 @@ def native_get_device_bus_type(device_id_or_name: Optional[str] = None, is_input
         dataflow = 1 if is_input else 0
 
         # Branch 1: Specific ID (GUID or endpoint ID string)
-        if device_id_or_name and ("{" in device_id_or_name or "." in device_id_or_name):
+        if _is_endpoint_id(device_id_or_name):
             GetDevice = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_void_p))(enum_vtable[5])
             pDev = ctypes.c_void_p()
             if GetDevice(pEnum, str(device_id_or_name), ctypes.byref(pDev)) != 0 or not pDev:
@@ -489,7 +495,7 @@ def _endpoint_name_matches(item_dev, target_name_lower: str) -> bool:
 def native_get_device_form_factor(device_name: Optional[str], is_input: bool = True) -> Optional[int]:
     """
     Reads PKEY_AudioEndpoint_FormFactor (an EndpointFormFactor value) of the active capture (is_input) or
-    render endpoint whose friendly name matches device_name. Read-only: one property read per call.
+    render endpoint given by friendly name or by endpoint ID. Read-only: one property read per call.
     Returns None when the endpoint or the property is not available.
     """
     if sys.platform != 'win32' or not ole32 or not device_name:
@@ -519,15 +525,22 @@ def native_get_device_form_factor(device_name: Optional[str], is_input: bool = T
         count = wintypes.UINT()
         GetCount(pCol, ctypes.byref(count))
 
-        target_name_lower = device_name.lower().strip()
-        for i in range(count.value):
-            item_dev = ctypes.c_void_p()
-            if Item(pCol, i, ctypes.byref(item_dev)) != 0 or not item_dev:
-                continue
-            if _endpoint_name_matches(item_dev, target_name_lower):
-                pDev = item_dev
-                break
-            _release_com_ptr(item_dev)
+        if _is_endpoint_id(device_name):
+            # Endpoint ID: direct lookup, no name matching
+            GetDevice = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_void_p))(enum_vtable[5])
+            pDev = ctypes.c_void_p()
+            if GetDevice(pEnum, device_name.strip(), ctypes.byref(pDev)) != 0 or not pDev:
+                return None
+        else:
+            target_name_lower = device_name.lower().strip()
+            for i in range(count.value):
+                item_dev = ctypes.c_void_p()
+                if Item(pCol, i, ctypes.byref(item_dev)) != 0 or not item_dev:
+                    continue
+                if _endpoint_name_matches(item_dev, target_name_lower):
+                    pDev = item_dev
+                    break
+                _release_com_ptr(item_dev)
 
         if not pDev:
             return None

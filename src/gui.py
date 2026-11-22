@@ -118,6 +118,11 @@ WINDOW_W = 420
 CONTENT_PAD = 24
 CONTENT_W = WINDOW_W - 2 * CONTENT_PAD  # 372 px between the gutters
 HERO_H = 212  # logical px: hero block and first-run card share this slot (the hero content ends at the meter)
+SETTINGS_ROW_H = 64  # logical px: one settings row; a two-line detail fits
+SET_LABEL_W = 210    # label column of a settings row (the detail wraps inside it)
+SET_CTRL_W = 146     # control column of a settings row: slider, boost segments, switch
+VAD_MIN, VAD_MAX = 0.40, 0.90  # Sensitivity range (vad_threshold)
+BOOST_DBS = (0, 5, 10, 15)     # mic boost segments, left to right
 
 # First-run card copy (mockup "First run" and "Installing cable" screens).
 SETUP_BODY_OFFER = ("Getsu needs a free virtual audio cable to send your clean voice to Discord, Zoom and games. "
@@ -404,7 +409,10 @@ class GetsuGUI:
         self.theme_sheet = None
         self.theme_chip = None
         self.theme_scrim = None
-        self.theme_slider = None
+        self._vad_value = 0.70                # Sensitivity knob value (set when the settings row is built)
+        self._drag: Optional[str] = None      # "vad" while the Sensitivity knob follows the mouse
+        self._slider_hovered = False
+        self._seg_hover: Optional[int] = None  # index of the hovered boost segment
 
         self._hwnd: Optional[int] = None
         self._old_wndproc = None
@@ -467,26 +475,107 @@ class GetsuGUI:
         self.mic_boost_db = boost_db
         self.config["mic_boost_db"] = boost_db
         save_config(self.config)
-        self._update_boost_buttons_ui()
+        self._draw_boost()
         if self.engine:
             new_gain = self._compute_current_gain()
             self.engine.mic_gain = new_gain
             self.engine.mic_boost_db = float(boost_db)
             print(f"[GUI] Live Microphone Gain updated to: {new_gain:.2f}x (+{boost_db} dB)")
 
-    def _update_boost_buttons_ui(self):
+    # --- Sensitivity knob and mic boost segments (drawn in drawlists; clicks come from _on_mouse_click) ---
+
+    def _draw_slider(self):
+        """Redraws the Sensitivity knob: 4 px track, accent fill up to the value, white knob with a soft shadow."""
+        tag = "slider_vad"
+        if not dpg.does_item_exist(tag):
+            return
+        s = self.s
+        h = 30
+        cy = h / 2.0
+        track_h = 2.0
+        x_knob = ui_hit.slider_knob_x(self._vad_value, 0, s(SET_CTRL_W), s(15), VAD_MIN, VAD_MAX)
+        dpg.delete_item(tag, children_only=True)
+        dpg.draw_rectangle((s(15), s(cy - track_h)), (s(SET_CTRL_W - 15), s(cy + track_h)),
+                           color=COL_FILL_2, fill=COL_FILL_2, rounding=s(2), parent=tag)
+        dpg.draw_rectangle((s(15), s(cy - track_h)), (max(s(15), x_knob), s(cy + track_h)),
+                           color=COL_ACCENT, fill=COL_ACCENT, rounding=s(2), parent=tag)
+        if self._slider_hovered:
+            dpg.draw_circle((x_knob, s(cy)), s(15), color=COL_ACCENT_SOFT, fill=COL_ACCENT_SOFT, parent=tag)
+        dpg.draw_circle((x_knob, s(cy + 1)), s(11), color=(0, 0, 0, 80), fill=(0, 0, 0, 80), parent=tag)
+        dpg.draw_circle((x_knob, s(cy)), s(11), color=COL_WHITE, fill=COL_WHITE, parent=tag)
+
+    def _draw_boost(self):
+        """Redraws the mic boost track: selected segment is an accent pill with white text, hover tints the others."""
+        if not self._ui_built or not dpg.does_item_exist("seg_boost_bg"):
+            return
+        s = self.s
+        w, h, inset, gap = SET_CTRL_W, 30, 2, 2
+        seg_w = (w - 2 * inset - gap * (len(BOOST_DBS) - 1)) / float(len(BOOST_DBS))
+        dpg.delete_item("seg_boost_bg", children_only=True)
+        dpg.draw_rectangle((0, 0), (s(w), s(h)), color=COL_FILL, fill=COL_FILL, rounding=s(9), parent="seg_boost_bg")
+        for i, db in enumerate(BOOST_DBS):
+            x0 = inset + i * (seg_w + gap)
+            selected = db == self.mic_boost_db
+            if selected:
+                fill = COL_ACCENT
+            elif self._seg_hover == i:
+                fill = COL_FILL_2
+            else:
+                continue
+            dpg.draw_rectangle((s(x0), s(inset)), (s(x0 + seg_w), s(h - inset)), color=fill, fill=fill,
+                               rounding=s(7), parent="seg_boost_bg")
+        for db in BOOST_DBS:
+            if dpg.does_item_exist(f"seg_lbl_{db}"):
+                dpg.configure_item(f"seg_lbl_{db}", color=COL_WHITE if db == self.mic_boost_db else COL_TEXT)
+
+    def _vad_from_x(self, x: float, rect) -> float:
+        return ui_hit.slider_value_at(x, rect[0][0], rect[1][0] - rect[0][0], self.s(15), VAD_MIN, VAD_MAX)
+
+    def _set_vad(self, value: float):
+        """Applies a Sensitivity value from the knob. Same path as before: on_vad_slider_changed debounces the save."""
+        value = round(float(value), 2)
+        if value == self._vad_value:
+            return
+        self._vad_value = value
+        self._draw_slider()
+        self.on_vad_slider_changed(None, value)
+
+    def _slider_press(self):
+        """Click on the Sensitivity track: jump to that value and start a drag."""
+        rect = self._item_rect("slider_vad")
+        if rect is None:
+            return
+        self._drag = "vad"
+        self._set_vad(self._vad_from_x(dpg.get_mouse_pos(local=False)[0], rect))
+
+    def _boost_press(self):
+        """Click on the boost track: select the segment under the pointer."""
+        rect = self._item_rect("seg_boost")
+        idx = ui_hit.segment_index(dpg.get_mouse_pos(local=False), rect, len(BOOST_DBS), self.s(2))
+        if idx is not None:
+            self.set_mic_boost(BOOST_DBS[idx])
+
+    def _tick_controls(self):
+        """Per frame: follows the mouse while the Sensitivity knob is dragged, and updates hover highlights."""
         if not self._ui_built:
             return
-        try:
-            for b in [0, 5, 10, 15]:
-                tag = f"btn_boost_{b}"
-                if dpg.does_item_exist(tag):
-                    if b == self.mic_boost_db:
-                        dpg.bind_item_theme(tag, self.theme_boost_active)
-                    else:
-                        dpg.bind_item_theme(tag, self.theme_boost_inactive)
-        except Exception:
-            pass
+        point = dpg.get_mouse_pos(local=False)
+        settings_open = self._open_panel_name == "settings"
+        if self._drag == "vad":
+            rect = self._item_rect("slider_vad")
+            if not settings_open or rect is None or not dpg.is_mouse_button_down(dpg.mvMouseButton_Left):
+                self._drag = None
+            else:
+                self._set_vad(self._vad_from_x(point[0], rect))
+        hovered = settings_open and ui_hit.point_in_rect(point, self._item_rect("slider_vad") or ((0, 0), (0, 0)))
+        if hovered != self._slider_hovered:
+            self._slider_hovered = hovered
+            self._draw_slider()
+        seg_hover = (ui_hit.segment_index(point, self._item_rect("seg_boost"), len(BOOST_DBS), self.s(2))
+                     if settings_open else None)
+        if seg_hover != self._seg_hover:
+            self._seg_hover = seg_hover
+            self._draw_boost()
 
     def _get_windows_default_input(self) -> int:
         """Find the Windows default recording device index directly from WASAPI."""
@@ -1554,6 +1643,7 @@ class GetsuGUI:
         if not self._ui_built or not dpg.does_item_exist("meter_bar_0"):
             return
         self._update_button_hover()
+        self._tick_controls()
         self._poll_setup_card()
         now = time.monotonic()
         if now - self._last_meter_t < 0.05:
@@ -1995,7 +2085,7 @@ class GetsuGUI:
             content = rows * self.s(52) + max(0, rows - 1) + self.s(16)
             return min(vp_h, self.s(56) + content)
         if name == "settings":
-            return min(vp_h, self.s(56) + self.s(4 * 56 + 3) + self.s(24))
+            return min(vp_h, self.s(56) + self.s(4 * SETTINGS_ROW_H + 3) + self.s(24))
         return min(vp_h, self.s(56 + 252 + 24))
 
     def _close_panels(self):
@@ -2264,7 +2354,8 @@ class GetsuGUI:
             self._sheet_head("Settings", lambda: self._close_panels())
             with dpg.group(horizontal=True):
                 dpg.add_spacer(width=self.s(24))
-                with dpg.child_window(tag="settings_card", width=width, height=self.s(4 * 56 + 3), border=False):
+                with dpg.child_window(tag="settings_card", width=width, height=self.s(4 * SETTINGS_ROW_H + 3),
+                                      border=False):
                     self._bind_list("settings_card")
                     self._settings_row_slider(width)
                     self._divider(width)
@@ -2301,54 +2392,71 @@ class GetsuGUI:
             dpg.add_drawlist(width=width - self.s(16), height=1)
             dpg.draw_line((0, 0), (width - self.s(32), 0), color=COL_SEPARATOR, thickness=1.0, parent=dpg.last_item())
 
+    # Settings rows: label column (SET_LABEL_W, detail text wraps inside it) and control column (SET_CTRL_W).
+
     def _settings_row_slider(self, width: int):
+        self._vad_value = float(self.config.get("vad_threshold", 0.70))
         with dpg.group(horizontal=True):
             dpg.add_spacer(width=self.s(16))
-            with dpg.child_window(width=self.s(186), height=self.s(56), border=False, no_scrollbar=True):
+            with dpg.child_window(width=self.s(SET_LABEL_W), height=self.s(SETTINGS_ROW_H), border=False,
+                                  no_scrollbar=True):
                 self._bind_flat(dpg.last_item())
-                dpg.add_spacer(height=self.s(12))
+                dpg.add_spacer(height=self.s(10))
                 dpg.add_text("Sensitivity", color=COL_TEXT)
-                dpg.add_text("Higher ignores more background voices", color=COL_TEXT_2)
+                dpg.add_text("Higher ignores more background voices", color=COL_TEXT_2,
+                             wrap=self.s(SET_LABEL_W))
                 dpg.bind_item_font(dpg.last_item(), self.font_notice)
             with dpg.group():
-                dpg.add_spacer(height=self.s(14))
-                dpg.add_slider_float(default_value=float(self.config.get("vad_threshold", 0.70)), min_value=0.40,
-                                     max_value=0.90, format="", callback=self.on_vad_slider_changed,
-                                     tag="slider_vad", width=self.s(150))
-                if self.theme_slider:
-                    dpg.bind_item_theme("slider_vad", self.theme_slider)
+                dpg.add_spacer(height=self.s(17))
+                dpg.add_drawlist(width=self.s(SET_CTRL_W), height=self.s(30), tag="slider_vad")
+        self._panel_targets.setdefault("settings", {})["slider_vad"] = self._slider_press
+        self._draw_slider()
 
     def _settings_row_boost(self, width: int):
         with dpg.group(horizontal=True):
             dpg.add_spacer(width=self.s(16))
-            with dpg.child_window(width=self.s(170), height=self.s(56), border=False, no_scrollbar=True):
+            with dpg.child_window(width=self.s(SET_LABEL_W), height=self.s(SETTINGS_ROW_H), border=False,
+                                  no_scrollbar=True):
                 self._bind_flat(dpg.last_item())
-                dpg.add_spacer(height=self.s(18))
+                dpg.add_spacer(height=self.s(22))
                 dpg.add_text("Mic boost", color=COL_TEXT)
-            seg_w = (self.s(170) - self.s(6)) // 4
             with dpg.group():
-                dpg.add_spacer(height=self.s(14))
-                with dpg.group(horizontal=True):
-                    for i, db in enumerate((0, 5, 10, 15)):
-                        dpg.add_button(label=("0" if db == 0 else f"+{db}"), tag=f"btn_boost_{db}", width=seg_w,
-                                       height=self.s(28), callback=lambda s, a, d=db: self.set_mic_boost(d))
-                        dpg.bind_item_font(f"btn_boost_{db}", self.font_btn)
-                        if i < 3:
-                            dpg.add_spacer(width=self.s(2))
-        self._update_boost_buttons_ui()
+                dpg.add_spacer(height=self.s(17))
+                with dpg.child_window(tag="seg_boost", width=self.s(SET_CTRL_W), height=self.s(30), border=False,
+                                      no_scrollbar=True, no_scroll_with_mouse=True):
+                    self._bind_flat("seg_boost")
+                    dpg.add_drawlist(width=self.s(SET_CTRL_W), height=self.s(30), tag="seg_boost_bg")
+                    # Labels are text items placed over the track (drawlist text cannot use the SemiBold font).
+                    label_font = self.font_seg or self.font_btn
+                    seg_w = (SET_CTRL_W - 4 - 2 * 3) / 4.0
+                    for i, db in enumerate(BOOST_DBS):
+                        label = "0" if db == 0 else f"+{db}"
+                        text_w = self._text_w(label, label_font)
+                        text_h = self._text_h(label, label_font)
+                        cx = 2 + i * (seg_w + 2) + seg_w / 2.0
+                        dpg.add_text(label, tag=f"seg_lbl_{db}", color=COL_TEXT,
+                                     pos=[self.s(cx) - text_w // 2, (self.s(30) - text_h) // 2])
+                        if label_font:
+                            dpg.bind_item_font(f"seg_lbl_{db}", label_font)
+        self._panel_targets.setdefault("settings", {})["seg_boost"] = self._boost_press
+        self._hit_parts["seg_boost"] = ["seg_boost_bg"]
+        self._draw_boost()
 
     def _settings_row_switch(self, name: str, label: str, detail, on: bool, callback):
         with dpg.group(horizontal=True):
             dpg.add_spacer(width=self.s(16))
-            with dpg.child_window(width=self.s(298), height=self.s(56), border=False, no_scrollbar=True):
+            with dpg.child_window(width=self.s(SET_LABEL_W), height=self.s(SETTINGS_ROW_H), border=False,
+                                  no_scrollbar=True):
                 self._bind_flat(dpg.last_item())
-                dpg.add_spacer(height=self.s(14 if detail is None else 12))
+                dpg.add_spacer(height=self.s(10 if detail else 22))
                 dpg.add_text(label, color=COL_TEXT)
                 if detail:
-                    dpg.add_text(detail, color=COL_TEXT_2)
+                    dpg.add_text(detail, color=COL_TEXT_2, wrap=self.s(SET_LABEL_W))
                     dpg.bind_item_font(dpg.last_item(), self.font_notice)
-            with dpg.group() as switch_group:
-                dpg.add_spacer(height=self.s(15))
+            with dpg.group(horizontal=True):
+                dpg.add_spacer(width=self.s(SET_CTRL_W - 42))
+                with dpg.group() as switch_group:
+                    dpg.add_spacer(height=self.s(19))
             self._make_switch(name, switch_group, on, callback)
 
     def _settings_row_learn(self, width: int, show: bool = False):
@@ -2427,7 +2535,11 @@ class GetsuGUI:
         self._set_button_label("btn_voice_test", "Hear myself")
         self._set_button_tip("btn_voice_test", reason)
 
-    def build_ui(self):
+    def build_ui(self, headless: bool = False):
+        """
+        Builds the windows and runs the UI loop. headless=True builds and lays out the windows, then returns
+        without the tray, the window hook, the signal handlers or the loop (used by the click-path tests).
+        """
         dpg.create_context()
         self._ui_built = True
         self._last_meter_t = 0.0
@@ -2468,6 +2580,7 @@ class GetsuGUI:
                 self.font_body = dpg.add_font(path_regular, self.s(15))
                 self.font_small = dpg.add_font(path_regular, self.s(12))
                 self.font_footer = dpg.add_font(path_regular, self.s(13))
+                self.font_seg = dpg.add_font(bold_file, self.s(13))
                 self.font_notice = dpg.add_font(path_regular, self.s(14))
                 self.font_list = dpg.add_font(path_regular, self.s(16))
                 self.font_header = dpg.add_font(bold_file, self.s(16))
@@ -2477,9 +2590,9 @@ class GetsuGUI:
                 dpg.bind_font(self.font_body)
             else:
                 self.font_body = self.font_small = self.font_notice = None
-                self.font_footer = None
                 self.font_list = self.font_header = self.font_btn = None
                 self.font_title = self.font_state = None
+                self.font_footer = self.font_seg = None
 
         # Dark theme from the approved mockup palette. Rounding: cards 14, buttons 10, segmented 9.
         # Spacing is zero by default: every gap in the layout is an explicit spacer.
@@ -2550,17 +2663,6 @@ class GetsuGUI:
                 dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, 0, 0)
                 dpg.add_theme_style(dpg.mvStyleVar_WindowBorderSize, 0)
                 dpg.add_theme_style(dpg.mvStyleVar_WindowRounding, 0)
-
-        with dpg.theme() as self.theme_slider:
-            with dpg.theme_component(dpg.mvSliderFloat):
-                dpg.add_theme_color(dpg.mvThemeCol_FrameBg, COL_FILL_2)
-                dpg.add_theme_color(dpg.mvThemeCol_FrameBgHovered, COL_FILL_3)
-                dpg.add_theme_color(dpg.mvThemeCol_SliderGrab, COL_WHITE)
-                dpg.add_theme_color(dpg.mvThemeCol_SliderGrabActive, COL_WHITE)
-                dpg.add_theme_style(dpg.mvStyleVar_GrabMinSize, self.s(16))
-                dpg.add_theme_style(dpg.mvStyleVar_GrabRounding, self.s(8))
-                dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(2))
-                dpg.add_theme_style(dpg.mvStyleVar_FramePadding, 0, self.s(2))
 
         dpg.bind_theme(global_theme)
 
@@ -2717,6 +2819,8 @@ class GetsuGUI:
 
         self._card_sig = None
         self._poll_setup_card()
+        if headless:
+            return
 
         # Start tray icon & window hook
         self._start_tray_icon()

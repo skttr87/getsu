@@ -126,6 +126,22 @@ class NoPictographTests(unittest.TestCase):
         self.assertEqual(hits, [])
 
 
+class FeatureFlagTests(unittest.TestCase):
+    """Controls whose backend is not built yet stay hidden in phase B."""
+
+    def test_modes_hidden_by_default(self):
+        self.assertIs(gui.FEATURE_MODES, False)
+
+    def test_earbud_hint_hidden_by_default(self):
+        self.assertIs(gui.FEATURE_EARBUD_HINT, False)
+
+    def test_learn_my_room_hidden_by_default(self):
+        self.assertIs(gui.FEATURE_LEARN_ROOM, False)
+
+    def test_mode_names_match_the_mockup(self):
+        self.assertEqual(gui.MODE_NAMES, ("Game", "Meeting", "Session", "Music"))
+
+
 class PaletteTests(unittest.TestCase):
     """Colours follow the approved mockup: one blue accent, red for errors, orange for warnings, no green."""
 

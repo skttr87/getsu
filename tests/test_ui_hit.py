@@ -1,4 +1,4 @@
-"""Geometric hit testing for the main window clicks (src/ui_hit.py)."""
+﻿"""Geometric hit testing for the main window clicks (src/ui_hit.py)."""
 import unittest
 
 from src import ui_hit
@@ -78,5 +78,51 @@ class ControlRectangleTests(unittest.TestCase):
         with patcher:
             self.assertIsNone(obj._item_rect("mic_row_0"))
 
+class SliderGeometryTests(unittest.TestCase):
+    """Knob position and value mapping of the Sensitivity track (pad keeps the knob and its halo inside)."""
+
+    def test_knob_at_range_ends_and_middle(self):
+        self.assertEqual(ui_hit.slider_knob_x(0.40, 0, 146, 15, 0.40, 0.90), 15)
+        self.assertEqual(ui_hit.slider_knob_x(0.90, 0, 146, 15, 0.40, 0.90), 131)
+        self.assertAlmostEqual(ui_hit.slider_knob_x(0.65, 0, 146, 15, 0.40, 0.90), 73)
+
+    def test_default_value_sits_at_sixty_percent_of_the_track(self):
+        x = ui_hit.slider_knob_x(0.70, 0, 146, 15, 0.40, 0.90)
+        self.assertAlmostEqual((x - 15) / (131 - 15), 0.60, places=6)
+
+    def test_out_of_range_value_is_clamped_for_drawing(self):
+        self.assertEqual(ui_hit.slider_knob_x(0.10, 0, 146, 15, 0.40, 0.90), 15)
+        self.assertEqual(ui_hit.slider_knob_x(2.0, 0, 146, 15, 0.40, 0.90), 131)
+
+    def test_click_maps_back_to_the_value_rounded_to_hundredths(self):
+        self.assertEqual(ui_hit.slider_value_at(15, 0, 146, 15, 0.40, 0.90), 0.40)
+        self.assertEqual(ui_hit.slider_value_at(131, 0, 146, 15, 0.40, 0.90), 0.90)
+        self.assertEqual(ui_hit.slider_value_at(73, 0, 146, 15, 0.40, 0.90), 0.65)
+        self.assertEqual(ui_hit.slider_value_at(-500, 0, 146, 15, 0.40, 0.90), 0.40)
+        self.assertEqual(ui_hit.slider_value_at(900, 0, 146, 15, 0.40, 0.90), 0.90)
+
+    def test_value_round_trips_through_the_knob(self):
+        for v in (0.40, 0.47, 0.55, 0.70, 0.83, 0.90):
+            x = ui_hit.slider_knob_x(v, 10, 146, 15, 0.40, 0.90)
+            self.assertEqual(ui_hit.slider_value_at(x, 10, 146, 15, 0.40, 0.90), v)
+
+
+class SegmentIndexTests(unittest.TestCase):
+
+    RECT = ((0, 0), (146, 30))
+
+    def test_equal_segments_inside_the_inset(self):
+        # inset 2: segments cover x in [2, 144), each about 35.5 px wide
+        self.assertEqual(ui_hit.segment_index((10, 15), self.RECT, 4, 2), 0)
+        self.assertEqual(ui_hit.segment_index((50, 15), self.RECT, 4, 2), 1)
+        self.assertEqual(ui_hit.segment_index((90, 15), self.RECT, 4, 2), 2)
+        self.assertEqual(ui_hit.segment_index((140, 15), self.RECT, 4, 2), 3)
+
+    def test_outside_the_rectangle_is_no_segment(self):
+        self.assertIsNone(ui_hit.segment_index((150, 15), self.RECT, 4, 2))
+        self.assertIsNone(ui_hit.segment_index((10, 15), None, 4, 2))
+        self.assertIsNone(ui_hit.segment_index((10, 15), self.RECT, 0, 2))
+
 if __name__ == "__main__":
     unittest.main()
+

@@ -41,3 +41,39 @@ def click_is_outside(point: Sequence[float], sheet_rect: Optional[Rect]) -> bool
     if sheet_rect is None:
         return False
     return not point_in_rect(point, sheet_rect)
+
+
+def _clamp(v: float, lo: float, hi: float) -> float:
+    return lo if v < lo else hi if v > hi else v
+
+
+def slider_knob_x(value: float, x0: float, width: float, pad: float, lo: float, hi: float) -> float:
+    """
+    X of the knob centre for a value. The track runs from x0 + pad to x0 + width - pad, so the knob (and its halo)
+    never leaves the control. The value is clamped to [lo, hi] for drawing.
+    """
+    t = (_clamp(value, lo, hi) - lo) / (hi - lo)
+    return x0 + pad + t * (width - 2.0 * pad)
+
+
+def slider_value_at(x: float, x0: float, width: float, pad: float, lo: float, hi: float, step: float = 0.01) -> float:
+    """Value under x (inverse of slider_knob_x), clamped to [lo, hi] and rounded to step."""
+    span = width - 2.0 * pad
+    t = _clamp((x - x0 - pad) / span, 0.0, 1.0) if span > 0 else 0.0
+    value = lo + t * (hi - lo)
+    return round(round(value / step) * step, 2)
+
+
+def segment_index(point: Sequence[float], rect: Optional[Rect], count: int, inset: float = 0.0) -> Optional[int]:
+    """
+    Index of the equal segment under point in a control of count segments spanning rect (inset from both ends),
+    or None when the point is outside the rectangle.
+    """
+    if rect is None or count <= 0 or not point_in_rect(point, rect):
+        return None
+    (x0, _), (x1, _) = rect
+    left = x0 + inset
+    seg_w = (x1 - inset - left) / count
+    if seg_w <= 0:
+        return None
+    return int(_clamp((point[0] - left) // seg_w, 0, count - 1))

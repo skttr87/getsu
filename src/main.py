@@ -14,7 +14,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 # Fast Single-Instance Micro-Checker (exits in <5ms if Getsu is already running)
 if not any(arg in sys.argv for arg in ("--check-devices", "--install-driver", "-h", "--help", "--cli", "--clean", "--batch")):
     from src.single_instance import activate_existing_instance
-    if activate_existing_instance():
+    # A --minimized launch (Start with Windows) still exits when Getsu is running, but must not raise its window.
+    if activate_existing_instance(restore="--minimized" not in sys.argv):
         sys.exit(0)
 
 # Direct delegate to Headless CLI Cleaner if invoked with --clean or --batch
@@ -40,6 +41,7 @@ def parse_args():
     parser.add_argument("--tray", action="store_true", help="Run in background system tray mode")
     parser.add_argument("--check-devices", action="store_true", help="Print audio device diagnostics and exit")
     parser.add_argument("--install-driver", action="store_true", help="Install bundled VB-Audio Virtual Cable driver")
+    parser.add_argument("--minimized", action="store_true", help="Start hidden in the system tray (used by Start with Windows)")
     return parser.parse_args()
 
 
@@ -132,7 +134,7 @@ def main():
         run_tray_mode()
     else:
         # Default: Launch the sleek GUI with Start/Stop & Input Selector
-        launch_gui()
+        launch_gui(minimized=args.minimized)
 
 
 if __name__ == "__main__":

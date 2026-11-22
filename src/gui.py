@@ -46,6 +46,7 @@ from src.device_labels import split_name, subtitle
 from src import ui_icons as icons
 from src import ui_hit
 from src import win_theme
+from src import autostart
 from src.rnnoise import RNNoise, FRAME_SIZE, SAMPLE_RATE
 from src.dsp import (
     HighPassFilter,
@@ -334,7 +335,7 @@ def create_tray_icon_image(is_active: bool = False) -> Image.Image:
 
 
 class GetsuGUI:
-    def __init__(self):
+    def __init__(self, minimized: bool = False):
         # Explicit AppUserModelID ensures Windows Taskbar pins the custom icon instead of python.exe
         try:
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("getsu.ai.noisecancellation.1")
@@ -348,6 +349,10 @@ class GetsuGUI:
         print(f"[GUI] Active Monitor DPI: {self.dpi} (DPI Scale: {self.dpi_scale:.2f}x)")
 
         self.config = load_config()
+        # --minimized (Start with Windows): no window at launch; resume noise cancellation if it was on at exit.
+        self._start_minimized = bool(minimized)
+        self._resume_pending = autostart.should_resume_filter(
+            self._start_minimized, bool(self.config.get("was_running_on_exit", False)))
         self.router = SmartMicRouter(self.config)
         self.mic_boost_db = int(self.config.get("mic_boost_db", 0))
         self.engine: Optional[AudioEngine] = None
@@ -431,6 +436,8 @@ class GetsuGUI:
 
     def _teardown_engine_and_timers(self):
         """Unified teardown: halts background workers, cancels timers, and restores audio routing."""
+        self._persist_was_running(
+            (self.is_running and self._busy != "stopping") or self._resume_pending)
         self._app_running = False
         self._cancel_voice_test = True
         for timer in (self._device_change_timer, self._vad_save_timer):
@@ -450,6 +457,14 @@ class GetsuGUI:
                 self.router.restore_original()
             except Exception:
                 pass
+
+    def _persist_was_running(self, running: bool):
+        """Stores whether noise cancellation is on, for the next Start with Windows launch. Never raises."""
+        try:
+            self.config["was_running_on_exit"] = bool(running)
+            save_config(self.config)
+        except Exception as e:
+            print(f"[WARN] Could not store the running state: {e}")
 
     def _compute_current_gain(self) -> float:
         dev_name = ""
@@ -930,6 +945,7 @@ class GetsuGUI:
                     self.config["input_device_name"] = self.selected_input_name
                     self.config["output_device_id"] = self.selected_output_idx
                     self.config["output_device_name"] = self.selected_output_name
+                    self.config["was_running_on_exit"] = True
                     save_config(self.config)
                     self._update_tray_icon()
                 except Exception as e:
@@ -985,6 +1001,7 @@ class GetsuGUI:
                     elif self.router and self.router.is_swapped:
                         self.router.restore_original()
                     self.is_running = False
+                    self._persist_was_running(False)
                     self._update_tray_icon()
                 except Exception as e:
                     print(f"[ERROR] Failed to stop stream cleanly: {e}")
@@ -1282,8 +1299,9 @@ class GetsuGUI:
             print("[WARN] Getsu window handle not found for subclassing.")
             return
 
-        # Force foreground activation on initial launch
-        force_foreground_window(self._hwnd)
+        # Force foreground activation on initial launch (not for a hidden --minimized launch)
+        if not self._start_minimized:
+            force_foreground_window(self._hwnd)
         apply_dwm_title_bar(self._hwnd)
 
         # Disable Windows Maximize button and resizing frame for compact widget
@@ -1375,6 +1393,42 @@ class GetsuGUI:
             self._tick_ui()
             time.sleep(frame_sleep_s(self._is_window_visible(), time.perf_counter() - started))
 
+    def _toggle_autostart(self, icon=None, menu_item=None):
+        """Tray action for "Start with Windows": flips the Run entry. Never raises."""
+        try:
+            if autostart.is_enabled():
+                autostart.disable()
+            else:
+                autostart.enable()
+        except OSError as e:
+            print(f"[AUTOSTART] Could not change the Windows startup entry: {e}")
+
+    def _resume_filter_worker(self):
+        """After a Start with Windows launch, starts noise cancellation once the devices are ready (up to 20 s)."""
+        try:
+            started = autostart.retry_until(self._try_resume, autostart.RESUME_WAIT_S, autostart.RESUME_POLL_S)
+            if not started and self._app_running:
+                print("[AUTOSTART] Noise cancellation was not resumed: the microphone or cable was not ready in time.")
+        except Exception as e:
+            print(f"[AUTOSTART] Resume failed: {e}")
+        finally:
+            self._resume_pending = False
+
+    def _try_resume(self) -> bool:
+        """One attempt of the resume: True when done (running, or Getsu is closing), False to retry."""
+        if not self._app_running or self.is_running:
+            return True
+        if self._busy is not None or self._is_testing_voice:
+            return False
+        self._refresh_devices(reinit_portaudio=True)
+        if not autostart.devices_ready(self.selected_input_idx, self.selected_output_idx, self.is_vbcable_installed):
+            return False
+        # Same start path as the button: 3 s state lock and the router swap.
+        self.toggle_stream()
+        while self._busy is not None and self._app_running:
+            time.sleep(0.1)
+        return self.is_running
+
     def _start_tray_icon(self):
         """Starts system tray icon in background thread."""
         def on_open(icon, item):
@@ -1389,9 +1443,15 @@ class GetsuGUI:
             icon.stop()
             dpg.stop_dearpygui()
 
+        autostart_item = item(
+            "Start with Windows", self._toggle_autostart,
+            checked=lambda i: autostart.is_enabled(),
+            enabled=autostart.is_supported())
+
         menu = Menu(
             item("Open Getsu", on_open, default=True),
             item("Toggle Start / Stop", on_toggle),
+            autostart_item,
             pystray.Menu.SEPARATOR,
             item("Exit", on_exit),
         )
@@ -2687,6 +2747,11 @@ class GetsuGUI:
             dpg.add_mouse_click_handler(button=dpg.mvMouseButton_Left, callback=self._on_mouse_click)
         dpg.setup_dearpygui()
         dpg.show_viewport()
+        if self._start_minimized:
+            # Hide before the first frames are drawn; the window is restored later by the tray or a second launch.
+            hidden_hwnd = user32.FindWindowW(None, "Getsu - AI Noise Cancellation")
+            if hidden_hwnd:
+                user32.ShowWindow(hidden_hwnd, SW_HIDE)
         dpg.set_primary_window("main_window", True)
 
         # Render frames to settle layout, then fit the viewport height to the content.
@@ -2719,6 +2784,8 @@ class GetsuGUI:
         # Start tray icon & window hook
         self._start_tray_icon()
         threading.Thread(target=self._setup_window_hook, daemon=True).start()
+        if self._resume_pending:
+            threading.Thread(target=self._resume_filter_worker, daemon=True).start()
 
         # Handle terminal signals cleanly (Ctrl+C / SIGINT / SIGTERM)
         def _sig_handler(sig, frame):
@@ -2765,8 +2832,8 @@ class GetsuGUI:
 
 
 
-def launch_gui():
-    app = GetsuGUI()
+def launch_gui(minimized: bool = False):
+    app = GetsuGUI(minimized=minimized)
     app.build_ui()
 
 

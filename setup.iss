@@ -60,6 +60,9 @@ Name: "addtopath"; Description: "Add Getsu CLI to system PATH (enables running '
 Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; \
     ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; \
     Tasks: addtopath; Check: NeedsAddPath(ExpandConstant('{app}'))
+; Start with Windows entry: removed on uninstall. The uninstaller runs elevated, so HKCU is the elevated account's hive.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "Getsu"; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"; ValueType: none; ValueName: "Getsu"; Flags: uninsdeletevalue
 
 [Files]
 ; Compiled application files and bundled internal dependencies (preserve existing user config.json on upgrade)

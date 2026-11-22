@@ -37,6 +37,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "stereo_downmix": "auto",       # "auto": use the live channel for dead or inverted stereo mics; "average": (L+R)/2
     "vad_floor_tilt_hz": 0.0,       # 0 = off. Above 0: closed-gate path is low-passed at this frequency (more HF cut)
     "rnnoise_dry_mix_db": None,     # null = off. A number (e.g. -24) mixes the delayed pre-RNNoise signal back while the gate is open
+    "was_running_on_exit": False,   # True when noise cancellation was on at the last exit; a Start with Windows launch resumes it
 }
 
 import sys
@@ -134,6 +135,9 @@ def load_config() -> Dict[str, Any]:
             migrated = True
         if "stereo_downmix" not in data:
             merged["stereo_downmix"] = "auto"
+            migrated = True
+        if "was_running_on_exit" not in data:
+            merged["was_running_on_exit"] = False
             migrated = True
 
         # v1.2.6 migration (handles stale close thresholds, hangovers, and version bump)

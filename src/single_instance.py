@@ -17,11 +17,12 @@ REGISTERED_MSG_NAME = "GETSU_RESTORE_WINDOW_MSG"
 _app_mutex = None  # Global reference to prevent GC from closing handle
 
 
-def activate_existing_instance(mutex_name: str = MUTEX_NAME) -> bool:
+def activate_existing_instance(mutex_name: str = MUTEX_NAME, restore: bool = True) -> bool:
     """
     Checks if another instance of Getsu is already running.
     - If yes: Finds the existing window (even if minimized or hidden in tray),
       restores it, brings it to foreground, and returns True.
+      With restore=False (a --minimized launch) the window is left as it is; the launch still exits.
     - If no: Holds the mutex handle and returns False.
     """
     global _app_mutex
@@ -49,6 +50,9 @@ def activate_existing_instance(mutex_name: str = MUTEX_NAME) -> bool:
             retries -= 1
 
         if hwnd:
+            if not restore:
+                return True
+
             # 1. Post custom registered message so primary instance wndproc triggers restore
             try:
                 msg_id = user32.RegisterWindowMessageW(REGISTERED_MSG_NAME)

@@ -95,6 +95,40 @@ def get_config_path() -> str:
 CONFIG_FILE = get_config_path()
 
 
+MIC_BOOST_STEPS = (0, 5, 10, 15)
+# vad_threshold is a speech probability, so only 0..1 is meaningful. The Settings slider shows 0.40-0.90 and draws a
+# stored value outside that range at the nearest end without changing it.
+VAD_THRESHOLD_RANGE = (0.0, 1.0)
+
+
+def sanitize_config(cfg: Dict[str, Any]) -> bool:
+    """
+    Replaces values the app cannot use with safe ones, in place. Returns True when something changed.
+    - mic_boost_db must be one of MIC_BOOST_STEPS; anything else (null, text, 7) becomes 0.
+    - vad_threshold must be a number between 0 and 1 (clamped); a non-number becomes 0.70.
+    """
+    changed = False
+    boost = cfg.get("mic_boost_db")
+    if isinstance(boost, bool) or not isinstance(boost, (int, float)) or boost not in MIC_BOOST_STEPS:
+        cfg["mic_boost_db"] = 0
+        changed = True
+    elif not isinstance(boost, int):
+        cfg["mic_boost_db"] = int(boost)
+        changed = True
+
+    vad = cfg.get("vad_threshold")
+    if isinstance(vad, bool) or not isinstance(vad, (int, float)):
+        cfg["vad_threshold"] = 0.70
+        changed = True
+    else:
+        lo, hi = VAD_THRESHOLD_RANGE
+        clamped = min(hi, max(lo, float(vad)))
+        if clamped != vad:
+            cfg["vad_threshold"] = clamped
+            changed = True
+    return changed
+
+
 def load_config() -> Dict[str, Any]:
     """Loads configuration from config.json or returns defaults."""
     if not os.path.exists(CONFIG_FILE):
@@ -138,6 +172,11 @@ def load_config() -> Dict[str, Any]:
             migrated = True
         if "was_running_on_exit" not in data:
             merged["was_running_on_exit"] = False
+            migrated = True
+
+        # Repair values the app cannot use instead of failing at start-up (older builds could save
+        # mic_boost_db as null from the boost buttons).
+        if sanitize_config(merged):
             migrated = True
 
         # v1.2.6 migration (handles stale close thresholds, hangovers, and version bump)

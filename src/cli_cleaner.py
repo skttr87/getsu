@@ -29,6 +29,7 @@ from src.dsp import (
     SpeechLeveler,
     TransientSuppressor,
     process_mono_frame,
+    PRECLIP_KNEE_DEFAULT,
 )
 
 
@@ -186,7 +187,7 @@ def clean_file(
                 if hpf_list[0]:
                     mono_frame = hpf_list[0].process(mono_frame)
                 _, rms = calculate_levels(mono_frame)
-                mono_frame = soft_preclip(mono_frame, knee=0.75)
+                mono_frame = soft_preclip(mono_frame, knee=PRECLIP_KNEE_DEFAULT)
                 np.clip(mono_frame, -1.0, 1.0, out=mono_frame)
                 sp = 0.0
                 if rn_inst:
@@ -213,8 +214,8 @@ def clean_file(
             # HPF & Preclip
             ch0 = hpf_list[0].process(ch0)
             ch1 = hpf_list[1].process(ch1)
-            ch0 = soft_preclip(ch0, knee=0.75)
-            ch1 = soft_preclip(ch1, knee=0.75)
+            ch0 = soft_preclip(ch0, knee=PRECLIP_KNEE_DEFAULT)
+            ch1 = soft_preclip(ch1, knee=PRECLIP_KNEE_DEFAULT)
 
             _, rms0 = calculate_levels(ch0)
             _, rms1 = calculate_levels(ch1)

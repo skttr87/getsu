@@ -306,7 +306,7 @@ class TestInPlaceHelpers(unittest.TestCase):
 
             x = fr.copy()
             _, rms_b = calculate_levels(x)
-            x = soft_preclip(x, knee=0.75)
+            x = soft_preclip(x, knee=0.95)
             x = np.clip(x, -1.0, 1.0)
             rn_out, sp_b = rn.process_frame(x * 32767.0)
             x = rn_out / 32767.0

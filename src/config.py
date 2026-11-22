@@ -33,6 +33,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "is_swapped": False,            # Tracks if Windows default mic is currently CABLE Output
     "original_mic_id": None,        # Stores Windows CoreAudio endpoint GUID string of physical mic
     "auto_route": True,             # Settings toggle: Auto-Route to Apps (switch default mic when active)
+    "preclip_knee": 0.95,           # Soft pre-clip knee before RNNoise (1.0 = stage off)
 }
 
 import sys
@@ -116,6 +117,10 @@ def load_config() -> Dict[str, Any]:
             migrated = True
         if "music_mode" not in data:
             merged["music_mode"] = False
+            migrated = True
+        # Configs saved without the pre-clip knee key get the current default (0.95).
+        if "preclip_knee" not in data:
+            merged["preclip_knee"] = 0.95
             migrated = True
 
         # v1.2.6 migration (handles stale close thresholds, hangovers, and version bump)

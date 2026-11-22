@@ -16,6 +16,7 @@ from src.dsp import (
     SpeechLeveler,
     TransientSuppressor,
     process_mono_frame,
+    PRECLIP_KNEE_DEFAULT,
 )
 from src.host_api_resolver import resolve_pair, DeviceResolutionError, ResolvedPair
 from src.audio_errors import explain_start_error, ExplainedError
@@ -47,9 +48,11 @@ class AudioEngine:
         router: Optional[Any] = None,
         auto_level: bool = False,
         mic_boost_db: float = 0.0,
+        preclip_knee: float = PRECLIP_KNEE_DEFAULT,
     ):
         self.input_device = input_device
         self.output_device = output_device
+        self.preclip_knee = float(preclip_knee)
         self.denoise_enabled = denoise_enabled
         self.high_pass_enabled = high_pass_enabled
         self.vad_threshold = vad_threshold
@@ -179,6 +182,7 @@ class AudioEngine:
                 leveler=self.leveler,
                 transient_suppressor=self.transient_suppressor,
                 mic_boost_db=self.mic_boost_db,
+                preclip_knee=self.preclip_knee,
             )
 
             # 3. Post-gate output metrics and clip protection
@@ -505,4 +509,5 @@ def create_engine_from_config(
         router=router,
         auto_level=config.get("auto_level", False),
         mic_boost_db=float(boost_db),
+        preclip_knee=float(config.get("preclip_knee", PRECLIP_KNEE_DEFAULT)),
     )

@@ -624,12 +624,17 @@ def calculate_levels(frame: np.ndarray):
     return peak_db, rms_db
 
 
-def soft_preclip(frame: np.ndarray, knee: float = 0.75) -> np.ndarray:
+PRECLIP_KNEE_DEFAULT = 0.95   # a lower knee (0.75) saturates speech peaks before RNNoise
+
+
+def soft_preclip(frame: np.ndarray, knee: float = PRECLIP_KNEE_DEFAULT) -> np.ndarray:
     """
     Smooths hard ADC rail flat-topping to protect RNNoise Bark-band features.
-    Uses hyperbolic tangent saturation above knee (default 0.75), eliminating
-    square-wave splatter from unshielded plosives and breath blasts.
+    Uses hyperbolic tangent saturation above the knee, so samples approach 1.0 smoothly.
+    A knee of 1.0 or more disables the stage (the caller's final clip still applies).
     """
+    if knee >= 1.0:
+        return frame
     if frame.size == 0 or (frame.max() <= knee and frame.min() >= -knee):
         return frame                      # common case: nothing above the knee, no temporaries
     mask = np.abs(frame) > knee
@@ -891,6 +896,7 @@ def process_mono_frame(
     leveler: Optional[SpeechLeveler] = None,
     transient_suppressor: Optional[TransientSuppressor] = None,
     mic_boost_db: float = 0.0,
+    preclip_knee: float = PRECLIP_KNEE_DEFAULT,
 ) -> Tuple[np.ndarray, float, float, float]:
     """
     Authoritative single-frame (10ms) DSP processing pipeline shared by both the live stream
@@ -915,7 +921,7 @@ def process_mono_frame(
 
     # 2. Dual-Stage Metering & Headroom Pre-clip
     input_peak_db, input_rms_db = calculate_levels(frame_mono)
-    frame_mono = soft_preclip(frame_mono, knee=0.75)
+    frame_mono = soft_preclip(frame_mono, knee=preclip_knee)
     np.clip(frame_mono, -1.0, 1.0, out=frame_mono)
 
     # 3. RNNoise Neural Core (scaled into a per-thread scratch buffer, result written back in place)

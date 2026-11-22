@@ -6,6 +6,9 @@ from unittest.mock import patch
 
 import numpy as np
 
+import sys as _sys
+_sys.path.insert(0, os.path.dirname(__file__))
+import _isolation  # noqa: E402,F401  (keeps config writes off the tracked config.json)
 from src.config import DEFAULT_CONFIG, load_config
 import src.config as config_module
 from src.dsp import PRECLIP_KNEE_DEFAULT, soft_preclip, process_mono_frame, AdaptiveNoiseGate, InputDownmixer

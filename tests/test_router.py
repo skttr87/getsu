@@ -7,6 +7,9 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from src.router import SmartMicRouter
+import sys as _sys
+_sys.path.insert(0, os.path.dirname(__file__))
+import _isolation  # noqa: E402,F401  (keeps config writes off the tracked config.json)
 from src.config import save_config, load_config
 from src.devices import get_physical_output_device
 from src.stream import AudioEngine

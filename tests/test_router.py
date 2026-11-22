@@ -238,7 +238,7 @@ class TestAutoRouteToggleLock(unittest.TestCase):
             GetsuGUI.on_auto_route_toggled(mock_gui, "chk_auto_route", False)
             mock_set_val.assert_called_with("chk_auto_route", True)
             mock_gui.set_status_pill.assert_called_once_with(
-                "▲ Stop noise cancellation first to change routing preference.", COL_WARNING
+                "Stop noise cancellation first to change routing preference.", COL_WARNING
             )
             self.assertTrue(mock_gui.config["auto_route"])
 

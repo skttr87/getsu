@@ -1,4 +1,6 @@
+import ast
 import math
+import os
 import struct
 import sys
 import unittest
@@ -98,6 +100,30 @@ class AppIconFileTests(unittest.TestCase):
             gui.ensure_app_icon_ico()
         image_module.open.assert_not_called()
         image_module.open.return_value.save.assert_not_called()
+
+
+GUI_SOURCE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src", "gui.py")
+
+# Emoji, pictographs, arrows, geometric shapes, misc symbols, and the bullet character.
+FORBIDDEN_CODEPOINT_RANGES = (
+    (0x2190, 0x2BFF),
+    (0x1F000, 0x1FAFF),
+    (0x2022, 0x2022),
+)
+
+
+class NoPictographTests(unittest.TestCase):
+    def test_gui_string_literals_have_no_pictographic_symbols(self):
+        with open(GUI_SOURCE, encoding="utf-8") as fh:
+            tree = ast.parse(fh.read())
+        hits = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                for ch in node.value:
+                    cp = ord(ch)
+                    if any(lo <= cp <= hi for lo, hi in FORBIDDEN_CODEPOINT_RANGES):
+                        hits.append(f"line {node.lineno}: U+{cp:04X} in {node.value[:40]!r}")
+        self.assertEqual(hits, [])
 
 
 class PaletteTests(unittest.TestCase):

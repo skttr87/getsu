@@ -1,7 +1,7 @@
 """
 Getsu Desktop GUI Application.
 Features:
-- Single toggle button: "START" (Green) -> "STOP" (Red)
+- Single toggle button: "START" -> "STOP", both in the accent blue
 - Minimize and Close buttons both minimize to the Windows notification area (System Tray)
 - Human-friendly, clean UI with zero broken symbols or technical jargon
 - No vertical scrollbars
@@ -411,7 +411,7 @@ class GetsuGUI:
                         print("[WATCHDOG] Audio stream stalled while microphone swapped. Emergency restoring default capture...")
                         try:
                             self.router.restore_original()
-                            self.set_status_pill("▲ Audio stream stalled • Restored physical mic", COL_WARNING)
+                            self.set_status_pill("Audio stream stalled. Restored physical mic", COL_WARNING)
                         except Exception as e:
                             print(f"[WATCHDOG] Emergency restore error: {e}")
                     with self._device_change_lock:
@@ -587,7 +587,7 @@ class GetsuGUI:
                                 dpg.configure_item("status_badge_text", color=COL_ACCENT)
                                 dpg.configure_item("btn_toggle", label="STOP", enabled=True)
                                 dpg.bind_item_theme("btn_toggle", self.theme_stop_btn)
-                            self.set_status_pill("● AI Filter Active • Clean Voice Routed", COL_ACCENT)
+                            self.set_status_pill("AI Filter Active. Clean Voice Routed", COL_ACCENT)
                             self._update_tray_icon()
                             self._set_voice_test_button_state(False)
                         except Exception as e:
@@ -605,7 +605,7 @@ class GetsuGUI:
                                 dpg.configure_item("btn_toggle", label="START", enabled=True)
                                 dpg.bind_item_theme("btn_toggle", self.theme_start_btn)
                             self._set_voice_test_button_state(True)
-                            self.set_status_pill(f"▲ {self._format_audio_error(e)}", COL_ERROR)
+                            self.set_status_pill(f"{self._format_audio_error(e)}", COL_ERROR)
                         finally:
                             self._release_state_lock()
                     else:
@@ -631,7 +631,7 @@ class GetsuGUI:
             if dpg.does_item_exist("input_combo"):
                 dpg.set_value("input_combo", current_label)
             self._update_selection_hint(current_label)
-            self.set_status_pill("▲ Stop noise cancellation first to switch microphone.", COL_WARNING)
+            self.set_status_pill("Stop noise cancellation first to switch microphone.", COL_WARNING)
             return
 
         try:
@@ -655,7 +655,7 @@ class GetsuGUI:
                 self.config["output_device_id"] = self.selected_output_idx
                 save_config(self.config)
                 self._update_selection_hint(app_data)
-                self.set_status_pill(f"● Microphone selected: {clean_device_label(app_data)}", COL_ACCENT)
+                self.set_status_pill(f"Microphone selected: {clean_device_label(app_data)}", COL_ACCENT)
         finally:
             self._release_state_lock()
 
@@ -667,7 +667,7 @@ class GetsuGUI:
         available = list(self.device_map.keys())
         hint = selection_hint(label, available)
         if hint:
-            dpg.set_value("input_selection_hint", f"▲ {hint}")
+            dpg.set_value("input_selection_hint", hint)
             dpg.show_item("input_selection_hint")
         else:
             dpg.hide_item("input_selection_hint")
@@ -676,10 +676,10 @@ class GetsuGUI:
     def _get_idle_status(self) -> str:
         """Returns the single-line idle status string based on driver and auto_route configuration."""
         if not self.is_vbcable_installed:
-            return "▲ Virtual Cable required • Please install driver"
+            return "Virtual Cable required. Please install driver"
         if self.config.get("auto_route", True):
-            return "● Ready • Default Mic Routing ON"
-        return "● Ready • Manual Routing Mode"
+            return "Ready. Default Mic Routing ON"
+        return "Ready. Manual Routing Mode"
 
     def _get_idle_color(self) -> Sequence[int]:
         """Returns the color for the idle status pill."""
@@ -723,7 +723,7 @@ class GetsuGUI:
             current_setting = self.config.get("auto_route", True)
             if dpg.does_item_exist("chk_auto_route"):
                 dpg.set_value("chk_auto_route", current_setting)
-            self.set_status_pill("▲ Stop noise cancellation first to change routing preference.", COL_WARNING)
+            self.set_status_pill("Stop noise cancellation first to change routing preference.", COL_WARNING)
             return
 
         try:
@@ -776,7 +776,7 @@ class GetsuGUI:
             return
 
         if self._is_testing_voice:
-            self.set_status_pill("▲ Microphone voice test in progress. Please wait.", COL_WARNING)
+            self.set_status_pill("Microphone voice test in progress. Please wait.", COL_WARNING)
             return
 
         if not self._state_lock.acquire(blocking=False):
@@ -786,11 +786,11 @@ class GetsuGUI:
         if not self.is_running:
             # START FLOW
             if self.selected_input_idx is None or self.selected_input_idx < 0:
-                self.set_status_pill("▲ No microphone detected. Please connect a mic.", COL_ERROR)
+                self.set_status_pill("No microphone detected. Please connect a mic.", COL_ERROR)
                 self._release_state_lock()
                 return
             if self.selected_output_idx is None or self.selected_output_idx < 0:
-                self.set_status_pill("▲ No audio output device detected.", COL_ERROR)
+                self.set_status_pill("No audio output device detected.", COL_ERROR)
                 self._release_state_lock()
                 return
 
@@ -799,17 +799,17 @@ class GetsuGUI:
                 self._refresh_devices(reinit_portaudio=True)
                 if not self.is_vbcable_installed:
                     self.show_install_modal()
-                    self.set_status_pill("▲ Virtual Cable required to route clean voice.", COL_ERROR)
+                    self.set_status_pill("Virtual Cable required to route clean voice.", COL_ERROR)
                     self._release_state_lock()
                     return
 
-            # Lock UI immediately into Starting state (Crimson Red button)
+            # Lock UI immediately into Starting state (accent button, label shows the state)
             dpg.configure_item("btn_toggle", label="Starting...", enabled=False)
             dpg.bind_item_theme("btn_toggle", self.theme_stop_btn)
             dpg.set_value("status_badge_text", "[ STARTING... ]")
             dpg.configure_item("status_badge_text", color=COL_TEXT_2)
             self._set_voice_test_button_state(False)
-            self.set_status_pill("◌ Starting AI Filter • Routing to CABLE Output...", COL_WARNING)
+            self.set_status_pill("Starting AI Filter. Routing to CABLE Output...", COL_TEXT_2)
 
             def _start_worker():
                 start_time = time.monotonic()
@@ -858,7 +858,7 @@ class GetsuGUI:
                             pass
                         self.engine = None
                     self.is_running = False
-                    self.set_status_pill(f"▲ {self._format_audio_error(e)}", COL_ERROR)
+                    self.set_status_pill(f"{self._format_audio_error(e)}", COL_ERROR)
                 finally:
                     # Enforce symmetric 3-second state lock
                     elapsed = time.monotonic() - start_time
@@ -873,14 +873,14 @@ class GetsuGUI:
                         dpg.bind_item_theme("btn_toggle", self.theme_stop_btn)
                         pair = getattr(self.engine, 'resolved_pair', None)
                         if pair and pair.ambiguous:
-                            self.set_status_pill("● Active • Default mic selected (Confirm in dropdown)", COL_WARNING)
+                            self.set_status_pill("Active. Default mic selected (Confirm in dropdown)", COL_WARNING)
                         elif self.config.get("auto_route", True):
                             if getattr(self.engine, 'router_swap_success', True):
-                                self.set_status_pill("● AI Filter Active • Clean Voice Routed", COL_ACCENT)
+                                self.set_status_pill("AI Filter Active. Clean Voice Routed", COL_ACCENT)
                             else:
-                                self.set_status_pill("▲ AI Filter Active • Auto-Route Failed (Select CABLE in Apps)", COL_WARNING)
+                                self.set_status_pill("AI Filter Active. Auto-Route Failed (Select CABLE in Apps)", COL_WARNING)
                         else:
-                            self.set_status_pill("● AI Filter Active • Manual Output Mode", COL_ACCENT)
+                            self.set_status_pill("AI Filter Active. Manual Output Mode", COL_ACCENT)
                         self._set_voice_test_button_state(False)
                     else:
                         dpg.set_value("status_badge_text", "[ STOPPED ]")
@@ -899,7 +899,7 @@ class GetsuGUI:
             dpg.configure_item("btn_toggle", label="Stopping...", enabled=False)
             dpg.set_value("status_badge_text", "[ STOPPING... ]")
             dpg.configure_item("status_badge_text", color=COL_TEXT_2)
-            self.set_status_pill("◌ Restoring physical microphone...", COL_WARNING)
+            self.set_status_pill("Restoring physical microphone...", COL_TEXT_2)
 
             def _stop_worker():
                 start_time = time.monotonic()
@@ -933,10 +933,10 @@ class GetsuGUI:
     def start_voice_test(self, sender=None, app_data=None):
         """Starts the 11-second in-memory voice preview test."""
         if not self.is_vbcable_installed:
-            self.set_status_pill("▲ Virtual Cable required • Please install driver", COL_WARNING)
+            self.set_status_pill("Virtual Cable required. Please install driver", COL_WARNING)
             return
         if self.is_running:
-            self.set_status_pill("▲ Stop noise cancellation first to run voice test.", COL_WARNING)
+            self.set_status_pill("Stop noise cancellation first to run voice test.", COL_WARNING)
             return
         if self._is_testing_voice:
             return
@@ -962,7 +962,7 @@ class GetsuGUI:
         rn = None
         try:
             if self.selected_input_idx is None or self.selected_input_idx < 0:
-                self.set_status_pill("▲ No microphone selected for voice test.", COL_ERROR)
+                self.set_status_pill("No microphone selected for voice test.", COL_ERROR)
                 return
 
             # Resolve safe non-WDM-KS input endpoint for voice preview
@@ -1066,7 +1066,7 @@ class GetsuGUI:
                     # Update countdown UI once every 100 chunks (~1.0s)
                     if chunk_idx % 100 == 0:
                         sec_left = 11 - (chunk_idx // 100)
-                        self.set_status_pill(f"◌ Voice Test: Recording to RAM... ({sec_left}s left)", COL_ACCENT)
+                        self.set_status_pill(f"Voice Test: Recording to RAM... ({sec_left}s left)", COL_ACCENT)
                         dpg.configure_item("btn_voice_test", label=f"Recording... ({sec_left}s)")
 
             if not self._app_running or self._cancel_voice_test or not processed_chunks:
@@ -1111,7 +1111,7 @@ class GetsuGUI:
                 if not self._app_running or self._cancel_voice_test:
                     sd.stop()
                     break
-                self.set_status_pill(f"◌ Voice Test: Playing back clean voice... ({sec}s left)", COL_ACCENT)
+                self.set_status_pill(f"Voice Test: Playing back clean voice... ({sec}s left)", COL_ACCENT)
                 dpg.configure_item("btn_voice_test", label=f"Playing back... ({sec}s)")
                 time.sleep(1.0)
             sd.stop()
@@ -1121,11 +1121,11 @@ class GetsuGUI:
             del playback_data
             del processed_chunks
             print("[VOICE TEST] Phase 3: RAM buffer purged. Zero disk clutter.")
-            self.set_status_pill("● Voice test complete • Clean audio verified", COL_ACCENT)
+            self.set_status_pill("Voice test complete. Clean audio verified", COL_ACCENT)
 
         except Exception as e:
             print(f"[VOICE TEST] Error during voice preview: {e}")
-            self.set_status_pill(f"▲ {self._format_audio_error(e)}", COL_ERROR)
+            self.set_status_pill(f"{self._format_audio_error(e)}", COL_ERROR)
         finally:
             if rn is not None:
                 try:

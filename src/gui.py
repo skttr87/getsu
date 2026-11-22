@@ -43,6 +43,7 @@ from src.stream import AudioEngine, create_engine_from_config
 from src.router import SmartMicRouter, clear_device_bus_type_cache, native_get_device_bus_type_cached
 from src.device_labels import split_name, subtitle, kind_from_bus_type
 from src import ui_icons as icons
+from src import ui_hit
 from src.rnnoise import RNNoise, FRAME_SIZE, SAMPLE_RATE
 from src.dsp import (
     HighPassFilter,
@@ -355,7 +356,8 @@ class GetsuGUI:
         self._busy: Optional[str] = None
         self._notice = None
         self._switches: Dict[str, "_Switch"] = {}
-        self._click_targets: Dict[str, object] = {}
+        self._click_targets: Dict[str, object] = {}     # main window controls: tag -> callback
+        self._panel_targets: Dict[str, Dict[str, object]] = {}  # per panel: rows and switches inside its sheet
         self._open_panel_name: Optional[str] = None
         self._overlay_sig = None
         self._ovl = None                 # viewport drawlist for icons and the voice test progress
@@ -1650,8 +1652,7 @@ class GetsuGUI:
         if not dpg.does_item_exist("mic_list"):
             return
         dpg.delete_item("mic_list", children_only=True)
-        for tag in [t for t in self._click_targets if t.startswith("mic_row_")]:
-            del self._click_targets[tag]
+        self._panel_targets["mics"] = {}
         entries = self._mic_entries()
         current = self._get_selected_input_label()
         row_w = self.s(372)
@@ -1681,7 +1682,7 @@ class GetsuGUI:
                     if entry["label"] == current:
                         dpg.draw_polyline(icons.to_px(icons.CHECK, 0, self.s(18), self.s(16)), color=COL_ACCENT,
                                           thickness=float(self.s(2)), parent=tick_dl)
-            self._click_targets[tag] = (lambda lab=entry["label"]: self._select_mic_from_panel(lab))
+            self._panel_targets["mics"][tag] = (lambda lab=entry["label"]: self._select_mic_from_panel(lab))
             if i < len(entries) - 1:
                 div = f"{tag}_div"
                 with dpg.group(horizontal=True, parent="mic_list"):
@@ -1702,7 +1703,7 @@ class GetsuGUI:
         sw = _Switch(self, name, on, callback)
         sw.build(parent)
         self._switches[name] = sw
-        self._click_targets[sw.tag] = (lambda n=name: self._toggle_switch(n))
+        self._panel_targets.setdefault("settings", {})[sw.tag] = (lambda n=name: self._toggle_switch(n))
 
     def _toggle_switch(self, name: str):
         sw = self._switches.get(name)
@@ -1811,18 +1812,38 @@ class GetsuGUI:
         self._overlay_sig = None
         self._draw_overlays()
 
+    def _item_rect(self, tag: str):
+        """Rectangle (min, max) of a rendered item in viewport coordinates, or None when it has no size or does not exist."""
+        if not dpg.does_item_exist(tag):
+            return None
+        rmin = tuple(dpg.get_item_rect_min(tag))
+        rmax = tuple(dpg.get_item_rect_max(tag))
+        if rmax[0] <= rmin[0] or rmax[1] <= rmin[1]:
+            return None
+        return rmin, rmax
+
     def _on_mouse_click(self, sender=None, app_data=None):
-        """Global left click. A click on the scrim closes the open panel; otherwise the hovered custom control is run."""
+        """
+        Global left click, resolved geometrically (see ui_hit). With a panel open, a click outside its sheet closes
+        it, a click on a row or switch inside the sheet runs that control, and the main window gets no clicks.
+        With no panel open, the topmost main-window control under the pointer runs.
+        """
         if not self._ui_built:
             return
+        point = dpg.get_mouse_pos(local=True)
         if self._open_panel_name:
-            if not dpg.is_item_hovered(f"sheet_{self._open_panel_name}"):
+            name = self._open_panel_name
+            if ui_hit.click_is_outside(point, self._item_rect(f"sheet_{name}")):
                 self._close_panels()
                 return
-        for tag, callback in list(self._click_targets.items()):
-            if dpg.does_item_exist(tag) and dpg.is_item_hovered(tag):
-                callback()
-                return
+            panel_targets = self._panel_targets.get(name, {})
+            tag = ui_hit.pick_target(point, [(t, self._item_rect(t)) for t in panel_targets])
+            if tag is not None:
+                panel_targets[tag]()
+            return
+        tag = ui_hit.pick_target(point, [(t, self._item_rect(t)) for t in self._click_targets])
+        if tag is not None:
+            self._click_targets[tag]()
 
     def show_how_to_use_modal(self, sender=None, app_data=None):
         """Opens the How to use panel over the window."""

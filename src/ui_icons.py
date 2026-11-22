@@ -77,3 +77,9 @@ BUD_LEFT = rounded_rect_points(4.0, 4.0, 6.0, 8.0, 3.0)
 BUD_RIGHT = rounded_rect_points(14.0, 4.0, 6.0, 8.0, 3.0)
 BUD_STEM_LEFT = [(8.0, 12.0), (8.0, 19.0)]
 BUD_STEM_RIGHT = [(16.0, 12.0), (16.0, 19.0)]
+
+# Virtual cable (mockup symbol i-cable): a plug body with a round end and two prongs, plus the tail.
+CABLE_BODY = [(7.0, 7.0), (17.0, 7.0), (17.0, 13.0)] + arc_points(12.0, 13.0, 5.0, 0.0, 180.0, 16) + [(7.0, 7.0)]
+CABLE_PRONG_LEFT = [(10.0, 3.0), (10.0, 7.0)]
+CABLE_PRONG_RIGHT = [(14.0, 3.0), (14.0, 7.0)]
+CABLE_TAIL = [(12.0, 18.0), (12.0, 21.0)]

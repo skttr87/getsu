@@ -1,15 +1,11 @@
 import unittest
 
 from src.device_labels import (
-    KIND_BLUETOOTH,
-    KIND_BUILTIN,
-    KIND_OTHER,
-    KIND_USB,
     base_subtitle,
-    kind_from_bus_type,
     split_name,
     subtitle,
 )
+from src.devices import DeviceKind
 
 
 class SplitNameTests(unittest.TestCase):
@@ -31,39 +27,39 @@ class SplitNameTests(unittest.TestCase):
         self.assertEqual(split_name("HUAWEI FreeBuds SE 4 ANC"), {"title": "HUAWEI FreeBuds SE 4 ANC", "prefix": ""})
 
 
-class KindTests(unittest.TestCase):
-    def test_bus_types_map_to_kinds(self):
-        self.assertEqual(kind_from_bus_type("BTHHFENUM"), KIND_BLUETOOTH)
-        self.assertEqual(kind_from_bus_type("USB"), KIND_USB)
-        self.assertEqual(kind_from_bus_type("HDAUDIO"), KIND_BUILTIN)
-        self.assertEqual(kind_from_bus_type("INTELAUDIO"), KIND_BUILTIN)
-
-    def test_unknown_bus_types_are_other(self):
-        for bus in ("BTHENUM", "SWD", "UNKNOWN", None):
-            self.assertEqual(kind_from_bus_type(bus), KIND_OTHER)
-
-
 class SubtitleTests(unittest.TestCase):
     def test_plain_subtitle_is_the_kind_label(self):
-        names = {"Headset (HUAWEI FreeBuds SE 4 ANC)": KIND_BLUETOOTH}
-        self.assertEqual(subtitle("Headset (HUAWEI FreeBuds SE 4 ANC)", KIND_BLUETOOTH, names), "Bluetooth headset")
+        names = {"Headset (HUAWEI FreeBuds SE 4 ANC)": DeviceKind.BLUETOOTH_HEADSET}
+        self.assertEqual(subtitle("Headset (HUAWEI FreeBuds SE 4 ANC)", DeviceKind.BLUETOOTH_HEADSET, names),
+                         "Bluetooth headset")
 
     def test_unknown_kind_uses_the_endpoint_word(self):
-        names = {"Line In (Realtek(R) Audio)": KIND_OTHER}
-        self.assertEqual(subtitle("Line In (Realtek(R) Audio)", KIND_OTHER, names), "Line In")
+        names = {"Line In (Realtek(R) Audio)": DeviceKind.OTHER}
+        self.assertEqual(subtitle("Line In (Realtek(R) Audio)", DeviceKind.OTHER, names), "Line In")
 
     def test_twin_entries_get_the_endpoint_word(self):
         names = {
-            "Microphone (Realtek(R) Audio)": KIND_BUILTIN,
-            "Line In (Realtek(R) Audio)": KIND_BUILTIN,
+            "Microphone (Realtek(R) Audio)": DeviceKind.BUILT_IN,
+            "Line In (Realtek(R) Audio)": DeviceKind.BUILT_IN,
         }
-        self.assertEqual(subtitle("Microphone (Realtek(R) Audio)", KIND_BUILTIN, names),
+        self.assertEqual(subtitle("Microphone (Realtek(R) Audio)", DeviceKind.BUILT_IN, names),
                          "Built-in microphone, Microphone")
-        self.assertEqual(subtitle("Line In (Realtek(R) Audio)", KIND_BUILTIN, names),
+        self.assertEqual(subtitle("Line In (Realtek(R) Audio)", DeviceKind.BUILT_IN, names),
                          "Built-in microphone, Line In")
 
-    def test_base_subtitle_for_usb(self):
-        self.assertEqual(base_subtitle("Microphone (MPOW Wireless Gaming Headset)", KIND_USB), "USB headset")
+    def test_different_kinds_with_same_title_need_no_endpoint_word(self):
+        names = {
+            "Microphone (Realtek(R) Audio)": DeviceKind.BUILT_IN,
+            "Line In (Realtek(R) Audio)": DeviceKind.LINE_IN,
+        }
+        self.assertEqual(subtitle("Line In (Realtek(R) Audio)", DeviceKind.LINE_IN, names), "Line in")
+
+    def test_base_subtitle_for_usb_headset(self):
+        self.assertEqual(base_subtitle("Microphone (MPOW Wireless Gaming Headset)", DeviceKind.USB_HEADSET),
+                         "USB headset")
+
+    def test_wired_headset_label(self):
+        self.assertEqual(base_subtitle("Headset (Realtek(R) Audio)", DeviceKind.WIRED_HEADSET), "Wired headset")
 
 
 if __name__ == "__main__":

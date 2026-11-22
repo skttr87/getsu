@@ -13,11 +13,15 @@ from src.config import get_config_path, load_config, save_config, DEFAULT_CONFIG
 
 
 class TestConfig(unittest.TestCase):
-    def test_dev_mode_config_path(self):
-        # In non-frozen dev mode, it points to project root config.json
-        path = get_config_path()
-        self.assertTrue(path.endswith("config.json"))
-        self.assertTrue(os.path.isabs(path))
+    def test_dev_mode_config_path_is_outside_the_repo(self):
+        # Dev mode writes %APPDATA%\Getsu-dev\config.json, never the tracked repo-root config.json.
+        with tempfile.TemporaryDirectory() as appdata:
+            with patch.dict(os.environ, {"APPDATA": appdata}):
+                path = get_config_path()
+            repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+            self.assertEqual(path, os.path.join(appdata, "Getsu-dev", "config.json"))
+            self.assertTrue(os.path.isdir(os.path.join(appdata, "Getsu-dev")))
+            self.assertFalse(os.path.abspath(path).startswith(repo_root))
 
     @patch("sys.frozen", True, create=True)
     @patch("sys.executable", "C:\\Program Files\\Getsu\\getsu.exe")

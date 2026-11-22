@@ -137,6 +137,7 @@ class DeviceBusType:
     INTERNAL_HD = "HDAUDIO"       # High Definition Audio (Realtek / Motherboard)
     INTEL_AUDIO = "INTELAUDIO"   # Intel Smart Sound / High Definition
     VIRTUAL = "SWD"               # Software Virtual Drivers (VB-Audio, VoiceMeeter)
+    ROOT = "ROOT"                 # Root-enumerated software devices (VB-Audio CABLE registers as ROOT\MEDIA\0000)
     UNKNOWN = "UNKNOWN"
 
 # CoreAudio Device Enumerator
@@ -414,6 +415,8 @@ def native_get_device_bus_type(device_id_or_name: Optional[str] = None, is_input
                             return DeviceBusType.INTEL_AUDIO
                         elif "SWD" in enumerator:
                             return DeviceBusType.VIRTUAL
+                        elif enumerator.split("\\")[0] == "ROOT":
+                            return DeviceBusType.ROOT
                         return enumerator
             finally:
                 if ole32 and hasattr(ole32, 'PropVariantClear'):

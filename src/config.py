@@ -46,7 +46,7 @@ import tempfile
 def get_config_path() -> str:
     """
     Determines writable path for config.json.
-    - Source / dev mode: uses root/config.json
+    - Source / dev mode: uses %APPDATA%\\Getsu-dev\\config.json (the repo-root config.json is the tracked template)
     - Frozen portable mode: if directory next to getsu.exe is writable, uses it.
     - Frozen installed mode: uses %APPDATA%\\Getsu\\config.json.
     """
@@ -81,7 +81,14 @@ def get_config_path() -> str:
 
         return user_cfg
     else:
-        return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "config.json"))
+        # Dev mode: the repo-root config.json is tracked and the release script commits it, so developer runs
+        # keep their settings in %APPDATA%\Getsu-dev instead.
+        dev_dir = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "Getsu-dev")
+        try:
+            os.makedirs(dev_dir, exist_ok=True)
+        except Exception:
+            pass
+        return os.path.join(dev_dir, "config.json")
 
 
 CONFIG_FILE = get_config_path()

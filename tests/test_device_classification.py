@@ -129,8 +129,14 @@ class TestClassifyByBusType(FakeEndpointStore):
         self.assertEqual(classify_device("CABLE Output (VB-Audio Virtual Cable)", True), DeviceKind.VIRTUAL)
 
     def test_unknown_enumerator_is_other(self):
-        self.endpoint("Mystery Mic", "ROOT")
+        self.endpoint("Mystery Mic", "FOOBUS")
         self.assertEqual(classify_device("Mystery Mic", True), DeviceKind.OTHER)
+
+    def test_root_enumerator_is_virtual(self):
+        self.endpoint("CABLE Output (VB-Audio Virtual Cable)", DeviceBusType.ROOT)
+        self.assertEqual(classify_device("CABLE Output (VB-Audio Virtual Cable)", True), DeviceKind.VIRTUAL)
+        self.endpoint("Other Root Device", DeviceBusType.ROOT)
+        self.assertEqual(classify_device("Other Root Device", True), DeviceKind.VIRTUAL)
 
     def test_unknown_bus_without_virtual_name_is_other(self):
         self.assertEqual(classify_device("Some Microphone", True), DeviceKind.OTHER)
@@ -150,9 +156,18 @@ class TestClassifyByBusType(FakeEndpointStore):
 
 class TestVirtualDetection(FakeEndpointStore):
 
-    def test_bus_known_non_swd_is_not_virtual_even_with_cable_name(self):
+    def test_cable_name_is_virtual_even_when_bus_is_known(self):
         self.endpoint("CABLE Output (VB-Audio)", DeviceBusType.INTERNAL_HD)
-        self.assertFalse(is_virtual_input_device("CABLE Output (VB-Audio)"))
+        self.assertTrue(is_virtual_input_device("CABLE Output (VB-Audio)"))
+        self.assertEqual(classify_device("CABLE Output (VB-Audio)", True), DeviceKind.VIRTUAL)
+
+    def test_root_bus_is_virtual(self):
+        self.endpoint("CABLE Output (VB-Audio Virtual Cable)", DeviceBusType.ROOT)
+        self.assertTrue(is_virtual_input_device("CABLE Output (VB-Audio Virtual Cable)"))
+
+    def test_product_fallback_names_ignored_when_bus_known(self):
+        self.endpoint("Krisp Microphone", DeviceBusType.USB, EndpointFormFactor.MICROPHONE)
+        self.assertFalse(is_virtual_input_device("Krisp Microphone"))
 
     def test_unknown_bus_uses_generic_cable_names(self):
         for name in ("CABLE Output (VB-Audio Virtual Cable)", "VB-Audio Virtual Cable", "Virtual Cable 2"):

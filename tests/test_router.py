@@ -233,14 +233,12 @@ class TestAutoRouteToggleLock(unittest.TestCase):
         mock_gui._state_lock = threading.Lock()
 
         from src.gui import GetsuGUI, COL_WARNING
-        with patch("src.gui.dpg.does_item_exist", return_value=True), \
-             patch("src.gui.dpg.set_value") as mock_set_val:
-            GetsuGUI.on_auto_route_toggled(mock_gui, "chk_auto_route", False)
-            mock_set_val.assert_called_with("chk_auto_route", True)
-            mock_gui.set_status_pill.assert_called_once_with(
-                "Stop noise cancellation first to change routing preference.", COL_WARNING
-            )
-            self.assertTrue(mock_gui.config["auto_route"])
+        GetsuGUI.on_auto_route_toggled(mock_gui, "chk_auto_route", False)
+        mock_gui._switch_set.assert_called_with("auto_route", True)
+        mock_gui.set_status_pill.assert_called_once_with(
+            "Stop noise cancellation first to change routing preference.", COL_WARNING
+        )
+        self.assertTrue(mock_gui.config["auto_route"])
 
     def test_auto_route_toggle_allowed_when_idle(self):
         mock_gui = MagicMock()

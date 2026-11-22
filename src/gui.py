@@ -40,7 +40,9 @@ from src.devices import (
 )
 from src.config import load_config, save_config
 from src.stream import AudioEngine, create_engine_from_config
-from src.router import SmartMicRouter, clear_device_bus_type_cache
+from src.router import SmartMicRouter, clear_device_bus_type_cache, native_get_device_bus_type_cached
+from src.device_labels import split_name, subtitle, kind_from_bus_type
+from src import ui_icons as icons
 from src.rnnoise import RNNoise, FRAME_SIZE, SAMPLE_RATE
 from src.dsp import (
     HighPassFilter,
@@ -106,6 +108,59 @@ COL_WHITE = (255, 255, 255)
 TITLE_CAPTION_COLOR = 0x001E1C1C
 TITLE_TEXT_COLOR = 0x00A6A1A1
 TITLE_BORDER_COLOR = 0x002E2C2C
+
+# Window geometry (logical pixels, scaled with self.s()): 420 px wide, 24 px side gutters.
+WINDOW_W = 420
+CONTENT_PAD = 24
+VB_MODAL_W = 396  # VB-Cable install dialog: 396 px so it fits the 420 px window
+
+# Features whose backend lands in a later task. Their controls are built but hidden.
+FEATURE_MODES = False          # Game / Meeting / Session / Music segments (backend: M2.4)
+FEATURE_EARBUD_HINT = False    # "Earbud mic drops audio to call quality." (earbud work: M5.x)
+FEATURE_LEARN_ROOM = False     # "Learn my room" row in Settings (backend: M2.3)
+
+MODE_NAMES = ("Game", "Meeting", "Session", "Music")
+MODE_DESCRIPTIONS = {
+    "Game": "Lowest delay, strong click removal",
+    "Meeting": "Steady voice level for long calls",
+    "Session": "Gentle, never cuts quiet speech",
+    "Music": "No noise filter, natural sound",
+}
+
+
+class _Switch:
+    """Drawn on/off switch, 42 x 26 px: accent track and white knob when on, fill track when off."""
+
+    def __init__(self, gui, name: str, on: bool, callback):
+        self.gui = gui
+        self.name = name
+        self.tag = f"switch_{name}"
+        self.on = bool(on)
+        self.callback = callback
+
+    def build(self, parent: str):
+        dpg.add_drawlist(width=self.gui.s(42), height=self.gui.s(26), tag=self.tag, parent=parent)
+        self.draw()
+
+    def draw(self):
+        if not dpg.does_item_exist(self.tag):
+            return
+        s = self.gui.s
+        dpg.delete_item(self.tag, children_only=True)
+        track = COL_ACCENT if self.on else COL_FILL_2
+        dpg.draw_rectangle((0, 0), (s(42), s(26)), color=track, fill=track, rounding=s(13), parent=self.tag)
+        knob_r = s(11)
+        cx = s(42) - s(2) - knob_r if self.on else s(2) + knob_r
+        dpg.draw_circle((cx, s(13)), knob_r, color=COL_WHITE, fill=COL_WHITE, parent=self.tag)
+
+    def set(self, on: bool):
+        self.on = bool(on)
+        self.draw()
+
+    def toggle(self):
+        self.set(not self.on)
+        if self.callback:
+            self.callback(self.on)
 
 
 def init_dpi_awareness() -> tuple[int, float]:
@@ -283,15 +338,40 @@ class GetsuGUI:
 
         self.input_devices: List[Dict] = []
         self.device_map: Dict[str, int] = {}
+        self.device_raw: Dict[str, str] = {}      # display label -> full Windows endpoint name
         self.selected_input_name: Optional[str] = self.config.get("input_device_name")
         self.selected_output_name: Optional[str] = self.config.get("output_device_name")
         self.selected_input_idx: Optional[int] = self.config.get("input_device_id")
         self.selected_output_idx: Optional[int] = self.config.get("output_device_id")
         self.is_vbcable_installed = False
-        self.has_icon_texture = False
         self._ui_built = False
         self._app_running = True
         self._is_rescanning = False
+
+        # Phase B UI state. _busy is "starting" / "stopping" while the 3 s lock runs; _notice is (text, colour)
+        # shown on the hero sub line in place of the default sentence.
+        self._busy: Optional[str] = None
+        self._notice = None
+        self._switches: Dict[str, "_Switch"] = {}
+        self._click_targets: Dict[str, object] = {}
+        self._open_panel_name: Optional[str] = None
+        self._overlay_sig = None
+        self._ovl = None                 # viewport drawlist for icons and the voice test progress
+        self._vt_active = False
+        self._vt_progress = 0.0
+        self._meter_phase = 0.0
+        self._meter_level = 0.0
+        self._meter_flat = True
+        self._last_meter_t = 0.0
+        self._work_h = 0
+        self._mode = "Game"
+        self.theme_flat = None
+        self.theme_card = None
+        self.theme_list = None
+        self.theme_sheet = None
+        self.theme_chip = None
+        self.theme_scrim = None
+        self.theme_slider = None
 
         self._hwnd: Optional[int] = None
         self._old_wndproc = None
@@ -433,12 +513,14 @@ class GetsuGUI:
 
         self.input_devices = get_input_devices()
         self.device_map = {}
+        self.device_raw = {}
         for d in self.input_devices:
             label = clean_device_label(d['name'])
             # Avoid duplicate keys if multiple devices have similar names
             if label in self.device_map:
                 label = f"{label} #{d['index']}"
             self.device_map[label] = d['index']
+            self.device_raw[label] = d['name']
 
         # Match persistent device identity by NAME first, then fallback
         if self.selected_input_name and self.selected_input_name in self.device_map:
@@ -466,11 +548,9 @@ class GetsuGUI:
             self.selected_output_idx = target_out['index']
             self.selected_output_name = target_out.get('name', 'Default Output')
 
-        if self._ui_built and dpg.does_item_exist("input_combo"):
-            combo_items = list(self.device_map.keys())
-            current_label = self._get_selected_input_label()
-            dpg.configure_item("input_combo", items=combo_items, default_value=current_label)
-            self._update_selection_hint(current_label)
+        if self._ui_built:
+            self._update_selection_hint(self._get_selected_input_label())
+            self._refresh_mic_widgets()
 
 
     def _on_device_change_event(self):
@@ -560,11 +640,8 @@ class GetsuGUI:
                     self.selected_output_idx = target_out['index']
                     self.selected_output_name = target_out.get('name', 'Default Output')
 
-                # Update UI dropdown
-                if self._ui_built and dpg.does_item_exist("input_combo"):
-                    combo_items = list(self.device_map.keys())
-                    current_label = self._get_selected_input_label()
-                    dpg.configure_item("input_combo", items=combo_items, default_value=current_label)
+                # Update the microphone row and the microphone panel
+                self._refresh_mic_widgets()
 
                 self._update_cable_banner()
 
@@ -585,11 +662,7 @@ class GetsuGUI:
                             )
                             self.engine.start()
                             self.is_running = True
-                            if self._ui_built and dpg.does_item_exist("status_badge_text"):
-                                dpg.set_value("status_badge_text", "[ ACTIVE ]")
-                                dpg.configure_item("status_badge_text", color=COL_ACCENT)
-                                dpg.configure_item("btn_toggle", label="STOP", enabled=True)
-                                dpg.bind_item_theme("btn_toggle", self.theme_stop_btn)
+                            self._render_hero()
                             self.set_status_pill("AI Filter Active. Clean Voice Routed", COL_ACCENT)
                             self._update_tray_icon()
                             self._set_voice_test_button_state(False)
@@ -602,11 +675,7 @@ class GetsuGUI:
                                 except Exception:
                                     pass
                                 self.engine = None
-                            if self._ui_built and dpg.does_item_exist("status_badge_text"):
-                                dpg.set_value("status_badge_text", "[ STOPPED ]")
-                                dpg.configure_item("status_badge_text", color=COL_TEXT_2)
-                                dpg.configure_item("btn_toggle", label="START", enabled=True)
-                                dpg.bind_item_theme("btn_toggle", self.theme_start_btn)
+                            self._render_hero()
                             self._set_voice_test_button_state(True)
                             self.set_status_pill(f"{self._format_audio_error(e)}", COL_ERROR)
                         finally:
@@ -629,10 +698,8 @@ class GetsuGUI:
         """Handles user selecting a different microphone from dropdown (Option B: locked while active)."""
         if self.is_running or self._is_testing_voice or not self._state_lock.acquire(blocking=False):
             # Option B: Lock microphone switching while active/testing.
-            # Revert dropdown value back to currently active microphone and warn user.
+            # The selection stays on the active microphone and the user is told why.
             current_label = self._get_selected_input_label()
-            if dpg.does_item_exist("input_combo"):
-                dpg.set_value("input_combo", current_label)
             self._update_selection_hint(current_label)
             self.set_status_pill("Stop noise cancellation first to switch microphone.", COL_WARNING)
             return
@@ -676,27 +743,25 @@ class GetsuGUI:
             dpg.hide_item("input_selection_hint")
 
 
-    def _get_idle_status(self) -> str:
-        """Returns the single-line idle status string based on driver and auto_route configuration."""
+    def _get_idle_status(self) -> Optional[str]:
+        """Notice shown while stopped. None means no notice: the hero shows its own sentence."""
         if not self.is_vbcable_installed:
-            return "Virtual Cable required. Please install driver"
-        if self.config.get("auto_route", True):
-            return "Ready. Default Mic Routing ON"
-        return "Ready. Manual Routing Mode"
+            return "Virtual cable not installed. Press the button to set it up."
+        return None
 
     def _get_idle_color(self) -> Sequence[int]:
-        """Returns the color for the idle status pill."""
+        """Colour of the idle notice."""
         if not self.is_vbcable_installed:
             return COL_WARNING
         return COL_TEXT_2
 
-    def set_status_pill(self, text: str, color: Optional[Sequence[int]] = None):
-        """Updates the compact single-line status pill with text and optional color."""
-        if not self._ui_built or not dpg.does_item_exist("active_notice"):
-            return
-        dpg.set_value("active_notice", text)
-        if color:
-            dpg.configure_item("active_notice", color=color)
+    def set_status_pill(self, text: Optional[str], color: Optional[Sequence[int]] = None):
+        """
+        Shows a notice on the hero sub line (replaces the old status pill). text None clears the notice.
+        The notice colour defaults to secondary text.
+        """
+        self._notice = (text, tuple(color) if color else COL_TEXT_2) if text else None
+        self._render_hero()
 
     def _format_audio_error(self, e: Exception) -> str:
         """Translates technical PortAudio / driver exceptions into clear, actionable advice."""
@@ -705,27 +770,13 @@ class GetsuGUI:
         return f"{explained.title}. {explained.advice}"
 
 
-    def _set_voice_test_button_state(self, enabled: bool):
-        """Sets the voice test button enabled/disabled state, contextual label, and theme."""
-        if not self._ui_built or not dpg.does_item_exist("btn_voice_test"):
-            return
-        if enabled and not self.is_vbcable_installed:
-            enabled = False
-        if enabled:
-            dpg.configure_item("btn_voice_test", enabled=True, label="Hear Myself (11s Voice Test)")
-            dpg.bind_item_theme("btn_voice_test", self.theme_voice_btn)
-        else:
-            dpg.configure_item("btn_voice_test", enabled=False, label="Voice Test Unavailable")
-            dpg.bind_item_theme("btn_voice_test", self.theme_voice_btn_disabled)
-
     def on_auto_route_toggled(self, sender, app_data):
         """Handles user toggling default microphone switch setting (Option B: locked while active)."""
         if self.is_running or self._is_testing_voice or not self._state_lock.acquire(blocking=False):
             # Option B: Lock auto-route preference while active/testing.
             # Revert checkbox value back to saved config setting and warn user.
             current_setting = self.config.get("auto_route", True)
-            if dpg.does_item_exist("chk_auto_route"):
-                dpg.set_value("chk_auto_route", current_setting)
+            self._switch_set("auto_route", current_setting)
             self.set_status_pill("Stop noise cancellation first to change routing preference.", COL_WARNING)
             return
 
@@ -806,11 +857,8 @@ class GetsuGUI:
                     self._release_state_lock()
                     return
 
-            # Lock UI immediately into Starting state (accent button, label shows the state)
-            dpg.configure_item("btn_toggle", label="Starting...", enabled=False)
-            dpg.bind_item_theme("btn_toggle", self.theme_stop_btn)
-            dpg.set_value("status_badge_text", "[ STARTING... ]")
-            dpg.configure_item("status_badge_text", color=COL_TEXT_2)
+            # Lock the UI into the Starting state (power button ring, "Starting" line)
+            self._busy = "starting"
             self._set_voice_test_button_state(False)
             self.set_status_pill("Starting AI Filter. Routing to CABLE Output...", COL_TEXT_2)
 
@@ -843,8 +891,7 @@ class GetsuGUI:
                                 self.selected_output_name = sd.query_devices(pair.output)['name']
                             except Exception:
                                 pass
-                        if dpg.does_item_exist("input_combo"):
-                            dpg.configure_item("input_combo", default_value=self._get_selected_input_label())
+                        self._refresh_mic_widgets()
 
                     self.config["input_device_id"] = self.selected_input_idx
                     self.config["input_device_name"] = self.selected_input_name
@@ -869,11 +916,8 @@ class GetsuGUI:
                     if remaining > 0:
                         time.sleep(remaining)
 
+                    self._busy = None
                     if success and self.is_running:
-                        dpg.set_value("status_badge_text", "[ ACTIVE ]")
-                        dpg.configure_item("status_badge_text", color=COL_ACCENT)
-                        dpg.configure_item("btn_toggle", label="STOP", enabled=True)
-                        dpg.bind_item_theme("btn_toggle", self.theme_stop_btn)
                         pair = getattr(self.engine, 'resolved_pair', None)
                         if pair and pair.ambiguous:
                             self.set_status_pill("Active. Default mic selected (Confirm in dropdown)", COL_WARNING)
@@ -886,10 +930,7 @@ class GetsuGUI:
                             self.set_status_pill("AI Filter Active. Manual Output Mode", COL_ACCENT)
                         self._set_voice_test_button_state(False)
                     else:
-                        dpg.set_value("status_badge_text", "[ STOPPED ]")
-                        dpg.configure_item("status_badge_text", color=COL_TEXT_2)
-                        dpg.configure_item("btn_toggle", label="START", enabled=True)
-                        dpg.bind_item_theme("btn_toggle", self.theme_start_btn)
+                        self._render_hero()
                         self._set_voice_test_button_state(True)
 
                     self._release_state_lock()
@@ -899,9 +940,7 @@ class GetsuGUI:
         else:
             # STOP FLOW
             # Lock UI immediately into Stopping state
-            dpg.configure_item("btn_toggle", label="Stopping...", enabled=False)
-            dpg.set_value("status_badge_text", "[ STOPPING... ]")
-            dpg.configure_item("status_badge_text", color=COL_TEXT_2)
+            self._busy = "stopping"
             self.set_status_pill("Restoring physical microphone...", COL_TEXT_2)
 
             def _stop_worker():
@@ -923,10 +962,7 @@ class GetsuGUI:
                     if remaining > 0:
                         time.sleep(remaining)
 
-                    dpg.set_value("status_badge_text", "[ STOPPED ]")
-                    dpg.configure_item("status_badge_text", color=COL_TEXT_2)
-                    dpg.configure_item("btn_toggle", label="START", enabled=True)
-                    dpg.bind_item_theme("btn_toggle", self.theme_start_btn)
+                    self._busy = None
                     self._set_voice_test_button_state(True)
                     self.set_status_pill(self._get_idle_status(), self._get_idle_color())
                     self._release_state_lock()
@@ -948,8 +984,9 @@ class GetsuGUI:
 
         self._is_testing_voice = True
         self._cancel_voice_test = False
-        dpg.configure_item("btn_voice_test", enabled=False, label="Testing...")
-        dpg.configure_item("btn_toggle", enabled=False)
+        self._vt_active = True
+        self._vt_progress = 0.0
+        dpg.configure_item("btn_voice_test", enabled=False, label=self._vt_label_pad() + "Testing...")
 
         threading.Thread(target=self._run_voice_test_worker, daemon=True).start()
 
@@ -1070,6 +1107,7 @@ class GetsuGUI:
                     if chunk_idx % 100 == 0:
                         sec_left = 11 - (chunk_idx // 100)
                         self.set_status_pill(f"Voice Test: Recording to RAM... ({sec_left}s left)", COL_ACCENT)
+                        self._vt_progress = chunk_idx / float(total_chunks)
                         dpg.configure_item("btn_voice_test", label=f"Recording... ({sec_left}s)")
 
             if not self._app_running or self._cancel_voice_test or not processed_chunks:
@@ -1115,6 +1153,7 @@ class GetsuGUI:
                     sd.stop()
                     break
                 self.set_status_pill(f"Voice Test: Playing back clean voice... ({sec}s left)", COL_ACCENT)
+                self._vt_progress = (11 - sec) / 11.0
                 dpg.configure_item("btn_voice_test", label=f"Playing back... ({sec}s)")
                 time.sleep(1.0)
             sd.stop()
@@ -1137,8 +1176,8 @@ class GetsuGUI:
                     pass
             self._is_testing_voice = False
             self._set_voice_test_button_state(True)
-            if dpg.does_item_exist("btn_toggle"):
-                dpg.configure_item("btn_toggle", enabled=True)
+            self._vt_active = False
+            self._vt_progress = 0.0
             self._release_state_lock()
 
     def restore_window(self):
@@ -1233,50 +1272,18 @@ class GetsuGUI:
             try:
                 vp_w = dpg.get_viewport_client_width()
                 vp_h = dpg.get_viewport_client_height()
-                w = self.s(450)
+                w = self.s(VB_MODAL_W)
                 h = self.s(240)
                 dpg.set_item_pos("modal_vbcable", [max(0, (vp_w - w) // 2), max(0, (vp_h - h) // 2)])
             except Exception:
                 pass
             dpg.show_item("modal_vbcable")
 
-    def show_how_to_use_modal(self, sender=None, app_data=None):
-        """Displays the How to Use Getsu modal dialog, dynamically centered on the active viewport."""
-        if dpg.does_item_exist("modal_how_to_use"):
-            try:
-                vp_w = dpg.get_viewport_client_width()
-                vp_h = dpg.get_viewport_client_height()
-                w = self.s(450)
-                h = self.s(380)
-                dpg.set_item_pos("modal_how_to_use", [max(0, (vp_w - w) // 2), max(0, (vp_h - h) // 2)])
-            except Exception:
-                pass
-            dpg.show_item("modal_how_to_use")
-
     def _update_cable_banner(self):
-        """Updates the status card and bottom status pill."""
-        if self.is_vbcable_installed:
-            dpg.set_value("banner_text", "Virtual Mic: Ready for All Voice Apps & Games")
-            dpg.configure_item("banner_text", color=COL_ACCENT)
-            dpg.hide_item("banner_install_btn")
-            dpg.configure_item("banner_install_btn", enabled=False)
-            if dpg.does_item_exist("banner_how_to_use_btn"):
-                dpg.show_item("banner_how_to_use_btn")
-                dpg.configure_item("banner_how_to_use_btn", enabled=True)
-            self._set_voice_test_button_state(not self.is_running)
-            if not self.is_running:
-                self.set_status_pill(self._get_idle_status(), self._get_idle_color())
-        else:
-            dpg.set_value("banner_text", "Driver not installed")
-            dpg.configure_item("banner_text", color=COL_WARNING)
-            dpg.show_item("banner_install_btn")
-            dpg.configure_item("banner_install_btn", enabled=True)
-            if dpg.does_item_exist("banner_how_to_use_btn"):
-                dpg.hide_item("banner_how_to_use_btn")
-                dpg.configure_item("banner_how_to_use_btn", enabled=False)
-            self._set_voice_test_button_state(False)
-            if not self.is_running:
-                self.set_status_pill(self._get_idle_status(), self._get_idle_color())
+        """Refreshes the voice test enable state and the idle notice (the status card was removed in phase B)."""
+        self._set_voice_test_button_state(not self.is_running)
+        if not self.is_running and self._busy is None:
+            self.set_status_pill(self._get_idle_status(), self._get_idle_color())
 
     def _setup_window_hook(self):
         """Subclass the DearPyGui window so Minimize and Close minimize to tray."""
@@ -1382,6 +1389,7 @@ class GetsuGUI:
         while dpg.is_dearpygui_running():
             started = time.perf_counter()
             dpg.render_dearpygui_frame()
+            self._tick_ui()
             time.sleep(frame_sleep_s(self._is_window_visible(), time.perf_counter() - started))
 
     def _start_tray_icon(self):
@@ -1408,20 +1416,772 @@ class GetsuGUI:
         self._tray_icon = pystray.Icon("getsu", create_tray_icon_image(self.is_running), "Getsu Noise Cancellation", menu)
         threading.Thread(target=self._tray_icon.run, daemon=True).start()
 
+    # ------------------------------------------------------------------
+    # Phase B layout: hero (power button, state, level meter), one card (microphone + mode),
+    # actions, footer, and the three panels (microphone list, settings, help).
+    # Controls with no native DearPyGui equivalent (power button, switches, icons, meter) are
+    # drawlists. Their clicks go through _on_mouse_click, which tests hover on the drawlist.
+    # ------------------------------------------------------------------
+
+    def _text_w(self, text: str, font=None) -> int:
+        """Width of a text run in physical pixels, measured with the given font (falls back to an estimate)."""
+        try:
+            return int(dpg.get_text_size(text, font=font or 0)[0])
+        except Exception:
+            return int(len(text) * self.s(7))
+
+    def _fit_text(self, text: str, font, max_w: int) -> str:
+        """Shortens text with '...' so it fits max_w pixels (names in the microphone rows)."""
+        if self._text_w(text, font) <= max_w:
+            return text
+        cut = text
+        while cut and self._text_w(cut + "...", font) > max_w:
+            cut = cut[:-1]
+        return cut.rstrip() + "..."
+
+    def _centered_line(self, key: str, font, color, width: int, with_dot: bool = False):
+        """A text line centred in width. With with_dot, a 7 px status dot sits before the text."""
+        with dpg.group(horizontal=True):
+            dpg.add_spacer(width=0, tag=f"{key}_pad")
+            if with_dot:
+                dpg.add_drawlist(width=self.s(8), height=self.s(18), tag=f"{key}_dot")
+                dpg.add_spacer(width=self.s(6))
+            dpg.add_text("", tag=f"{key}_text", color=color)
+        if font:
+            dpg.bind_item_font(f"{key}_text", font)
+
+    def _tile_draw(self, drawlist: str, kind: str, bg, fg, size: int):
+        """Rounded tile with a white input-device glyph (kind: bt, usb, builtin, other or nomic)."""
+        dpg.delete_item(drawlist, children_only=True)
+        y0 = self.s(14)  # the tile sits in the middle of the 60 px microphone row
+        dpg.draw_rectangle((0, y0), (size, y0 + size), color=bg, fill=bg, rounding=self.s(8), parent=drawlist)
+        self._draw_device_glyph(drawlist, kind, 0, y0, size, fg)
+
+    def _draw_device_glyph(self, parent: str, kind: str, x0: float, y0: float, size: float, color, base=0):
+        """Draws the icon for a device kind inside a square box (drawlist primitives only)."""
+        thick = max(1.0, self.s(1.6))
+        def poly(points, closed=False):
+            dpg.draw_polyline(icons.to_px(points, x0, y0, size), color=color, thickness=thick, closed=closed, parent=parent)
+        if kind == "bt":
+            poly(icons.BUD_LEFT, closed=True)
+            poly(icons.BUD_RIGHT, closed=True)
+            poly(icons.BUD_STEM_LEFT)
+            poly(icons.BUD_STEM_RIGHT)
+        elif kind == "usb":
+            poly(icons.HEADSET_BAND)
+            poly(icons.HEADSET_LEFT, closed=True)
+            poly(icons.HEADSET_RIGHT, closed=True)
+        elif kind == "builtin":
+            poly(icons.LAPTOP_SCREEN, closed=True)
+            poly(icons.LAPTOP_BASE)
+        else:
+            poly(icons.MIC_BODY, closed=True)
+            poly(icons.MIC_CRADLE)
+            poly(icons.MIC_STEM)
+            if kind == "nomic":
+                poly([(4.0, 4.0), (20.0, 20.0)])
+
+    def _draw_power(self):
+        """Power button: filled circle, power glyph drawn with polylines, ring when stopped, arc while busy."""
+        if not dpg.does_item_exist("power_drawlist"):
+            return
+        dl = "power_drawlist"
+        dpg.delete_item(dl, children_only=True)
+        size = self.s(104)
+        c = size / 2.0
+        if self.is_running:
+            fill, glyph = COL_ACCENT, COL_WHITE
+        else:
+            fill, glyph = COL_CARD, (142, 142, 147)
+        dpg.draw_circle((c, c), c, color=fill, fill=fill, parent=dl)
+        if not self.is_running and self._busy is None:
+            dpg.draw_circle((c, c), c - 0.5, color=(84, 84, 88, 255), thickness=1.0, parent=dl)
+        if self._busy is not None:
+            ring = icons.arc_points(c, c, c - self.s(3), -90.0, 180.0, 40)
+            dpg.draw_polyline(ring, color=COL_ACCENT, thickness=float(self.s(3)), parent=dl)
+        gs = self.s(38)
+        x0 = c - gs / 2.0
+        y0 = c - gs / 2.0
+        thick = float(self.s(2))
+        dpg.draw_polyline(icons.to_px(icons.POWER_STEM, x0, y0, gs), color=glyph, thickness=thick, parent=dl)
+        dpg.draw_polyline(icons.to_px(icons.POWER_ARC, x0, y0, gs), color=glyph, thickness=thick, parent=dl)
+
+    def _set_sub(self, text: str, color, dot_on: bool):
+        """Secondary line under the state text: coloured dot plus text, centred."""
+        width = self.s(372)
+        dpg.set_value("hero_sub_text", text)
+        if color:
+            dpg.configure_item("hero_sub_text", color=color)
+        dpg.delete_item("hero_sub_dot", children_only=True)
+        dot_color = COL_ACCENT if dot_on else COL_TEXT_3
+        dpg.draw_circle((self.s(4), self.s(9)), float(self.s(3.5)), color=dot_color, fill=dot_color, parent="hero_sub_dot")
+        pad_w = self.s(8) + self.s(6)
+        tw = self._text_w(text, self.font_notice)
+        dpg.configure_item("hero_sub_pad", width=max(0, (width - pad_w - tw) // 2))
+
+    def _render_hero(self):
+        """Derives the hero (power button, state text, sub line, dot) from the engine state and the notice."""
+        if not self._ui_built or not dpg.does_item_exist("hero_state_text"):
+            return
+        width = self.s(372)
+        if self._busy == "starting":
+            state, sub_default = "Starting", "Switching apps to your clean voice"
+        elif self._busy == "stopping":
+            state, sub_default = "Stopping", "Restoring your microphone"
+        elif self.is_running:
+            state, sub_default = "Noise cancellation on", "Apps hear your clean voice"
+        else:
+            state, sub_default = "Noise cancellation off", "Apps use your normal microphone"
+        if self._notice:
+            sub_text, sub_color = self._notice
+        else:
+            sub_text, sub_color = sub_default, COL_TEXT_2
+        dpg.set_value("hero_state_text", state)
+        dpg.configure_item("hero_state_pad", width=max(0, (width - self._text_w(state, self.font_state)) // 2))
+        self._set_sub(sub_text, sub_color, dot_on=self.is_running)
+        self._draw_power()
+        self._draw_overlays()
+
+    def _on_power_click(self):
+        """Clicking the power button does what START / STOP did: toggle_stream keeps the 3 s lock."""
+        self.toggle_stream()
+
+    def _draw_meter(self, level: float, live: bool):
+        """Fourteen bars. Lit bars use the accent; when stopped every bar is flat and dim."""
+        for i in range(14):
+            if live:
+                shape = 0.55 + 0.45 * abs(math.sin(i * 1.7 + self._meter_phase))
+                h = self.s(3) + (self.s(18) - self.s(3)) * min(1.0, level * shape)
+            else:
+                h = self.s(3)
+            x = i * self.s(7)
+            fill = COL_ACCENT if (live and h > self.s(6)) else COL_FILL_2
+            dpg.configure_item(f"meter_bar_{i}", pmin=(x, self.s(18) - h), pmax=(x + self.s(4), self.s(18)),
+                               color=fill, fill=fill)
+
+    def _tick_ui(self):
+        """Called every render frame. Animates the level meter at most 20 times a second, and only while visible and running."""
+        if not self._ui_built or not dpg.does_item_exist("meter_bar_0"):
+            return
+        now = time.monotonic()
+        if now - self._last_meter_t < 0.05:
+            return
+        self._last_meter_t = now
+        self._meter_phase += 0.9
+        live = bool(self.is_running and self.engine is not None and self._is_window_visible())
+        if live:
+            try:
+                peak = float(self.engine.last_peak_db)
+            except Exception:
+                peak = -120.0
+            level = min(1.0, max(0.0, (peak + 60.0) / 60.0))
+            self._meter_level = max(level, self._meter_level * 0.8)
+            self._draw_meter(self._meter_level, live=True)
+            self._meter_flat = False
+        elif not self._meter_flat:
+            self._meter_level = 0.0
+            self._draw_meter(0.0, live=False)
+            self._meter_flat = True
+        self._draw_overlays()
+
+    # --- microphone entries and widgets ----------------------------------
+
+    def _mic_entries(self) -> List[Dict]:
+        """One entry per detected microphone: label (for selection), title, subtitle, kind, full name."""
+        raw_of = {label: self.device_raw.get(label, label) for label in self.device_map}
+        kinds = {}
+        for label, raw in raw_of.items():
+            try:
+                bus = native_get_device_bus_type_cached(raw, True)
+            except Exception:
+                bus = None
+            kinds[raw] = kind_from_bus_type(bus)
+        entries = []
+        for label, idx in self.device_map.items():
+            raw = raw_of[label]
+            kind = kinds[raw]
+            entries.append({
+                "label": label,
+                "index": idx,
+                "raw": raw,
+                "title": split_name(raw)["title"],
+                "subtitle": subtitle(raw, kind, kinds),
+                "kind": kind,
+            })
+        return entries
+
+    def _refresh_mic_widgets(self):
+        """Updates the microphone row of the card, the hidden earbud hint, and the list if it is open."""
+        if not self._ui_built or not dpg.does_item_exist("mic_row_title"):
+            return
+        entries = self._mic_entries()
+        current = self._get_selected_input_label()
+        chosen = next((e for e in entries if e["label"] == current), entries[0] if entries else None)
+        width = self.s(268)
+        if chosen is None:
+            title, sub, kind = "No microphone", "Getsu selects it as soon as you plug one in", "nomic"
+            dpg.configure_item("mic_chev", show=False)
+            dpg.configure_item("mic_row", show=True)
+        else:
+            title, sub, kind = chosen["title"], chosen["subtitle"], chosen["kind"]
+            dpg.configure_item("mic_chev", show=True)
+        dpg.set_value("mic_row_title", self._fit_text(title, self.font_header, width))
+        dpg.set_value("mic_row_sub", self._fit_text(sub, self.font_notice, width))
+        bg = COL_ACCENT if kind != "nomic" else (99, 99, 102)
+        self._tile_draw("mic_tile", kind, bg, COL_WHITE, self.s(32))
+        if FEATURE_EARBUD_HINT:
+            bt_on = bool(chosen and chosen["kind"] == "bt" and any(e["kind"] == "builtin" for e in entries))
+            dpg.configure_item("hint_row", show=bt_on)
+        if self._open_panel_name == "mics":
+            self._rebuild_mic_list()
+
+    def _select_mic_from_panel(self, label: str):
+        """Selects a microphone the same way the old dropdown did (validation and locks live in on_input_changed)."""
+        self.on_input_changed(None, label)
+        self._close_panels()
+        self._refresh_mic_widgets()
+
+    def _rebuild_mic_list(self):
+        """Rows of the microphone panel: kind icon, title, subtitle, and a check on the selected microphone."""
+        if not dpg.does_item_exist("mic_list"):
+            return
+        dpg.delete_item("mic_list", children_only=True)
+        for tag in [t for t in self._click_targets if t.startswith("mic_row_")]:
+            del self._click_targets[tag]
+        entries = self._mic_entries()
+        current = self._get_selected_input_label()
+        row_w = self.s(372)
+        row_h = self.s(52)
+        label_w = self.s(284)
+        for i, entry in enumerate(entries):
+            tag = f"mic_row_{i}"
+            with dpg.child_window(tag=tag, parent="mic_list", width=row_w, height=row_h, border=False,
+                                  no_scrollbar=True, no_scroll_with_mouse=True):
+                self._bind_flat(tag)
+                with dpg.group(horizontal=True):
+                    dpg.add_spacer(width=self.s(16))
+                    icon_dl = f"{tag}_icon"
+                    dpg.add_drawlist(width=self.s(16), height=row_h, tag=icon_dl)
+                    self._draw_device_glyph(icon_dl, entry["kind"], self.s(0), self.s(18), self.s(16), COL_TEXT_2)
+                    dpg.add_spacer(width=self.s(12))
+                    with dpg.child_window(width=label_w, height=row_h, border=False, no_scrollbar=True):
+                        self._bind_flat(f"{tag}_label")
+                        dpg.add_spacer(height=self.s(10))
+                        dpg.add_text(self._fit_text(entry["title"], self.font_list, label_w), color=COL_TEXT)
+                        dpg.bind_item_font(dpg.last_item(), self.font_list)
+                        dpg.add_text(self._fit_text(entry["subtitle"], self.font_notice, label_w), color=COL_TEXT_2)
+                        dpg.bind_item_font(dpg.last_item(), self.font_notice)
+                    dpg.add_spacer(width=self.s(12))
+                    tick_dl = f"{tag}_tick"
+                    dpg.add_drawlist(width=self.s(16), height=row_h, tag=tick_dl)
+                    if entry["label"] == current:
+                        dpg.draw_polyline(icons.to_px(icons.CHECK, 0, self.s(18), self.s(16)), color=COL_ACCENT,
+                                          thickness=float(self.s(2)), parent=tick_dl)
+            self._click_targets[tag] = (lambda lab=entry["label"]: self._select_mic_from_panel(lab))
+            if i < len(entries) - 1:
+                div = f"{tag}_div"
+                with dpg.group(horizontal=True, parent="mic_list"):
+                    dpg.add_spacer(width=self.s(16))
+                    dpg.add_drawlist(width=self.s(340), height=1, tag=div)
+                    dpg.draw_line((0, 0), (self.s(340), 0), color=COL_SEPARATOR, thickness=1.0, parent=div)
+        if not entries:
+            dpg.add_text("No microphone detected.", color=COL_TEXT_2, parent="mic_list")
+
+    def _bind_flat(self, tag: str):
+        if dpg.does_item_exist(tag) and self.theme_flat:
+            dpg.bind_item_theme(tag, self.theme_flat)
+
+    # --- switches and overlays --------------------------------------------
+
+    def _make_switch(self, name: str, parent: str, on: bool, callback):
+        """Drawn toggle (42 x 26, accent when on). Registered for clicks."""
+        sw = _Switch(self, name, on, callback)
+        sw.build(parent)
+        self._switches[name] = sw
+        self._click_targets[sw.tag] = (lambda n=name: self._toggle_switch(n))
+
+    def _toggle_switch(self, name: str):
+        sw = self._switches.get(name)
+        if sw is not None:
+            sw.toggle()
+
+    def _switch_set(self, name: str, on: bool):
+        """Sets a switch without firing its callback (used when a change is refused)."""
+        sw = self._switches.get(name)
+        if sw is not None:
+            sw.set(on)
+
+    def _draw_overlays(self):
+        """Icons on the tinted buttons and the voice test progress. Drawn on the viewport layer, hidden while a panel is open."""
+        if not self._ui_built or self._ovl is None:
+            return
+        if self._open_panel_name:
+            if self._overlay_sig != "panel":
+                dpg.delete_item(self._ovl, children_only=True)
+                self._overlay_sig = "panel"
+            return
+        parts = []
+        for tag, glyph in (("btn_voice_test", "play"), ("btn_settings", "sliders"), ("btn_help", "help")):
+            if not dpg.does_item_exist(tag):
+                continue
+            rmin = dpg.get_item_rect_min(tag)
+            rmax = dpg.get_item_rect_max(tag)
+            if rmax[0] <= rmin[0]:
+                continue
+            enabled = bool(dpg.is_item_enabled(tag))
+            parts.append((tag, glyph, tuple(rmin), tuple(rmax), enabled))
+        sig = (tuple(parts), self._vt_active, round(self._vt_progress, 3))
+        if sig == self._overlay_sig:
+            return
+        self._overlay_sig = sig
+        dpg.delete_item(self._ovl, children_only=True)
+        accent = COL_ACCENT
+        for tag, glyph, (x0, y0), (x1, y1), enabled in parts:
+            col = accent if enabled else COL_TEXT_3
+            cx = (x0 + x1) / 2.0
+            cy = (y0 + y1) / 2.0
+            if glyph == "help":
+                size = self.s(16)
+                gx, gy = cx - size / 2.0, cy - size / 2.0
+                thick = float(self.s(2))
+                dpg.draw_polyline(icons.to_px(icons.HELP_RING, gx, gy, size), color=col, thickness=thick, closed=True, parent=self._ovl)
+                dpg.draw_polyline(icons.to_px(icons.HELP_QUESTION, gx, gy, size), color=col, thickness=thick, parent=self._ovl)
+                dpg.draw_circle(icons.to_px([icons.HELP_DOT], gx, gy, size)[0], float(self.s(1.2)), color=col, fill=col, parent=self._ovl)
+                continue
+            if tag == "btn_voice_test" and self._vt_active:
+                if self._vt_progress > 0:
+                    px = x0 + (x1 - x0) * min(1.0, self._vt_progress)
+                    dpg.draw_rectangle((x0, y0), (px, y1), color=COL_ACCENT_SOFT_2, fill=COL_ACCENT_SOFT_2, rounding=self.s(10), parent=self._ovl)
+                continue
+            label = dpg.get_item_label(tag) or ""
+            tw = self._text_w(label.strip(), self.font_btn)
+            size = self.s(16)
+            left = cx - (size + self.s(8) + tw) / 2.0
+            gy = cy - size / 2.0
+            if glyph == "play":
+                dpg.draw_polyline(icons.to_px(icons.PLAY, left, gy, size), color=col, thickness=1.0, closed=True, parent=self._ovl)
+                dpg.draw_polygon(icons.to_px(icons.PLAY, left, gy, size), color=col, fill=col, parent=self._ovl)
+            elif glyph == "sliders":
+                for (a, b) in icons.SLIDER_LINES:
+                    pa, pb = icons.to_px([a, b], left, gy, size)
+                    dpg.draw_line(pa, pb, color=col, thickness=float(self.s(2)), parent=self._ovl)
+                for (c, r) in icons.SLIDER_KNOBS:
+                    dpg.draw_circle(icons.to_px([c], left, gy, size)[0], float(r) * self.s(16) / 24.0, color=col, thickness=float(self.s(2)), parent=self._ovl)
+
+    def _open_panel(self, name: str):
+        """Opens a panel (mics, settings or help) over the window. The window height does not change."""
+        if not self._ui_built or not dpg.does_item_exist(f"panel_{name}"):
+            return
+        if name == "mics":
+            self._rebuild_mic_list()
+        vp_w = dpg.get_viewport_client_width()
+        vp_h = dpg.get_viewport_client_height()
+        sheet_h = self._panel_sheet_height(name, vp_h)
+        if name == "mics":
+            # The list takes the sheet height left after the head; it scrolls only when it is longer.
+            dpg.configure_item("mic_list", height=max(self.s(52), sheet_h - self.s(56) - self.s(24)))
+        dpg.configure_item(f"panel_{name}", pos=[0, 0], width=vp_w, height=vp_h)
+        dpg.show_item(f"panel_{name}")
+        dpg.focus_item(f"panel_{name}")  # raise above the main window
+        dpg.configure_item(f"panel_{name}_gap", height=max(0, vp_h - sheet_h))
+        dpg.configure_item(f"sheet_{name}", height=sheet_h, width=vp_w)
+        self._open_panel_name = name
+        self._overlay_sig = None
+        self._draw_overlays()
+
+    def _panel_sheet_height(self, name: str, vp_h: int) -> int:
+        """Sheet height: head plus content, never more than the viewport. The mic list scrolls when it is longer."""
+        if name == "mics":
+            rows = max(1, len(self.device_map))
+            content = rows * self.s(52) + max(0, rows - 1) + self.s(16)
+            return min(vp_h, self.s(56) + content)
+        if name == "settings":
+            return min(vp_h, self.s(56) + self.s(4 * 56) + self.s(24))
+        return min(vp_h, self.s(56 + 252 + 24))
+
+    def _close_panels(self):
+        for name in ("mics", "settings", "help"):
+            if dpg.does_item_exist(f"panel_{name}"):
+                dpg.hide_item(f"panel_{name}")
+        self._open_panel_name = None
+        self._overlay_sig = None
+        self._draw_overlays()
+
+    def _on_mouse_click(self, sender=None, app_data=None):
+        """Global left click. A click on the scrim closes the open panel; otherwise the hovered custom control is run."""
+        if not self._ui_built:
+            return
+        if self._open_panel_name:
+            if not dpg.is_item_hovered(f"sheet_{self._open_panel_name}"):
+                self._close_panels()
+                return
+        for tag, callback in list(self._click_targets.items()):
+            if dpg.does_item_exist(tag) and dpg.is_item_hovered(tag):
+                callback()
+                return
+
+    def show_how_to_use_modal(self, sender=None, app_data=None):
+        """Opens the How to use panel over the window."""
+        self._open_panel("help")
+
+    def _set_mode(self, name: str):
+        """Mode segment selection (UI only until the Modes backend lands in M2.4)."""
+        self._mode = name
+        for i, mode in enumerate(MODE_NAMES):
+            dpg.bind_item_theme(f"mode_{i}", self.theme_boost_active if mode == name else self.theme_boost_inactive)
+        desc = MODE_DESCRIPTIONS[name]
+        dpg.set_value("mode_desc", desc)
+
+    # --- main window -------------------------------------------------------
+
+    def _build_hero(self, width: int):
+        dpg.add_spacer(height=self.s(16))
+        with dpg.group(horizontal=True):
+            dpg.add_spacer(width=(width - self.s(104)) // 2)
+            dpg.add_drawlist(width=self.s(104), height=self.s(104), tag="power_drawlist")
+        self._click_targets["power_drawlist"] = self._on_power_click
+        dpg.add_spacer(height=self.s(16))
+        self._centered_line("hero_state", self.font_state, COL_TEXT, width)
+        dpg.add_spacer(height=self.s(2))
+        self._centered_line("hero_sub", self.font_notice, COL_TEXT_2, width, with_dot=True)
+        dpg.add_spacer(height=self.s(12))
+        with dpg.group(horizontal=True):
+            dpg.add_spacer(width=(width - self.s(95)) // 2)
+            dpg.add_drawlist(width=self.s(95), height=self.s(18), tag="meter")
+        for i in range(14):
+            x = i * self.s(7)
+            dpg.draw_rectangle((x, self.s(15)), (x + self.s(4), self.s(18)), color=COL_FILL_2, fill=COL_FILL_2,
+                               rounding=self.s(2), tag=f"meter_bar_{i}", parent="meter")
+        dpg.add_spacer(height=self.s(32))
+
+    def _build_mic_card(self, width: int):
+        modes_h = self.s(85) if FEATURE_MODES else 0
+        hint_h = self.s(28) if FEATURE_EARBUD_HINT else 0
+        card_h = self.s(60) + hint_h + modes_h
+        with dpg.child_window(tag="mic_card", width=width, height=card_h, border=False, no_scrollbar=True):
+            self._bind_card("mic_card")
+            with dpg.child_window(tag="mic_row", width=width, height=self.s(60), border=False,
+                                  no_scrollbar=True, no_scroll_with_mouse=True):
+                self._bind_flat("mic_row")
+                with dpg.group(horizontal=True):
+                    dpg.add_spacer(width=self.s(16))
+                    dpg.add_drawlist(width=self.s(32), height=self.s(60), tag="mic_tile")
+                    dpg.add_spacer(width=self.s(12))
+                    with dpg.child_window(width=self.s(268), height=self.s(60), border=False, no_scrollbar=True):
+                        self._bind_flat("mic_label_box")
+                        dpg.add_spacer(height=self.s(12))
+                        dpg.add_text("", tag="mic_row_title", color=COL_TEXT)
+                        dpg.bind_item_font("mic_row_title", self.font_header)
+                        dpg.add_text("", tag="mic_row_sub", color=COL_TEXT_2)
+                        dpg.bind_item_font("mic_row_sub", self.font_notice)
+                    dpg.add_drawlist(width=self.s(16), height=self.s(60), tag="mic_chev")
+                    dpg.draw_polyline(icons.to_px(icons.CHEVRON, 0, self.s(22), self.s(16)), color=COL_TEXT_3,
+                                      thickness=float(self.s(2)), parent="mic_chev")
+            self._click_targets["mic_row"] = self._open_mic_panel_from_row
+            if FEATURE_EARBUD_HINT:
+                with dpg.group(horizontal=True, tag="hint_row", show=False):
+                    dpg.add_spacer(width=self.s(16))
+                    dpg.add_text("Earbud mic drops audio to call quality.", color=COL_TEXT_2, tag="hint_text")
+                    dpg.bind_item_font("hint_text", self.font_notice)
+                    dpg.add_button(label="Use built-in mic", tag="btn_use_builtin", callback=self._use_builtin_mic)
+                    dpg.bind_item_theme("btn_use_builtin", self.theme_link_btn)
+            if FEATURE_MODES:
+                with dpg.group(horizontal=True):
+                    dpg.add_spacer(width=self.s(16))
+                    dpg.add_drawlist(width=width - self.s(32), height=1, tag="mode_divider")
+                    dpg.draw_line((0, 0), (width - self.s(32), 0), color=COL_SEPARATOR, thickness=1.0, parent="mode_divider")
+                dpg.add_spacer(height=self.s(12))
+                with dpg.group(horizontal=True):
+                    dpg.add_spacer(width=self.s(16))
+                    dpg.add_text("Mode", color=COL_TEXT)
+                    dpg.bind_item_font(dpg.last_item(), self.font_btn)
+                    dpg.add_spacer(width=0, tag="mode_desc_pad")
+                    dpg.add_text(MODE_DESCRIPTIONS[self._mode], color=COL_TEXT_2, tag="mode_desc")
+                    dpg.bind_item_font("mode_desc", self.font_notice)
+                dpg.add_spacer(height=self.s(8))
+                seg_w = (width - self.s(32) - self.s(6)) // 4
+                with dpg.group(horizontal=True):
+                    dpg.add_spacer(width=self.s(16))
+                    for i, mode in enumerate(MODE_NAMES):
+                        dpg.add_button(label=mode, tag=f"mode_{i}", width=seg_w, height=self.s(30),
+                                       callback=lambda s, a, m=mode: self._set_mode(m))
+                        dpg.bind_item_font(f"mode_{i}", self.font_btn)
+                        if i < 3:
+                            dpg.add_spacer(width=self.s(2))
+                dpg.add_spacer(height=self.s(16))
+                self._set_mode(self._mode)
+
+    def _bind_card(self, tag: str):
+        if self.theme_card:
+            dpg.bind_item_theme(tag, self.theme_card)
+
+    def _open_mic_panel_from_row(self):
+        if self.device_map:
+            self._open_panel("mics")
+
+    def _use_builtin_mic(self, sender=None, app_data=None):
+        entries = self._mic_entries()
+        builtin = next((e for e in entries if e["kind"] == "builtin"), None)
+        if builtin is not None:
+            self.on_input_changed(None, builtin["label"])
+            self._refresh_mic_widgets()
+
+    def _build_actions(self, width: int):
+        btn_w = (width - self.s(16) - self.s(44)) // 2
+        btn_h = self.s(44)
+        with dpg.group(horizontal=True):
+            dpg.add_button(label="Hear myself", tag="btn_voice_test", width=btn_w, height=btn_h,
+                           callback=self.start_voice_test)
+            dpg.bind_item_theme("btn_voice_test", self.theme_voice_btn)
+            dpg.add_spacer(width=self.s(8))
+            dpg.add_button(label=self._vt_label_pad() + "Show settings", tag="btn_settings", width=btn_w, height=btn_h,
+                           callback=lambda: self._open_panel("settings"))
+            dpg.bind_item_theme("btn_settings", self.theme_voice_btn)
+            dpg.add_spacer(width=self.s(8))
+            dpg.add_button(label="", tag="btn_help", width=self.s(44), height=btn_h,
+                           callback=lambda: self._open_panel("help"))
+            dpg.bind_item_theme("btn_help", self.theme_voice_btn)
+        for tag in ("btn_voice_test", "btn_settings"):
+            dpg.bind_item_font(tag, self.font_btn)
+
+    def _build_footer(self, width: int):
+        # Width of "Sponsored by " plus the link button (its text and frame padding), so the group ends at the right edge.
+        link_w = self._text_w("Kopi Reman", self.font_small) + self.s(12)
+        right_w = self._text_w("Sponsored by", self.font_small) + self.s(4) + link_w
+        with dpg.table(header_row=False, policy=dpg.mvTable_SizingFixedFit, tag="footer_row"):
+            dpg.add_table_column(init_width_or_weight=max(1, width - right_w))
+            dpg.add_table_column(init_width_or_weight=right_w)
+            with dpg.table_row():
+                dpg.add_text("Created by Ihsan", color=COL_TEXT_3, tag="footer_creator_text")
+                with dpg.group(horizontal=True):
+                    dpg.add_text("Sponsored by", color=COL_TEXT_3, tag="footer_sponsor_text")
+                    dpg.add_spacer(width=self.s(4))
+                    dpg.add_button(label="Kopi Reman", callback=lambda: webbrowser.open("https://www.instagram.com/kopireman/"),
+                                   width=link_w, tag="sponsor_link_btn")
+                    dpg.bind_item_theme("sponsor_link_btn", self.theme_link_btn)
+        for tag in ("footer_creator_text", "footer_sponsor_text", "sponsor_link_btn"):
+            dpg.bind_item_font(tag, self.font_small)
+
+    # --- panels -----------------------------------------------------------
+
+    def _build_panel_shell(self, name: str):
+        """Modal overlay: scrim (dim) above the window, and a sheet anchored to the bottom. Resized by _open_panel."""
+        vp_w = self.s(420)
+        vp_h = self.s(640)
+        # Not a DearPyGui modal: a modal popup that was closed earlier (the VB-Cable dialog) blocks later modals.
+        # The window covers the whole client area, so it takes all input; _on_mouse_click closes it on a scrim click.
+        with dpg.window(tag=f"panel_{name}", show=False, no_title_bar=True, no_move=True,
+                        no_resize=True, no_scrollbar=True, no_collapse=True, no_close=True,
+                        pos=[0, 0], width=vp_w, height=vp_h):
+            if self.theme_scrim:
+                dpg.bind_item_theme(f"panel_{name}", self.theme_scrim)
+            dpg.add_spacer(tag=f"panel_{name}_gap", height=vp_h)
+            with dpg.child_window(tag=f"sheet_{name}", width=vp_w, height=vp_h, border=False, no_scrollbar=False):
+                if self.theme_sheet:
+                    dpg.bind_item_theme(f"sheet_{name}", self.theme_sheet)
+                self._panel_body(name)
+
+    def _sheet_head(self, title: str, done_callback):
+        width = self.s(372)
+        dpg.add_spacer(height=self.s(16))
+        with dpg.group(horizontal=True):
+            dpg.add_spacer(width=self.s(24))
+            dpg.add_text(title, color=COL_TEXT)
+            dpg.bind_item_font(dpg.last_item(), self.font_title)
+            dpg.add_spacer(width=max(0, width - self._text_w(title, self.font_title) - self.s(60)))
+            if done_callback is not None:
+                dpg.add_button(label="Done", callback=done_callback, width=self.s(44), height=self.s(26))
+                dpg.bind_item_theme(dpg.last_item(), self.theme_link_btn)
+                dpg.bind_item_font(dpg.last_item(), self.font_btn)
+        dpg.add_spacer(height=self.s(12))
+
+    def _panel_body(self, name: str):
+        width = self.s(372)
+        if name == "mics":
+            self._sheet_head("Microphone", lambda: self._close_panels())
+            with dpg.group(horizontal=True):
+                dpg.add_spacer(width=self.s(24))
+                with dpg.child_window(tag="mic_list", width=width, height=self.s(100), border=False):
+                    self._bind_list("mic_list")
+            dpg.add_spacer(height=self.s(8))
+            with dpg.group(horizontal=True):
+                dpg.add_spacer(width=self.s(24))
+                dpg.add_text("", tag="input_selection_hint", wrap=width, color=COL_WARNING, show=False)
+                dpg.bind_item_font("input_selection_hint", self.font_notice)
+        elif name == "settings":
+            self._sheet_head("Settings", lambda: self._close_panels())
+            with dpg.group(horizontal=True):
+                dpg.add_spacer(width=self.s(24))
+                with dpg.child_window(tag="settings_card", width=width, height=self.s(4 * 56), border=False):
+                    self._bind_list("settings_card")
+                    self._settings_row_slider(width)
+                    self._divider(width)
+                    self._settings_row_boost(width)
+                    self._divider(width)
+                    self._settings_row_switch("auto_route", "Use as default microphone",
+                                              "Discord, Zoom and games pick it up automatically",
+                                              bool(self.config.get("auto_route", True)),
+                                              self._on_auto_route_switch)
+                    self._divider(width)
+                    self._settings_row_switch("music_mode", "Music & Singing mode", None,
+                                              bool(self.config.get("music_mode", False)),
+                                              self._on_music_mode_switch)
+                    if FEATURE_LEARN_ROOM:
+                        self._divider(width)
+                        self._settings_row_learn(width)
+        else:
+            self._sheet_head("How to use Getsu", None)
+            with dpg.group(horizontal=True):
+                dpg.add_spacer(width=self.s(24))
+                with dpg.child_window(tag="help_body", width=width, height=self.s(252), border=False):
+                    self._help_steps(width - self.s(34))
+                    dpg.add_spacer(height=self.s(4))
+                    dpg.add_button(label="Got it", width=width, height=self.s(40), callback=lambda: self._close_panels())
+                    dpg.bind_item_theme(dpg.last_item(), self.theme_start_btn)
+                    dpg.bind_item_font(dpg.last_item(), self.font_btn)
+
+    def _bind_list(self, tag: str):
+        if self.theme_list and dpg.does_item_exist(tag):
+            dpg.bind_item_theme(tag, self.theme_list)
+
+    def _divider(self, width: int):
+        with dpg.group(horizontal=True):
+            dpg.add_spacer(width=self.s(16))
+            dpg.add_drawlist(width=width - self.s(16), height=1)
+            dpg.draw_line((0, 0), (width - self.s(32), 0), color=COL_SEPARATOR, thickness=1.0, parent=dpg.last_item())
+
+    def _settings_row_slider(self, width: int):
+        with dpg.group(horizontal=True):
+            dpg.add_spacer(width=self.s(16))
+            with dpg.child_window(width=self.s(186), height=self.s(56), border=False, no_scrollbar=True):
+                self._bind_flat(dpg.last_item())
+                dpg.add_spacer(height=self.s(12))
+                dpg.add_text("Sensitivity", color=COL_TEXT)
+                dpg.add_text("Higher ignores more background voices", color=COL_TEXT_2)
+                dpg.bind_item_font(dpg.last_item(), self.font_notice)
+            with dpg.group():
+                dpg.add_spacer(height=self.s(14))
+                dpg.add_slider_float(default_value=float(self.config.get("vad_threshold", 0.70)), min_value=0.40,
+                                     max_value=0.90, format="", callback=self.on_vad_slider_changed,
+                                     tag="slider_vad", width=self.s(150))
+                if self.theme_slider:
+                    dpg.bind_item_theme("slider_vad", self.theme_slider)
+
+    def _settings_row_boost(self, width: int):
+        with dpg.group(horizontal=True):
+            dpg.add_spacer(width=self.s(16))
+            with dpg.child_window(width=self.s(170), height=self.s(56), border=False, no_scrollbar=True):
+                self._bind_flat(dpg.last_item())
+                dpg.add_spacer(height=self.s(18))
+                dpg.add_text("Mic boost", color=COL_TEXT)
+            seg_w = (self.s(170) - self.s(6)) // 4
+            with dpg.group():
+                dpg.add_spacer(height=self.s(14))
+                with dpg.group(horizontal=True):
+                    for i, db in enumerate((0, 5, 10, 15)):
+                        dpg.add_button(label=("0" if db == 0 else f"+{db}"), tag=f"btn_boost_{db}", width=seg_w,
+                                       height=self.s(28), callback=lambda s, a, d=db: self.set_mic_boost(d))
+                        dpg.bind_item_font(f"btn_boost_{db}", self.font_btn)
+                        if i < 3:
+                            dpg.add_spacer(width=self.s(2))
+        self._update_boost_buttons_ui()
+
+    def _settings_row_switch(self, name: str, label: str, detail, on: bool, callback):
+        with dpg.group(horizontal=True):
+            dpg.add_spacer(width=self.s(16))
+            with dpg.child_window(width=self.s(298), height=self.s(56), border=False, no_scrollbar=True):
+                self._bind_flat(dpg.last_item())
+                dpg.add_spacer(height=self.s(14 if detail is None else 12))
+                dpg.add_text(label, color=COL_TEXT)
+                if detail:
+                    dpg.add_text(detail, color=COL_TEXT_2)
+                    dpg.bind_item_font(dpg.last_item(), self.font_notice)
+            with dpg.group() as switch_group:
+                dpg.add_spacer(height=self.s(15))
+            self._make_switch(name, switch_group, on, callback)
+
+    def _settings_row_learn(self, width: int):
+        with dpg.group(horizontal=True):
+            dpg.add_spacer(width=self.s(16))
+            dpg.add_text("Learn my room", color=COL_TEXT)
+            dpg.add_button(label="Learn", enabled=False, tag="btn_room_learn")
+            dpg.bind_item_theme("btn_room_learn", self.theme_voice_btn)
+
+    def _help_steps(self, text_w: int):
+        steps = (
+            ("Pick your microphone", "The one you speak into. Getsu remembers it.", None),
+            ("Turn on noise cancellation", "Most apps switch to your clean voice automatically.", None),
+            ("Only if an app still hears noise",
+             "Set its input to ", ("Default", "CABLE Output")),
+        )
+        for number, (title, desc, chips) in enumerate(steps, start=1):
+            with dpg.group(horizontal=True):
+                dpg.add_drawlist(width=self.s(22), height=self.s(22), tag=f"step_num_{number}")
+                dpg.draw_circle((self.s(11), self.s(11)), self.s(11), color=COL_ACCENT_SOFT, fill=COL_ACCENT_SOFT,
+                                parent=f"step_num_{number}")
+                dpg.draw_text((self.s(7), self.s(4)), str(number), color=COL_ACCENT, size=self.s(12),
+                              parent=f"step_num_{number}")
+                dpg.add_spacer(width=self.s(12))
+                with dpg.child_window(width=text_w, height=self.s(52), border=False, no_scrollbar=True):
+                    self._bind_flat(dpg.last_item())
+                    dpg.add_text(title, color=COL_TEXT)
+                    dpg.bind_item_font(dpg.last_item(), self.font_btn)
+                    if chips is None:
+                        dpg.add_text(desc, color=COL_TEXT_2, wrap=text_w)
+                        dpg.bind_item_font(dpg.last_item(), self.font_notice)
+                    else:
+                        with dpg.group(horizontal=True):
+                            dpg.add_text(desc, color=COL_TEXT_2)
+                            dpg.bind_item_font(dpg.last_item(), self.font_notice)
+                            for k, chip in enumerate(chips):
+                                self._chip(chip)
+                                if k == 0:
+                                    dpg.add_text(" or ", color=COL_TEXT_2)
+                                    dpg.bind_item_font(dpg.last_item(), self.font_notice)
+                        dpg.add_text("Turn off the app's own noise filter.", color=COL_TEXT_2, wrap=text_w)
+                        dpg.bind_item_font(dpg.last_item(), self.font_notice)
+            dpg.add_spacer(height=self.s(12))
+
+    def _chip(self, text: str):
+        """Code-styled chip (the mockup's <code>): a small card-coloured child window with the text inside."""
+        with dpg.child_window(width=self._text_w(text, self.font_notice) + self.s(12), height=self.s(18),
+                              border=False, no_scrollbar=True):
+            if self.theme_chip:
+                dpg.bind_item_theme(dpg.last_item(), self.theme_chip)
+            dpg.add_text(text, color=COL_TEXT)
+            dpg.bind_item_font(dpg.last_item(), self.font_notice)
+
+    # --- settings callbacks (switch toggles go through the same handlers as before) ----
+
+    def _on_auto_route_switch(self, on: bool):
+        self.on_auto_route_toggled(None, on)
+
+    def _on_music_mode_switch(self, on: bool):
+        self.on_music_mode_toggled(None, on)
+
+    def _set_voice_test_button_state(self, enabled: bool):
+        """Enables or disables Hear myself. Disabled while the cable is missing or during a voice test."""
+        if not self._ui_built or not dpg.does_item_exist("btn_voice_test"):
+            return
+        if enabled and not self.is_vbcable_installed:
+            enabled = False
+        pad = self._vt_label_pad()
+        if enabled:
+            dpg.configure_item("btn_voice_test", enabled=True, label=pad + "Hear myself")
+            dpg.bind_item_theme("btn_voice_test", self.theme_voice_btn)
+        else:
+            dpg.configure_item("btn_voice_test", enabled=False, label=pad + "Hear myself")
+            dpg.bind_item_theme("btn_voice_test", self.theme_voice_btn_disabled)
+
+    def _vt_label_pad(self) -> str:
+        """Leading spaces that leave room for the play glyph (see _draw_overlays)."""
+        space = self._text_w(" ", self.font_btn) or self.s(4)
+        return " " * max(1, int(round(self.s(24) / float(space))))
+
     def build_ui(self):
         dpg.create_context()
         self._ui_built = True
-
-        # --- APP ICON TEXTURE REGISTRY ---
-        self.has_icon_texture = False
-        if os.path.exists(ICON_PNG_PATH):
-            try:
-                iw, ih, ic, idata = dpg.load_image(ICON_PNG_PATH)
-                with dpg.texture_registry(show=False):
-                    dpg.add_static_texture(width=iw, height=ih, default_value=idata, tag="app_icon_texture")
-                self.has_icon_texture = True
-            except Exception as e:
-                print(f"[WARN] Failed to load icon texture: {e}")
+        self._last_meter_t = 0.0
 
         # --- FONT CONFIGURATION: BUNDLED INTER (WITH SYSTEM FALLBACK) ---
         bundled_font_dir = os.path.join(APP_DIR, "assets", "fonts")
@@ -1449,7 +2209,7 @@ class GetsuGUI:
 
         print(f"[GUI] Active Font Engine: {font_family}")
 
-        # Type scale from the mockup: 11, 12, 13, 14 and 16 px. SemiBold for titles and buttons.
+        # Type scale from the mockup: 11, 12, 13, 14, 16 and 17 px. SemiBold for titles and buttons.
         with dpg.font_registry():
             if path_regular and os.path.exists(path_regular):
                 bold_file = path_semibold if (path_semibold and os.path.exists(path_semibold)) else path_bold
@@ -1458,19 +2218,19 @@ class GetsuGUI:
                 self.font_body = dpg.add_font(path_regular, self.s(13))
                 self.font_small = dpg.add_font(path_regular, self.s(11))
                 self.font_notice = dpg.add_font(path_regular, self.s(12))
+                self.font_list = dpg.add_font(path_regular, self.s(14))
                 self.font_header = dpg.add_font(bold_file, self.s(14))
                 self.font_btn = dpg.add_font(bold_file, self.s(13))
-                self.font_start = dpg.add_font(bold_file, self.s(16))
+                self.font_title = dpg.add_font(bold_file, self.s(16))
+                self.font_state = dpg.add_font(bold_file, self.s(17))
                 dpg.bind_font(self.font_body)
             else:
-                self.font_body = None
-                self.font_header = None
-                self.font_btn = None
-                self.font_start = None
-                self.font_notice = None
-                self.font_small = None
+                self.font_body = self.font_small = self.font_notice = None
+                self.font_list = self.font_header = self.font_btn = None
+                self.font_title = self.font_state = None
 
         # Dark theme from the approved mockup palette. Rounding: cards 14, buttons 10, segmented 9.
+        # Spacing is zero by default: every gap in the layout is an explicit spacer.
         with dpg.theme() as global_theme:
             with dpg.theme_component(dpg.mvAll):
                 dpg.add_theme_color(dpg.mvThemeCol_WindowBg, COL_WINDOW)
@@ -1490,8 +2250,8 @@ class GetsuGUI:
                 dpg.add_theme_color(dpg.mvThemeCol_HeaderHovered, COL_CARD_HOVER)
                 dpg.add_theme_color(dpg.mvThemeCol_HeaderActive, COL_ACCENT_SOFT_2)
                 dpg.add_theme_color(dpg.mvThemeCol_CheckMark, COL_ACCENT)
-                dpg.add_theme_color(dpg.mvThemeCol_SliderGrab, COL_ACCENT)
-                dpg.add_theme_color(dpg.mvThemeCol_SliderGrabActive, COL_ACCENT_HOVER)
+                dpg.add_theme_color(dpg.mvThemeCol_SliderGrab, COL_WHITE)
+                dpg.add_theme_color(dpg.mvThemeCol_SliderGrabActive, COL_WHITE)
                 dpg.add_theme_color(dpg.mvThemeCol_ScrollbarBg, (0, 0, 0, 0))
                 dpg.add_theme_color(dpg.mvThemeCol_ScrollbarGrab, COL_FILL_3)
                 dpg.add_theme_color(dpg.mvThemeCol_ScrollbarGrabHovered, COL_FILL_3)
@@ -1502,22 +2262,53 @@ class GetsuGUI:
                 dpg.add_theme_style(dpg.mvStyleVar_ChildRounding, self.s(14))
                 dpg.add_theme_style(dpg.mvStyleVar_PopupRounding, self.s(10))
                 dpg.add_theme_style(dpg.mvStyleVar_WindowRounding, 0)
-                dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, self.s(10), self.s(8))
-                dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, self.s(14), self.s(12))
-
-        # Status card: flat card without border.
-        with dpg.theme() as theme_status_card:
-            with dpg.theme_component(dpg.mvChildWindow):
-                dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, self.s(14), self.s(6))
-                dpg.add_theme_style(dpg.mvStyleVar_ChildRounding, self.s(14))
+                dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, 0, 0)
+                dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, self.s(CONTENT_PAD), 0)
+                dpg.add_theme_style(dpg.mvStyleVar_WindowBorderSize, 0)
                 dpg.add_theme_style(dpg.mvStyleVar_ChildBorderSize, 0)
 
-        # Status text group theme (Zero item spacing so spacer sets exact vertical offset)
-        with dpg.theme() as theme_status_text_group:
-            with dpg.theme_component(dpg.mvGroup):
-                dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, 0, 0)
+        def _child_theme(rounding, bg=None):
+            with dpg.theme() as theme:
+                with dpg.theme_component(dpg.mvChildWindow):
+                    if bg is not None:
+                        dpg.add_theme_color(dpg.mvThemeCol_ChildBg, bg)
+                    dpg.add_theme_style(dpg.mvStyleVar_ChildRounding, self.s(rounding))
+                    dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, 0, 0)
+                    dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, 0, 0)
+                    dpg.add_theme_style(dpg.mvStyleVar_ChildBorderSize, 0)
+            return theme
 
-        # Primary accent button: START. The running state (STOP) uses the same accent, it is an "on" state.
+        self.theme_flat = _child_theme(0, (0, 0, 0, 0))
+        self.theme_card = _child_theme(14, COL_CARD)
+        self.theme_list = _child_theme(12, COL_CARD)
+        self.theme_sheet = _child_theme(14, COL_WINDOW)
+        with dpg.theme() as self.theme_chip:
+            with dpg.theme_component(dpg.mvChildWindow):
+                dpg.add_theme_color(dpg.mvThemeCol_ChildBg, COL_CARD)
+                dpg.add_theme_style(dpg.mvStyleVar_ChildRounding, self.s(5))
+                dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, self.s(5), self.s(2))
+
+        with dpg.theme() as self.theme_scrim:
+            with dpg.theme_component(dpg.mvAll):
+                dpg.add_theme_color(dpg.mvThemeCol_WindowBg, (0, 0, 0, 140))
+                dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, 0, 0)
+                dpg.add_theme_style(dpg.mvStyleVar_WindowBorderSize, 0)
+                dpg.add_theme_style(dpg.mvStyleVar_WindowRounding, 0)
+
+        with dpg.theme() as self.theme_slider:
+            with dpg.theme_component(dpg.mvSliderFloat):
+                dpg.add_theme_color(dpg.mvThemeCol_FrameBg, COL_FILL_2)
+                dpg.add_theme_color(dpg.mvThemeCol_FrameBgHovered, COL_FILL_3)
+                dpg.add_theme_color(dpg.mvThemeCol_SliderGrab, COL_WHITE)
+                dpg.add_theme_color(dpg.mvThemeCol_SliderGrabActive, COL_WHITE)
+                dpg.add_theme_style(dpg.mvStyleVar_GrabMinSize, self.s(16))
+                dpg.add_theme_style(dpg.mvStyleVar_GrabRounding, self.s(8))
+                dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(2))
+                dpg.add_theme_style(dpg.mvStyleVar_FramePadding, 0, self.s(2))
+
+        dpg.bind_theme(global_theme)
+
+        # Primary accent button: "Got it", install confirm. The running state uses the same accent.
         with dpg.theme() as self.theme_start_btn:
             with dpg.theme_component(dpg.mvButton):
                 dpg.add_theme_color(dpg.mvThemeCol_Button, COL_ACCENT)
@@ -1527,18 +2318,8 @@ class GetsuGUI:
                 dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(10))
         self.theme_stop_btn = self.theme_start_btn
 
-        # Tinted accent button: install driver, how to use.
-        with dpg.theme() as theme_banner_btn:
-            with dpg.theme_component(dpg.mvButton):
-                dpg.add_theme_color(dpg.mvThemeCol_Button, COL_ACCENT_SOFT)
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, COL_ACCENT_SOFT_2)
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, COL_ACCENT_SOFT_2)
-                dpg.add_theme_color(dpg.mvThemeCol_Text, COL_ACCENT)
-                dpg.add_theme_style(dpg.mvStyleVar_FrameBorderSize, 0.0)
-                dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(10))
-
-        # Link button (sponsor): accent text, no background.
-        with dpg.theme() as theme_link_btn:
+        # Link button (sponsor, Done): accent text, no background.
+        with dpg.theme() as self.theme_link_btn:
             with dpg.theme_component(dpg.mvButton):
                 dpg.add_theme_color(dpg.mvThemeCol_Button, (0, 0, 0, 0))
                 dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, COL_ACCENT_SOFT)
@@ -1565,13 +2346,14 @@ class GetsuGUI:
                 dpg.add_theme_style(dpg.mvStyleVar_FrameBorderSize, 0.0)
                 dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(9))
 
-        # Tinted button (voice test, dialog confirm): accent text on a soft accent fill.
+        # Tinted button (Hear myself, Show settings, help): accent text on a soft accent fill.
         with dpg.theme() as self.theme_voice_btn:
             with dpg.theme_component(dpg.mvButton):
                 dpg.add_theme_color(dpg.mvThemeCol_Button, COL_ACCENT_SOFT)
                 dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, COL_ACCENT_SOFT_2)
                 dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, COL_ACCENT_SOFT_2)
                 dpg.add_theme_color(dpg.mvThemeCol_Text, COL_ACCENT)
+                dpg.add_theme_style(dpg.mvStyleVar_FrameBorderSize, 0.0)
                 dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(10))
 
         # Disabled tinted button: grey text on the neutral fill, no hover change.
@@ -1585,7 +2367,7 @@ class GetsuGUI:
                     dpg.add_theme_color(dpg.mvThemeCol_TextDisabled, COL_TEXT_3)
                     dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(10))
 
-        # Unified modal theme: window background, hairline border, 12 px corners.
+        # Unified modal theme (VB-Cable install dialog): window background, hairline border, 12 px corners.
         with dpg.theme() as theme_modal:
             with dpg.theme_component(dpg.mvAll):
                 dpg.add_theme_color(dpg.mvThemeCol_WindowBg, COL_WINDOW)
@@ -1595,6 +2377,7 @@ class GetsuGUI:
                 dpg.add_theme_color(dpg.mvThemeCol_Border, COL_SEPARATOR)
                 dpg.add_theme_style(dpg.mvStyleVar_FramePadding, self.s(10), self.s(10))
                 dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, self.s(18), self.s(16))
+                dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, self.s(10), self.s(8))
                 dpg.add_theme_style(dpg.mvStyleVar_WindowRounding, self.s(12))
 
         # Secondary button (Not now, Cancel): neutral fill.
@@ -1607,225 +2390,25 @@ class GetsuGUI:
                 dpg.add_theme_style(dpg.mvStyleVar_FrameBorderSize, 0.0)
                 dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(10))
 
-        dpg.bind_theme(global_theme)
+        # Main window: no title bar (the OS title bar is drawn in DWM colours), no resize, no move.
+        width = self.s(372)
+        self._click_targets = {}
+        with dpg.window(tag="main_window", no_title_bar=True, no_resize=True, no_move=True,
+                        no_scrollbar=True, no_scroll_with_mouse=True, no_collapse=True):
+            self._build_hero(width)
+            self._build_mic_card(width)
+            dpg.add_spacer(height=self.s(24))
+            self._build_actions(width)
+            dpg.add_spacer(height=self.s(24))
+            self._build_footer(width)
+            dpg.add_spacer(height=self.s(16))
 
-        # Main window: zero scrollbar, no resize, no move
-        with dpg.window(
-            tag="main_window",
-            no_title_bar=True,
-            no_resize=True,
-            no_move=True,
-            no_scrollbar=True,
-            no_scroll_with_mouse=True,
-        ):
-            # --- HEADER ---
-            with dpg.table(header_row=False, policy=dpg.mvTable_SizingStretchProp):
-                dpg.add_table_column(init_width_or_weight=0.74)
-                dpg.add_table_column(init_width_or_weight=0.26)
-                with dpg.table_row():
-                    with dpg.group(horizontal=True):
-                        if self.has_icon_texture:
-                            dpg.add_image("app_icon_texture", width=self.s(22), height=self.s(22))
-                            dpg.add_spacer(width=self.s(3))
-                        dpg.add_text("GETSU - AI NOISE CANCELLATION", color=COL_TEXT, tag="header_title_text")
-                    dpg.add_text("[ STOPPED ]", tag="status_badge_text", color=COL_TEXT_2)
-
-            dpg.add_spacer(height=self.s(3))
-
-            # --- VB-CABLE STATUS CARD ---
-            with dpg.child_window(tag="status_card", width=-1, height=self.s(44), border=True, no_scrollbar=True):
-                with dpg.table(header_row=False, policy=dpg.mvTable_SizingStretchProp):
-                    dpg.add_table_column(init_width_or_weight=1.0)
-                    dpg.add_table_column(width_fixed=True, init_width_or_weight=self.s(120))
-                    with dpg.table_row():
-                        with dpg.group(tag="status_text_group"):
-                            dpg.add_spacer(height=self.s(3))
-                            dpg.add_text(
-                                "Virtual Mic Status",
-                                tag="banner_text",
-                                color=COL_ACCENT
-                            )
-                        with dpg.group(tag="status_btn_group"):
-                            dpg.add_button(
-                                label="Install Driver",
-                                callback=self.show_install_modal,
-                                tag="banner_install_btn",
-                                width=-1,
-                                height=self.s(28),
-                                show=False
-                            )
-                            dpg.add_button(
-                                label="How to Use",
-                                callback=self.show_how_to_use_modal,
-                                tag="banner_how_to_use_btn",
-                                width=-1,
-                                height=self.s(28),
-                                show=False
-                            )
-            dpg.bind_item_theme("status_card", theme_status_card)
-            dpg.bind_item_theme("status_text_group", theme_status_text_group)
-            dpg.bind_item_theme("status_btn_group", theme_status_text_group)
-            dpg.bind_item_theme("banner_install_btn", theme_banner_btn)
-            dpg.bind_item_theme("banner_how_to_use_btn", theme_banner_btn)
-
-            dpg.add_spacer(height=self.s(3))
-
-            # --- INPUT DEVICE SELECTION ---
-            dpg.add_text("Microphone Input:", color=COL_TEXT_2)
-            combo_items = list(self.device_map.keys())
-            dpg.add_combo(
-                items=combo_items,
-                default_value=self._get_selected_input_label(),
-                callback=self.on_input_changed,
-                tag="input_combo",
-                width=-1
-            )
-            dpg.add_text("", tag="input_selection_hint", wrap=self.s(360), color=COL_WARNING, show=False)
-
-            dpg.add_spacer(height=self.s(4))
-
-
-            # --- MICROPHONE BOOST (0, 5, 10, 15 dB) ---
-            dpg.add_text("Microphone Boost:", color=COL_TEXT_2)
-            with dpg.table(header_row=False, policy=dpg.mvTable_SizingStretchSame):
-                dpg.add_table_column(init_width_or_weight=1.0)
-                dpg.add_table_column(init_width_or_weight=1.0)
-                dpg.add_table_column(init_width_or_weight=1.0)
-                dpg.add_table_column(init_width_or_weight=1.0)
-                with dpg.table_row():
-                    dpg.add_button(
-                        label="0 dB",
-                        width=-1,
-                        height=self.s(30),
-                        tag="btn_boost_0",
-                        callback=lambda: self.set_mic_boost(0)
-                    )
-                    dpg.add_button(
-                        label="+5 dB",
-                        width=-1,
-                        height=self.s(30),
-                        tag="btn_boost_5",
-                        callback=lambda: self.set_mic_boost(5)
-                    )
-                    dpg.add_button(
-                        label="+10 dB",
-                        width=-1,
-                        height=self.s(30),
-                        tag="btn_boost_10",
-                        callback=lambda: self.set_mic_boost(10)
-                    )
-                    dpg.add_button(
-                        label="+15 dB",
-                        width=-1,
-                        height=self.s(30),
-                        tag="btn_boost_15",
-                        callback=lambda: self.set_mic_boost(15)
-                    )
-
-            dpg.add_spacer(height=self.s(5))
-
-            # --- VOICE SENSITIVITY THRESHOLD SLIDER ---
-            dpg.add_text("Voice Sensitivity Threshold:", color=COL_TEXT_2)
-            dpg.add_slider_float(
-                default_value=float(self.config.get("vad_threshold", 0.70)),
-                min_value=0.40,
-                max_value=0.90,
-                format="%.2f",
-                callback=self.on_vad_slider_changed,
-                tag="slider_vad",
-                width=-1,
-                height=self.s(26)
-            )
-
-            dpg.add_spacer(height=self.s(4))
-
-            # --- DEFAULT MICROPHONE SWITCH CHECKBOX ---
-            dpg.add_checkbox(
-                label="Set as Default Microphone while active",
-                default_value=self.config.get("auto_route", True),
-                callback=self.on_auto_route_toggled,
-                tag="chk_auto_route"
-            )
-
-            dpg.add_spacer(height=self.s(4))
-
-            # --- MUSIC & PERFORMANCE MODE CHECKBOX ---
-            dpg.add_checkbox(
-                label="Music & Singing Mode (Bypasses AI filter, 800ms sustain)",
-                default_value=self.config.get("music_mode", False),
-                callback=self.on_music_mode_toggled,
-                tag="chk_music_mode"
-            )
-
-            dpg.add_spacer(height=self.s(6))
-
-            # --- SINGLE ACTION BUTTON: START / STOP ---
-            dpg.add_button(
-                label="START",
-                callback=self.toggle_stream,
-                tag="btn_toggle",
-                width=-1,
-                height=self.s(50)
-            )
-            dpg.bind_item_theme("btn_toggle", self.theme_start_btn)
-
-            dpg.add_spacer(height=self.s(4))
-
-            # --- HEAR MYSELF (11s VOICE PREVIEW TEST) ---
-            dpg.add_button(
-                label="Hear Myself (11s Voice Test)",
-                callback=self.start_voice_test,
-                tag="btn_voice_test",
-                width=-1,
-                height=self.s(32)
-            )
-            dpg.bind_item_theme("btn_voice_test", self.theme_voice_btn)
-
-            dpg.add_spacer(height=self.s(6))
-
-            # --- COMPACT STATUS PILL (OPTION B) ---
-            dpg.add_text(
-                self._get_idle_status(),
-                tag="active_notice",
-                color=self._get_idle_color(),
-                wrap=self.s(485)
-            )
-
-            dpg.add_spacer(height=self.s(6))
-            dpg.add_separator()
-            dpg.add_spacer(height=self.s(4))
-
-            # --- FOOTER: CREATOR & SPONSOR ---
-            with dpg.group(horizontal=True, tag="footer_sponsor_row"):
-                dpg.add_text("Created by Ihsan  |  Sponsored by", color=COL_TEXT_3, tag="footer_creator_text")
-                dpg.add_button(
-                    label="Kopi Reman",
-                    callback=lambda: webbrowser.open("https://www.instagram.com/kopireman/"),
-                    small=True,
-                    tag="sponsor_link_btn"
-                )
-            dpg.bind_item_theme("sponsor_link_btn", theme_link_btn)
-
-            # Bind specialized fonts to elements
-            if self.font_header:
-                dpg.bind_item_font("header_title_text", self.font_header)
-                dpg.bind_item_font("status_badge_text", self.font_header)
-            if self.font_start:
-                dpg.bind_item_font("btn_toggle", self.font_start)
-            if self.font_notice:
-                dpg.bind_item_font("active_notice", self.font_notice)
-            if self.font_small:
-                dpg.bind_item_font("footer_creator_text", self.font_small)
-                dpg.bind_item_font("sponsor_link_btn", self.font_small)
-
-            # Initialize boost button states
-            self._update_boost_buttons_ui()
-
-            # --- MODAL: VB-CABLE SETUP ---
-            modal_w = self.s(450)
+            # Hidden earbud warning and voice test status are built behind their flags.
+            # The VB-Cable install dialog stays as it was (phase C replaces it with the first-run card).
+            modal_w = self.s(VB_MODAL_W)
             modal_h = self.s(240)
-            modal_x = max(0, (self.s(520) - modal_w) // 2)
-            modal_y = max(0, (self.s(652) - modal_h) // 2)
+            modal_x = max(0, (self.s(420) - modal_w) // 2)
+            modal_y = max(0, (self.s(640) - modal_h) // 2)
             with dpg.window(
                 label="Virtual Audio Cable Setup",
                 modal=True,
@@ -1880,61 +2463,21 @@ class GetsuGUI:
             dpg.bind_item_theme("btn_install_cancel", theme_secondary_btn)
             dpg.bind_item_theme("btn_install_done", self.theme_voice_btn)
 
-            # --- MODAL: HOW TO USE GETSU ---
-            guide_w = self.s(450)
-            guide_h = self.s(380)
-            guide_x = max(0, (self.s(520) - guide_w) // 2)
-            guide_y = max(0, (self.s(652) - guide_h) // 2)
-            with dpg.window(
-                label="How to Use Getsu",
-                modal=True,
-                show=False,
-                tag="modal_how_to_use",
-                no_resize=True,
-                no_move=True,
-                no_scrollbar=True,
-                width=guide_w,
-                height=guide_h,
-                pos=[guide_x, guide_y]
-            ):
-                dpg.add_text("Just click START. Most apps will switch to clean\naudio automatically.", color=COL_TEXT)
-                dpg.add_spacer(height=self.s(6))
+        # Panels: built once, shown over the window by _open_panel.
+        for name in ("mics", "settings", "help"):
+            self._build_panel_shell(name)
 
-                dpg.add_text("Notes: Only When Needed (Games & Voice Apps)", color=COL_ACCENT)
-                dpg.add_text(
-                    "If an app or game doesn't pick up the noise filter,\ngo to its audio settings and choose:",
-                    color=COL_TEXT_2
-                )
-                dpg.add_spacer(height=self.s(2))
-                dpg.add_text("Microphone  ->  CABLE Output", color=COL_ACCENT)
-                dpg.add_spacer(height=self.s(2))
-                dpg.add_text("(This guarantees clean voice, no restart needed.)", color=COL_TEXT_2)
+        if self.font_body:
+            dpg.bind_item_font("hero_state_text", self.font_state)
+            dpg.bind_item_font("hero_sub_text", self.font_notice)
+            dpg.bind_item_font("btn_voice_test", self.font_btn)
+            dpg.bind_item_font("btn_settings", self.font_btn)
+            for tag in ("btn_install_confirm", "btn_install_cancel", "btn_install_done"):
+                dpg.bind_item_font(tag, self.font_btn)
 
-                dpg.add_spacer(height=self.s(12))
-                with dpg.group(horizontal=True):
-                    dpg.add_spacer(width=(guide_w - self.s(130)) // 2 - self.s(18))
-                    dpg.add_button(
-                        label="Got It",
-                        callback=lambda: dpg.hide_item("modal_how_to_use"),
-                        tag="btn_how_to_use_ok",
-                        width=self.s(130),
-                        height=self.s(34)
-                    )
-            dpg.bind_item_theme("modal_how_to_use", theme_modal)
-            dpg.bind_item_theme("btn_how_to_use_ok", self.theme_voice_btn)
-
-            # Buttons use the SemiBold 13 px face; this runs after every button has been created.
-            if self.font_btn:
-                for tag in ("btn_voice_test", "banner_install_btn", "banner_how_to_use_btn",
-                            "btn_boost_0", "btn_boost_5", "btn_boost_10", "btn_boost_15",
-                            "btn_install_confirm", "btn_install_cancel", "btn_install_done",
-                            "btn_how_to_use_ok"):
-                    if dpg.does_item_exist(tag):
-                        dpg.bind_item_font(tag, self.font_btn)
-
-        # Viewport configuration - center on active monitor work area (taskbar-aware) from frame 0
-        vp_w = self.s(520)
-        vp_h = self.s(652)
+        # Viewport. Width is 420 px; height is fitted to the content after the first frames.
+        vp_w = self.s(420)
+        vp_h = self.s(640)
         try:
             class MONITORINFO(ctypes.Structure):
                 _fields_ = [
@@ -1950,26 +2493,16 @@ class GetsuGUI:
             mi = MONITORINFO()
             mi.cbSize = ctypes.sizeof(MONITORINFO)
             if hmon and user32.GetMonitorInfoW(hmon, ctypes.byref(mi)):
-                work_w = mi.rcWork.right - mi.rcWork.left
-                work_h = mi.rcWork.bottom - mi.rcWork.top
-                x_pos = mi.rcWork.left + max(0, (work_w - vp_w) // 2)
-                y_pos = mi.rcWork.top + max(0, (work_h - vp_h) // 2)
+                work = mi.rcWork
             else:
-                work_rect = wintypes.RECT()
-                user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(work_rect), 0)
-                work_w = work_rect.right - work_rect.left
-                work_h = work_rect.bottom - work_rect.top
-                x_pos = work_rect.left + max(0, (work_w - vp_w) // 2)
-                y_pos = work_rect.top + max(0, (work_h - vp_h) // 2)
+                work = wintypes.RECT()
+                user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(work), 0)
         except Exception:
-            try:
-                screen_w = user32.GetSystemMetrics(0) or 1920
-                screen_h = user32.GetSystemMetrics(1) or 1080
-            except Exception:
-                screen_w = 1920
-                screen_h = 1080
-            x_pos = max(0, (screen_w - vp_w) // 2)
-            y_pos = max(0, (screen_h - vp_h) // 2)
+            work = wintypes.RECT(0, 0, user32.GetSystemMetrics(0) or 1920, user32.GetSystemMetrics(1) or 1080)
+        work_w = work.right - work.left
+        self._work_h = work.bottom - work.top
+        x_pos = work.left + max(0, (work_w - vp_w) // 2)
+        y_pos = work.top + max(0, (self._work_h - vp_h) // 2)
 
         dpg.create_viewport(
             title="Getsu - AI Noise Cancellation",
@@ -1982,23 +2515,19 @@ class GetsuGUI:
             resizable=False,
             decorated=True
         )
+        with dpg.handler_registry():
+            dpg.add_mouse_click_handler(button=dpg.mvMouseButton_Left, callback=self._on_mouse_click)
+        with dpg.viewport_drawlist(front=True) as overlay_layer:
+            self._ovl = overlay_layer
         dpg.setup_dearpygui()
         dpg.show_viewport()
         dpg.set_primary_window("main_window", True)
 
-        # Render 3 layout frames to settle font glyphs, then fine-tune viewport height
-        dpg.render_dearpygui_frame()
-        dpg.render_dearpygui_frame()
-        dpg.render_dearpygui_frame()
-        try:
-            rect_max = dpg.get_item_rect_max("footer_sponsor_row")
-            diff = dpg.get_viewport_height() - dpg.get_viewport_client_height()
-            auto_fit_h = int(rect_max[1] + self.s(26)) + diff
-            if abs(auto_fit_h - dpg.get_viewport_height()) > 2:
-                dpg.set_viewport_height(auto_fit_h)
+        # Render frames to settle layout, then fit the viewport height to the content.
+        for _ in range(3):
             dpg.render_dearpygui_frame()
-        except Exception:
-            pass
+        self._fit_window_height()
+        dpg.render_dearpygui_frame()
 
         # Synchronous dead-center window placement on active monitor work area (taskbar-aware)
         try:
@@ -2009,24 +2538,16 @@ class GetsuGUI:
                 user32.GetWindowRect(hwnd, ctypes.byref(rect))
                 win_w = rect.right - rect.left
                 win_h = rect.bottom - rect.top
-                MONITOR_DEFAULTTONEAREST = 2
-                hmon = user32.MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
-                mi = MONITORINFO()
-                mi.cbSize = ctypes.sizeof(MONITORINFO)
-                if hmon and user32.GetMonitorInfoW(hmon, ctypes.byref(mi)):
-                    work_w = mi.rcWork.right - mi.rcWork.left
-                    work_h = mi.rcWork.bottom - mi.rcWork.top
-                    cx = mi.rcWork.left + max(0, (work_w - win_w) // 2)
-                    cy = mi.rcWork.top + max(0, (work_h - win_h) // 2)
-                    user32.SetWindowPos(hwnd, 0, cx, cy, 0, 0, SWP_NOSIZE | SWP_NOZORDER)
+                cx = work.left + max(0, (work_w - win_w) // 2)
+                cy = work.top + max(0, (self._work_h - win_h) // 2)
+                user32.SetWindowPos(hwnd, 0, cx, cy, 0, 0, SWP_NOSIZE | SWP_NOZORDER)
         except Exception as e:
             print(f"[WARN] Failed to center window: {e}")
 
+        self._refresh_mic_widgets()
         self._update_cable_banner()
-        self._update_selection_hint()
 
         if not self.is_vbcable_installed:
-
             dpg.show_item("modal_vbcable")
 
         # Start tray icon & window hook
@@ -2056,6 +2577,25 @@ class GetsuGUI:
                 pass
 
         dpg.destroy_context()
+
+    def _fit_window_height(self):
+        """
+        Fits the viewport to the content: client width 420 logical px, height = footer bottom plus 16 px,
+        capped at 640 px and at the work area. The frame (title bar, borders) is added back to both sizes.
+        """
+        try:
+            frame_w = dpg.get_viewport_width() - dpg.get_viewport_client_width()
+            dpg.set_viewport_width(self.s(WINDOW_W) + frame_w)
+            bottom = dpg.get_item_rect_max("footer_creator_text")[1]
+            frame_h = dpg.get_viewport_height() - dpg.get_viewport_client_height()
+            desired = int(bottom + self.s(16)) + frame_h
+            cap = min(self.s(640), self._work_h)
+            dpg.set_viewport_height(min(desired, cap))
+            # Only when the work area is shorter than the content does the window scroll.
+            dpg.configure_item("main_window", no_scrollbar=desired <= cap)
+        except Exception as e:
+            print(f"[WARN] Window fit failed: {e}")
+
 
 
 def launch_gui():

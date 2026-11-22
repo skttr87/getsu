@@ -377,6 +377,7 @@ class GetsuGUI:
         self._switches: Dict[str, "_Switch"] = {}
         self._click_targets: Dict[str, object] = {}     # main window controls: tag -> callback
         self._panel_targets: Dict[str, Dict[str, object]] = {}  # per panel: rows and switches inside its sheet
+        self._hit_parts: Dict[str, list] = {}  # control tag -> leaf drawlists that measure it (see _item_rect)
         self._open_panel_name: Optional[str] = None
         self._btn_state: Dict[str, tuple] = {}   # icon button tag -> (enabled, hovered), drives theme and icon colour
         self._btn_enabled: Dict[str, bool] = {}  # icon button tag -> enabled (clicks are ignored when False)
@@ -1662,6 +1663,7 @@ class GetsuGUI:
                     dpg.add_spacer(width=self.s(12))
                     tick_dl = f"{tag}_tick"
                     dpg.add_drawlist(width=self.s(16), height=row_h, tag=tick_dl)
+                    self._hit_parts[tag] = [icon_dl, tick_dl]
                     if entry["label"] == current:
                         dpg.draw_polyline(icons.to_px(icons.CHECK, 0, self.s(18), self.s(16)), color=COL_ACCENT,
                                           thickness=float(self.s(2)), parent=tick_dl)
@@ -2005,18 +2007,42 @@ class GetsuGUI:
                 dpg.hide_item(f"panel_{name}")
         self._open_panel_name = None
 
-    def _item_rect(self, tag: str):
-        """Rectangle (min, max) of a rendered item in viewport coordinates, or None when it has no size or does not exist."""
+    def _leaf_rect(self, tag: str):
+        """
+        Rectangle (min, max) in viewport coordinates of one item, or None. Items other than windows report it with
+        get_item_rect_min/max. Windows do not (DearPyGui 2.3.1 raises KeyError), so a window uses its position and
+        size: that is exact for windows whose parent is the viewport or a top-level panel at (0, 0).
+        """
         if not dpg.does_item_exist(tag):
             return None
         try:
             rmin = tuple(dpg.get_item_rect_min(tag))
             rmax = tuple(dpg.get_item_rect_max(tag))
         except KeyError:
-            return None  # not rendered yet
+            try:
+                rmin = tuple(dpg.get_item_pos(tag))
+                size = dpg.get_item_rect_size(tag)
+                rmax = (rmin[0] + size[0], rmin[1] + size[1])
+            except Exception:
+                return None
         if rmax[0] <= rmin[0] or rmax[1] <= rmin[1]:
             return None
         return rmin, rmax
+
+    def _item_rect(self, tag: str):
+        """
+        Rectangle of a clickable control. A control made of child windows (a microphone row) is measured by the
+        union of its leaf drawlists, listed in _hit_parts, because nested windows have no rectangle of their own.
+        """
+        parts = self._hit_parts.get(tag)
+        if not parts:
+            return self._leaf_rect(tag)
+        rects = [r for r in (self._leaf_rect(p) for p in parts) if r is not None]
+        if not rects:
+            return None
+        lo = (min(r[0][0] for r in rects), min(r[0][1] for r in rects))
+        hi = (max(r[1][0] for r in rects), max(r[1][1] for r in rects))
+        return lo, hi
 
     def _on_mouse_click(self, sender=None, app_data=None):
         """
@@ -2105,6 +2131,7 @@ class GetsuGUI:
                     dpg.draw_polyline(icons.to_px(icons.CHEVRON, 0, self.s(22), self.s(16)), color=COL_TEXT_3,
                                       thickness=float(self.s(2)), parent="mic_chev")
             self._click_targets["mic_row"] = self._open_mic_panel_from_row
+            self._hit_parts["mic_row"] = ["mic_tile", "mic_chev"]
             with dpg.group(horizontal=True, tag="hint_row", show=FEATURE_EARBUD_HINT):
                 dpg.add_spacer(width=self.s(16))
                 dpg.add_text("Earbud mic drops audio to call quality.", color=COL_TEXT_2, tag="hint_text")

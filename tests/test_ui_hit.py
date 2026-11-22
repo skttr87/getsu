@@ -51,5 +51,32 @@ class ClickOutsideTests(unittest.TestCase):
         self.assertFalse(ui_hit.click_is_outside((120, 100), None))
 
 
+class ControlRectangleTests(unittest.TestCase):
+    """GUI._item_rect: a control made of child windows is measured by the union of its leaf drawlists."""
+
+    def _gui(self, parts, rects):
+        from unittest.mock import patch
+        from src import gui as g
+        obj = g.GetsuGUI.__new__(g.GetsuGUI)
+        obj._hit_parts = parts
+        patcher = patch.object(g.GetsuGUI, "_leaf_rect", side_effect=lambda tag: rects.get(tag))
+        return obj, patcher
+
+    def test_mic_row_rectangle_is_union_of_icon_and_tick(self):
+        rects = {"row_icon": ((16, 240), (32, 300)), "row_tick": ((360, 240), (376, 300))}
+        obj, patcher = self._gui({"mic_row_0": ["row_icon", "row_tick"]}, rects)
+        with patcher:
+            self.assertEqual(obj._item_rect("mic_row_0"), ((16, 240), (376, 300)))
+
+    def test_control_without_parts_uses_its_own_rectangle(self):
+        obj, patcher = self._gui({}, {"sheet_mics": ((0, 200), (420, 640))})
+        with patcher:
+            self.assertEqual(obj._item_rect("sheet_mics"), ((0, 200), (420, 640)))
+
+    def test_no_measurable_part_gives_no_rectangle(self):
+        obj, patcher = self._gui({"mic_row_0": ["gone"]}, {})
+        with patcher:
+            self.assertIsNone(obj._item_rect("mic_row_0"))
+
 if __name__ == "__main__":
     unittest.main()

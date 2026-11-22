@@ -48,6 +48,7 @@ from src.dsp import (
     SpeechLeveler,
     TransientSuppressor,
     process_mono_frame,
+    InputDownmixer,
 )
 from src.host_api_resolver import resolve_single, selection_hint
 from src.audio_errors import explain_start_error
@@ -1032,6 +1033,8 @@ class GetsuGUI:
                 in_extra_settings = None
 
             print(f"[VOICE TEST] Phase 1: Recording 11s from [{safe_input_idx}] {in_info['name']}...")
+            voice_downmix = InputDownmixer(frame_len=chunk_size, sample_rate=int(SAMPLE_RATE),
+                                           mode=self.config.get("stereo_downmix", InputDownmixer.MODE_AUTO))
             with sd.InputStream(
                 samplerate=SAMPLE_RATE,
                 blocksize=chunk_size,
@@ -1046,7 +1049,7 @@ class GetsuGUI:
                     indata, _ = stream.read(chunk_size)
                     # Mono mix
                     if indata.ndim > 1 and indata.shape[1] >= 2:
-                        mono = (indata[:, 0] + indata[:, 1]) * 0.5
+                        mono = voice_downmix.process(indata)
                     elif indata.ndim > 1:
                         mono = indata[:, 0].copy()
                     else:

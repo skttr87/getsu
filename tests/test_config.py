@@ -5,6 +5,10 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(__file__))
+import _isolation  # noqa: E402,F401  (keeps config writes off the tracked config.json)
 from src.config import get_config_path, load_config, save_config, DEFAULT_CONFIG
 
 

@@ -188,6 +188,22 @@ _S_CURVE_F64 = _T_480**4 * (35.0 + _T_480 * (-84.0 + _T_480 * (70.0 - 20.0 * _T_
 _S_CURVE_TABLE_480 = np.maximum.accumulate(np.clip(_S_CURVE_F64, 0.0, 1.0).astype(np.float32))
 
 
+TILT_FIR_TAPS = 9
+
+
+def _design_tilt_fir(cutoff_hz: float, sample_rate: float, taps: int = TILT_FIR_TAPS) -> list:
+    """
+    Causal linear-phase low-pass (Hamming-windowed sinc, unity DC gain). Used only on the gate's closed path.
+    A short FIR is used instead of a one-pole IIR because the block filter must stay vectorised: a one-pole
+    needs a per-sample recursion, and a 480x480 matrix product would cost more than the whole budget allows.
+    """
+    fc = cutoff_hz / sample_rate
+    m = np.arange(taps, dtype=np.float64) - (taps - 1) / 2.0
+    h = 2.0 * fc * np.sinc(2.0 * fc * m) * (0.54 - 0.46 * np.cos(2.0 * np.pi * np.arange(taps) / (taps - 1)))
+    h /= np.sum(h)
+    return [float(v) for v in h]
+
+
 class AdaptiveNoiseGate:
     """
     Adaptive Dual-Threshold (Hysteresis) Soft-Knee Noise Gate with Dynamic Onset Detection.
@@ -263,6 +279,8 @@ class AdaptiveNoiseGate:
         calibrate_startup: bool = True,
         sustain_snr_db: float = 6.0,
         sustain_threshold: float = 0.25,
+        floor_tilt_hz: float = 0.0,
+        sample_rate: float = 48000.0,
     ):
         self.threshold = threshold
         self.close_threshold = close_threshold
@@ -291,6 +309,16 @@ class AdaptiveNoiseGate:
         self._delay_buffer: np.ndarray | None = None
         self._work_buffer: np.ndarray | None = None
         self._ramp_buf: np.ndarray | None = None
+
+        # Spectral tilt of the closed path (0 Hz = off). Only active when the floor is above silence.
+        self._tilt_h: list | None = None
+        if floor_tilt_hz > 0.0 and 0.0 < floor_gain < 1.0:
+            self._tilt_h = _design_tilt_fir(float(floor_tilt_hz), float(sample_rate))
+            self._tilt_hist = np.zeros(len(self._tilt_h) - 1, dtype=np.float32)
+            self._tilt_ext: np.ndarray | None = None
+            self._tilt_lp: np.ndarray | None = None
+            self._tilt_tmp: np.ndarray | None = None
+            self._tilt_o: np.ndarray | None = None
 
         # Flutter state
         self._frame_idx = 0
@@ -331,6 +359,8 @@ class AdaptiveNoiseGate:
         self._flutter_events.clear()
         if self._delay_buffer is not None:
             self._delay_buffer.fill(0.0)
+        if self._tilt_h is not None:
+            self._tilt_hist.fill(0.0)
 
     def recalibrate(self):
         """Restart the startup ambient profiler (call on stream start / device change)."""
@@ -421,6 +451,51 @@ class AdaptiveNoiseGate:
             else:
                 rate = self.FLOOR_SLOW_RISE_RATE
             self.noise_floor_db += min(diff * rate, self.FLOOR_RISE_CAP_DB)
+
+    def _tilt_filter(self, x: np.ndarray) -> np.ndarray:
+        """Low-passed copy of x (the closed-path signal). Its history is updated on every frame."""
+        taps = self._tilt_h
+        k1 = len(taps) - 1
+        n = len(x)
+        if self._tilt_lp is None or len(self._tilt_lp) != n:
+            self._tilt_ext = np.zeros(k1 + n, dtype=x.dtype)
+            self._tilt_lp = np.zeros(n, dtype=x.dtype)
+            self._tilt_tmp = np.zeros(n, dtype=x.dtype)
+            self._tilt_o = np.zeros(n, dtype=x.dtype)
+        ext = self._tilt_ext
+        lp = self._tilt_lp
+        tmp = self._tilt_tmp
+        ext[:k1] = self._tilt_hist
+        ext[k1:] = x
+        np.multiply(ext[k1:], taps[0], out=lp)
+        for k in range(1, k1 + 1):
+            np.multiply(ext[k1 - k:k1 - k + n], taps[k], out=tmp)
+            lp += tmp
+        self._tilt_hist[:] = ext[n:]
+        return lp
+
+    def _tilt_blend_scalar(self, x: np.ndarray, lp: np.ndarray, gain: float):
+        """x <- gain * (lp + o * (x - lp)), where o = openness in [0, 1] derived from gain."""
+        floor = self.floor_gain
+        o = min(1.0, max(0.0, (gain - floor) / (1.0 - floor)))
+        tmp = self._tilt_tmp
+        np.subtract(x, lp, out=tmp)
+        tmp *= o
+        tmp += lp
+        np.multiply(tmp, gain, out=x)
+
+    def _tilt_blend_array(self, x: np.ndarray, lp: np.ndarray, gain: np.ndarray):
+        """Per-sample version of _tilt_blend_scalar for the S-curve ramp."""
+        floor = self.floor_gain
+        o = self._tilt_o
+        np.subtract(gain, floor, out=o)
+        o *= 1.0 / (1.0 - floor)
+        np.clip(o, 0.0, 1.0, out=o)
+        tmp = self._tilt_tmp
+        np.subtract(x, lp, out=tmp)
+        tmp *= o
+        tmp += lp
+        np.multiply(tmp, gain, out=x)
 
     # ------------------------------------------------------------------ main
 
@@ -553,10 +628,18 @@ class AdaptiveNoiseGate:
 
         end_gain = self.current_gain
 
+        # Closed-path spectral tilt: computed on the unscaled frame so the filter history stays continuous
+        tilt = self._tilt_h is not None
+        if tilt:
+            lp = self._tilt_filter(target_frame)
+
         # Fast path 1: Steady silence (gain is at floor_gain)
         if end_gain <= self.floor_gain + 0.0001 and start_gain <= self.floor_gain + 0.0001:
             if self.floor_gain > 0.0:
-                target_frame *= self.floor_gain
+                if tilt:
+                    np.multiply(lp, self.floor_gain, out=target_frame)
+                else:
+                    target_frame *= self.floor_gain
                 if self.lookahead and in_place:
                     np.copyto(frame, target_frame)
                     return frame, self.floor_gain
@@ -596,9 +679,15 @@ class AdaptiveNoiseGate:
             ramp = self._ramp_scratch(len(target_frame), target_frame.dtype)
             np.multiply(s_curve, end_gain - start_gain, out=ramp)
             ramp += start_gain
-            target_frame *= ramp
+            if tilt:
+                self._tilt_blend_array(target_frame, lp, ramp)
+            else:
+                target_frame *= ramp
         else:
-            target_frame *= end_gain
+            if tilt:
+                self._tilt_blend_scalar(target_frame, lp, end_gain)
+            else:
+                target_frame *= end_gain
 
         if self.lookahead:
             if in_place:
@@ -624,12 +713,17 @@ def calculate_levels(frame: np.ndarray):
     return peak_db, rms_db
 
 
-def soft_preclip(frame: np.ndarray, knee: float = 0.75) -> np.ndarray:
+PRECLIP_KNEE_DEFAULT = 0.95   # a lower knee (0.75) saturates speech peaks before RNNoise
+
+
+def soft_preclip(frame: np.ndarray, knee: float = PRECLIP_KNEE_DEFAULT) -> np.ndarray:
     """
     Smooths hard ADC rail flat-topping to protect RNNoise Bark-band features.
-    Uses hyperbolic tangent saturation above knee (default 0.75), eliminating
-    square-wave splatter from unshielded plosives and breath blasts.
+    Uses hyperbolic tangent saturation above the knee, so samples approach 1.0 smoothly.
+    A knee of 1.0 or more disables the stage (the caller's final clip still applies).
     """
+    if knee >= 1.0:
+        return frame
     if frame.size == 0 or (frame.max() <= knee and frame.min() >= -knee):
         return frame                      # common case: nothing above the knee, no temporaries
     mask = np.abs(frame) > knee
@@ -869,6 +963,172 @@ class SpeechLeveler:
         return frame, 1.0
 
 
+class InputDownmixer:
+    """
+    Stereo to mono downmix for the capture callback, with dead and polarity-inverted channel detection.
+
+    mode "average": (L + R) / 2 for every frame.
+    mode "auto" (default): tracks per-channel power and the L/R correlation over about 0.5 s and
+      - uses the live channel when one channel is at least 30 dB below the other ("dead"),
+      - uses the left channel when the channels are polarity-inverted (correlation < -0.5), since the
+        average would cancel the signal,
+      - otherwise averages.
+    Hysteresis: a dead channel is released only when the level gap falls below 27 dB; inversion is
+    released only when correlation rises above -0.3. Decisions are skipped while both channels are
+    near silence (no change of state).
+
+    The output buffer is allocated once and returned on every call (overwritten by the next call).
+    process() only uses preallocated buffers and numpy calls with out= arguments.
+    """
+
+    MODE_AVERAGE = "average"
+    MODE_AUTO = "auto"
+
+    _STATE_AVG = 0
+    _STATE_LEFT = 1       # right channel dead: use left
+    _STATE_RIGHT = 2      # left channel dead: use right
+
+    DEAD_ENTER_DB = 30.0
+    DEAD_EXIT_DB = 27.0
+    INVERT_ENTER_CORR = -0.5
+    INVERT_EXIT_CORR = -0.3
+    MIN_POWER = 1e-8      # sum of both channel powers below -80 dBFS: no decision
+    _EPS = 1e-12
+
+    def __init__(self, frame_len: int = 480, sample_rate: int = 48000, mode: str = MODE_AUTO, window_s: float = 0.5):
+        if mode not in (self.MODE_AVERAGE, self.MODE_AUTO):
+            raise ValueError(f"unknown stereo downmix mode: {mode!r}")
+        self.mode = mode
+        self.sample_rate = int(sample_rate)
+        self.window_s = float(window_s)
+        self._alloc(int(frame_len))
+        self.reset()
+
+    def _alloc(self, n: int):
+        self.frame_len = n
+        self._alpha = 1.0 - math.exp(-n / (self.window_s * self.sample_rate))
+        self._l = np.zeros(n, dtype=np.float32)
+        self._r = np.zeros(n, dtype=np.float32)
+        self._out = np.zeros(n, dtype=np.float32)
+
+    def reset(self):
+        """Forget the running statistics and return to averaging."""
+        self._pl = 0.0
+        self._pr = 0.0
+        self._lr = 0.0
+        self._state = self._STATE_AVG
+        self._inverted = False
+
+    @property
+    def state_name(self) -> str:
+        """Human-readable current choice (for logs and tests)."""
+        if self._state == self._STATE_LEFT:
+            return "left"
+        if self._state == self._STATE_RIGHT:
+            return "right"
+        if self._inverted:
+            return "left (inverted)"
+        return "average"
+
+    def process(self, indata: np.ndarray) -> np.ndarray:
+        """indata: (n, >=2) float32 block. Returns the mono float32 buffer (internal, reused)."""
+        n = indata.shape[0]
+        if n != self.frame_len:
+            self._alloc(n)
+        np.copyto(self._l, indata[:, 0])
+        np.copyto(self._r, indata[:, 1])
+        out = self._out
+        if self.mode == self.MODE_AUTO:
+            self._update_state()
+        if self._state == self._STATE_LEFT or (self._state == self._STATE_AVG and self._inverted):
+            np.copyto(out, self._l)
+        elif self._state == self._STATE_RIGHT:
+            np.copyto(out, self._r)
+        else:
+            np.add(self._l, self._r, out=out)
+            np.multiply(out, 0.5, out=out)
+        return out
+
+    def _update_state(self):
+        l, r = self._l, self._r
+        a = self._alpha
+        inv_n = 1.0 / self.frame_len
+        pl_now = float(np.dot(l, l)) * inv_n
+        pr_now = float(np.dot(r, r)) * inv_n
+        lr_now = float(np.dot(l, r)) * inv_n
+        self._pl += a * (pl_now - self._pl)
+        self._pr += a * (pr_now - self._pr)
+        self._lr += a * (lr_now - self._lr)
+
+        if self._pl + self._pr < self.MIN_POWER:
+            return
+
+        ratio_db = 10.0 * math.log10((self._pr + self._EPS) / (self._pl + self._EPS))
+        if self._state == self._STATE_LEFT and ratio_db > -self.DEAD_EXIT_DB:
+            self._state = self._STATE_AVG
+        elif self._state == self._STATE_RIGHT and ratio_db < self.DEAD_EXIT_DB:
+            self._state = self._STATE_AVG
+        if self._state == self._STATE_AVG:
+            if ratio_db <= -self.DEAD_ENTER_DB:
+                self._state = self._STATE_LEFT
+            elif ratio_db >= self.DEAD_ENTER_DB:
+                self._state = self._STATE_RIGHT
+
+        corr = self._lr / math.sqrt(self._pl * self._pr + self._EPS)
+        if not self._inverted and corr < self.INVERT_ENTER_CORR:
+            self._inverted = True
+        elif self._inverted and corr > self.INVERT_EXIT_CORR:
+            self._inverted = False
+
+
+class DryBlend:
+    """
+    Optional RNNoise dry blend. Keeps a copy of the pre-RNNoise frame (after high-pass and pre-clip),
+    delayed by the pipeline latency (delay_frames x 10 ms), and mixes it back at mix_db while the gate is open.
+    The delay matches the measured RNNoise + lookahead latency (about 1440 samples at 48 kHz), so the dry
+    path lines up with the processed path and does not comb-filter.
+    Storage is a preallocated ring of frames; push() performs two copies and no allocation.
+    """
+
+    DEFAULT_DELAY_FRAMES = 3
+
+    def __init__(self, mix_db: float = -24.0, delay_frames: int = DEFAULT_DELAY_FRAMES, frame_len: int = 480):
+        self.mix_db = float(mix_db)
+        self.gain = 10.0 ** (self.mix_db / 20.0)
+        self._alloc(int(frame_len), int(delay_frames))
+
+    def _alloc(self, frame_len: int, delay_frames: int):
+        self._ring = np.zeros((delay_frames, frame_len), dtype=np.float32)
+        self._idx = 0
+        self._out = np.zeros(frame_len, dtype=np.float32)
+        self._scaled = np.zeros(frame_len, dtype=np.float32)
+
+    def reset(self):
+        self._ring.fill(0.0)
+        self._idx = 0
+
+    def push(self, frame: np.ndarray) -> np.ndarray:
+        """Store frame and return the frame from delay_frames calls ago (internal buffer, reused)."""
+        if frame.shape[0] != self._out.shape[0]:
+            self._alloc(frame.shape[0], self._ring.shape[0])
+        slot = self._ring[self._idx]
+        np.copyto(self._out, slot)
+        np.copyto(slot, frame)
+        self._idx = (self._idx + 1) % self._ring.shape[0]
+        return self._out
+
+    def mix_into(self, frame: np.ndarray, dry: np.ndarray, gate_gain: float, gate_floor: float):
+        """frame += dry * gain * openness, where openness is 0 at the gate floor and 1 when fully open."""
+        if gate_floor >= 1.0:
+            return
+        openness = min(1.0, max(0.0, (gate_gain - gate_floor) / (1.0 - gate_floor)))
+        w = self.gain * openness
+        if w <= 0.0:
+            return
+        np.multiply(dry, w, out=self._scaled)
+        frame += self._scaled
+
+
 _tls = threading.local()
 
 
@@ -891,6 +1151,8 @@ def process_mono_frame(
     leveler: Optional[SpeechLeveler] = None,
     transient_suppressor: Optional[TransientSuppressor] = None,
     mic_boost_db: float = 0.0,
+    preclip_knee: float = PRECLIP_KNEE_DEFAULT,
+    dry_blend: Optional[DryBlend] = None,
 ) -> Tuple[np.ndarray, float, float, float]:
     """
     Authoritative single-frame (10ms) DSP processing pipeline shared by both the live stream
@@ -915,8 +1177,9 @@ def process_mono_frame(
 
     # 2. Dual-Stage Metering & Headroom Pre-clip
     input_peak_db, input_rms_db = calculate_levels(frame_mono)
-    frame_mono = soft_preclip(frame_mono, knee=0.75)
+    frame_mono = soft_preclip(frame_mono, knee=preclip_knee)
     np.clip(frame_mono, -1.0, 1.0, out=frame_mono)
+    dry_delayed = dry_blend.push(frame_mono) if dry_blend is not None else None
 
     # 3. RNNoise Neural Core (scaled into a per-thread scratch buffer, result written back in place)
     speech_prob = 0.0
@@ -940,7 +1203,11 @@ def process_mono_frame(
         frame_mono *= total_gain
 
     # 7. Soft-Knee Adaptive Noise Gate
-    frame_mono, _ = gate.process(frame_mono, speech_prob, input_rms_db=input_rms_db, in_place=True)
+    frame_mono, gate_gain = gate.process(frame_mono, speech_prob, input_rms_db=input_rms_db, in_place=True)
+
+    # 7b. Optional RNNoise dry blend (only while the gate is open; only when RNNoise produced the wet path)
+    if dry_delayed is not None and denoise_enabled and rnnoise is not None:
+        dry_blend.mix_into(frame_mono, dry_delayed, gate_gain, gate.floor_gain)
 
     # 8. Soft Saturation Limiter (in place)
     frame_mono = soft_limit(frame_mono, threshold=0.85, out=frame_mono)

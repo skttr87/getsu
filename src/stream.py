@@ -16,6 +16,9 @@ from src.dsp import (
     SpeechLeveler,
     TransientSuppressor,
     process_mono_frame,
+    PRECLIP_KNEE_DEFAULT,
+    InputDownmixer,
+    DryBlend,
 )
 from src.host_api_resolver import resolve_pair, DeviceResolutionError, ResolvedPair
 from src.audio_errors import explain_start_error, ExplainedError
@@ -47,9 +50,21 @@ class AudioEngine:
         router: Optional[Any] = None,
         auto_level: bool = False,
         mic_boost_db: float = 0.0,
+        preclip_knee: float = PRECLIP_KNEE_DEFAULT,
+        stereo_downmix: str = InputDownmixer.MODE_AUTO,
+        vad_floor_tilt_hz: float = 0.0,
+        rnnoise_dry_mix_db: Optional[float] = None,
     ):
         self.input_device = input_device
         self.output_device = output_device
+        self.vad_floor_tilt_hz = float(vad_floor_tilt_hz)
+        self._dry_blend: Optional[DryBlend] = (
+            DryBlend(mix_db=float(rnnoise_dry_mix_db)) if rnnoise_dry_mix_db is not None else None
+        )
+        self.preclip_knee = float(preclip_knee)
+        # Set at start: the VB-Cable sample rate when it is not 48 kHz, else None (see _check_cable_rate)
+        self.cable_rate_mismatch: Optional[int] = None
+        self._downmixer = InputDownmixer(frame_len=FRAME_SIZE, sample_rate=int(SAMPLE_RATE), mode=stereo_downmix)
         self.denoise_enabled = denoise_enabled
         self.high_pass_enabled = high_pass_enabled
         self.vad_threshold = vad_threshold
@@ -97,6 +112,8 @@ class AudioEngine:
             lookahead=True,
             floor_gain=self.vad_floor_gain,
             cooldown_ms=150.0,
+            floor_tilt_hz=self.vad_floor_tilt_hz,
+            sample_rate=float(SAMPLE_RATE),
         )
         self.leveler: Optional[SpeechLeveler] = SpeechLeveler() if auto_level else None
 
@@ -132,6 +149,33 @@ class AudioEngine:
     def last_input_peak_db(self) -> float:
         return self._metrics[3]
 
+    def _check_cable_rate(self):
+        """
+        Reads the default sample rate of the VB-Cable endpoints when the engine writes to CABLE Input.
+        Called once at stream start (never from the audio callback). Sets cable_rate_mismatch to the
+        offending rate, or None when the rates are 48 kHz or the output is not a VB-Cable device.
+        """
+        self.cable_rate_mismatch = None
+        try:
+            from src.devices import check_vbcable_status
+            installed, cable_in, cable_out = check_vbcable_status()
+        except Exception:
+            return
+        if not installed or not isinstance(cable_in, dict) or not isinstance(cable_out, dict):
+            return
+        if cable_in.get("index") != self.output_device:
+            return
+        for dev in (cable_in, cable_out):
+            try:
+                rate = int(round(float(sd.query_devices(dev["index"])["default_samplerate"])))
+            except Exception:
+                continue
+            if rate != int(SAMPLE_RATE):
+                self.cable_rate_mismatch = rate
+                print(f"[ENGINE] VB-Cable is set to {rate} Hz (Getsu uses {int(SAMPLE_RATE)} Hz). "
+                      f"Set both CABLE devices to 48 kHz in Sound settings for best quality.")
+                return
+
     def _audio_callback(self, indata, outdata, frames, time_info, status):
         """10ms real-time audio processing callback."""
         try:
@@ -158,7 +202,7 @@ class AudioEngine:
 
             # 1. Stereo Downmixing with safe multi-channel array guard
             if indata.ndim > 1 and indata.shape[1] >= 2:
-                frame_mono = (indata[:, 0] + indata[:, 1]) * 0.5
+                frame_mono = self._downmixer.process(indata)
             elif indata.ndim > 1:
                 frame_mono = indata[:, 0].copy()
             else:
@@ -179,6 +223,8 @@ class AudioEngine:
                 leveler=self.leveler,
                 transient_suppressor=self.transient_suppressor,
                 mic_boost_db=self.mic_boost_db,
+                preclip_knee=self.preclip_knee,
+                dry_blend=self._dry_blend,
             )
 
             # 3. Post-gate output metrics and clip protection
@@ -249,6 +295,8 @@ class AudioEngine:
                         "Could not move the microphone off the WDM-KS audio path. "
                         "Please re-select your microphone."
                     ) from e
+
+            self._check_cable_rate()
 
             # Query channel configuration for resolved endpoints
             in_dev_info = sd.query_devices(self.input_device)
@@ -505,4 +553,8 @@ def create_engine_from_config(
         router=router,
         auto_level=config.get("auto_level", False),
         mic_boost_db=float(boost_db),
+        preclip_knee=float(config.get("preclip_knee", PRECLIP_KNEE_DEFAULT)),
+        stereo_downmix=config.get("stereo_downmix", InputDownmixer.MODE_AUTO),
+        vad_floor_tilt_hz=float(config.get("vad_floor_tilt_hz", 0.0) or 0.0),
+        rnnoise_dry_mix_db=config.get("rnnoise_dry_mix_db"),
     )

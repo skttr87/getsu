@@ -1003,10 +1003,7 @@ class GetsuGUI:
             threading.Thread(target=_stop_worker, daemon=True).start()
 
     def start_voice_test(self, sender=None, app_data=None):
-        """Starts the 11-second in-memory voice preview test."""
-        if not self.is_vbcable_installed:
-            self.set_status_pill("Virtual Cable required. Please install driver", COL_WARNING)
-            return
+        """Starts the 11-second in-memory voice preview test (microphone to speakers; the cable is not needed)."""
         if self.is_running:
             self.set_status_pill("Stop noise cancellation first to run voice test.", COL_WARNING)
             return
@@ -1791,7 +1788,7 @@ class GetsuGUI:
         """Hover is tested on the button rectangles (see ui_hit). No button is hovered while a panel is open."""
         if not self._ui_built or not self._btn_glyphs:
             return
-        point = dpg.get_mouse_pos(local=True)
+        point = dpg.get_mouse_pos(local=False)  # viewport space, the same space as item rectangles
         for tag in self._btn_glyphs:
             rect = self._item_rect(tag)
             hovered = (self._open_panel_name is None and rect is not None
@@ -2052,7 +2049,7 @@ class GetsuGUI:
         """
         if not self._ui_built:
             return
-        point = dpg.get_mouse_pos(local=True)
+        point = dpg.get_mouse_pos(local=False)  # viewport space, the same space as item rectangles
         if self._open_panel_name:
             name = self._open_panel_name
             if ui_hit.click_is_outside(point, self._item_rect(f"sheet_{name}")):
@@ -2417,16 +2414,15 @@ class GetsuGUI:
         """Enables or disables Hear myself. Disabled while the cable is missing or during a voice test."""
         if not self._ui_built or not dpg.does_item_exist("btn_voice_test"):
             return
+        # The voice test records the microphone and plays it back on the speakers; it never uses the cable.
         installing = self._install_state == "installing"
-        if not self.is_vbcable_installed:
-            reason = "Needs the virtual cable. Install it from the setup card."
-        elif installing:
+        if installing:
             reason = "Wait for the cable install to finish."
         elif not enabled:
             reason = "A voice test or a start is already running."
         else:
             reason = "Record 11 seconds, then hear how others hear you"
-        enabled = enabled and self.is_vbcable_installed and not installing
+        enabled = enabled and not installing
         self._set_button_enabled("btn_voice_test", enabled)
         self._set_button_label("btn_voice_test", "Hear myself")
         self._set_button_tip("btn_voice_test", reason)
@@ -2462,20 +2458,21 @@ class GetsuGUI:
 
         print(f"[GUI] Active Font Engine: {font_family}")
 
-        # Type scale from the mockup: 11, 12, 13, 14, 16 and 17 px. SemiBold for titles and buttons.
+        # Type scale: the mockup's 11-17 px read too small on Windows (owner feedback), so every step is ~15-20 %
+        # larger: 12, 14, 15, 16, 18 and 20 px. SemiBold for titles and buttons.
         with dpg.font_registry():
             if path_regular and os.path.exists(path_regular):
                 bold_file = path_semibold if (path_semibold and os.path.exists(path_semibold)) else path_bold
                 if not (bold_file and os.path.exists(bold_file)):
                     bold_file = path_regular
-                self.font_body = dpg.add_font(path_regular, self.s(13))
-                self.font_small = dpg.add_font(path_regular, self.s(11))
-                self.font_notice = dpg.add_font(path_regular, self.s(12))
-                self.font_list = dpg.add_font(path_regular, self.s(14))
-                self.font_header = dpg.add_font(bold_file, self.s(14))
-                self.font_btn = dpg.add_font(bold_file, self.s(13))
-                self.font_title = dpg.add_font(bold_file, self.s(16))
-                self.font_state = dpg.add_font(bold_file, self.s(17))
+                self.font_body = dpg.add_font(path_regular, self.s(15))
+                self.font_small = dpg.add_font(path_regular, self.s(12))
+                self.font_notice = dpg.add_font(path_regular, self.s(14))
+                self.font_list = dpg.add_font(path_regular, self.s(16))
+                self.font_header = dpg.add_font(bold_file, self.s(16))
+                self.font_btn = dpg.add_font(bold_file, self.s(15))
+                self.font_title = dpg.add_font(bold_file, self.s(18))
+                self.font_state = dpg.add_font(bold_file, self.s(20))
                 dpg.bind_font(self.font_body)
             else:
                 self.font_body = self.font_small = self.font_notice = None

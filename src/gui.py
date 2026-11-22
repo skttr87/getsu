@@ -17,7 +17,7 @@ import time
 import signal
 import ctypes
 from ctypes import wintypes
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Sequence
 
 import dearpygui.dearpygui as dpg
 import sounddevice as sd
@@ -79,6 +79,28 @@ user32.CallWindowProcW.restype = ctypes.c_longlong
 user32.IsWindowVisible.argtypes = [wintypes.HWND]
 user32.IsIconic.argtypes = [wintypes.HWND]
 
+
+# Palette from the approved mockup (opt/mockup/a-focus.html, CSS variables). Dark theme only.
+# One accent colour (Apple system blue) marks every on, selected or primary state.
+# Red is reserved for errors and orange for warnings. No green, no glow.
+COL_WINDOW = (28, 28, 30)           # --win
+COL_CARD = (44, 44, 46)             # --card
+COL_CARD_HOVER = (58, 58, 60)       # --card-hi
+COL_SEPARATOR = (84, 84, 88, 140)   # --sep (55 % opacity)
+COL_TEXT = (245, 245, 247)          # --text
+COL_TEXT_2 = (161, 161, 166)        # --text2
+COL_TEXT_3 = (110, 110, 115)        # --text3
+COL_FILL = (118, 118, 128, 61)      # --fill (24 %)
+COL_FILL_2 = (118, 118, 128, 92)    # --fill2 (36 %)
+COL_FILL_3 = (118, 118, 128, 112)   # --fill3 (44 %)
+COL_ACCENT = (10, 132, 255)         # --accent
+COL_ACCENT_HOVER = (47, 150, 255)   # --accent-hi
+COL_ACCENT_PRESSED = (8, 104, 210)
+COL_ACCENT_SOFT = (10, 132, 255, 46)     # --accent-soft (18 %)
+COL_ACCENT_SOFT_2 = (10, 132, 255, 71)   # --accent-soft2 (28 %)
+COL_WARNING = (255, 159, 10)        # --orange
+COL_ERROR = (255, 69, 58)           # --red
+COL_WHITE = (255, 255, 255)
 
 def init_dpi_awareness() -> tuple[int, float]:
     """
@@ -383,7 +405,7 @@ class GetsuGUI:
                         print("[WATCHDOG] Audio stream stalled while microphone swapped. Emergency restoring default capture...")
                         try:
                             self.router.restore_original()
-                            self.set_status_pill("▲ Audio stream stalled • Restored physical mic", [240, 180, 50])
+                            self.set_status_pill("▲ Audio stream stalled • Restored physical mic", COL_WARNING)
                         except Exception as e:
                             print(f"[WATCHDOG] Emergency restore error: {e}")
                     with self._device_change_lock:
@@ -556,10 +578,10 @@ class GetsuGUI:
                             self.is_running = True
                             if self._ui_built and dpg.does_item_exist("status_badge_text"):
                                 dpg.set_value("status_badge_text", "[ ACTIVE ]")
-                                dpg.configure_item("status_badge_text", color=[45, 215, 115])
+                                dpg.configure_item("status_badge_text", color=COL_ACCENT)
                                 dpg.configure_item("btn_toggle", label="STOP", enabled=True)
                                 dpg.bind_item_theme("btn_toggle", self.theme_stop_btn)
-                            self.set_status_pill("● AI Filter Active • Clean Voice Routed", [45, 215, 115])
+                            self.set_status_pill("● AI Filter Active • Clean Voice Routed", COL_ACCENT)
                             self._update_tray_icon()
                             self._set_voice_test_button_state(False)
                         except Exception as e:
@@ -573,11 +595,11 @@ class GetsuGUI:
                                 self.engine = None
                             if self._ui_built and dpg.does_item_exist("status_badge_text"):
                                 dpg.set_value("status_badge_text", "[ STOPPED ]")
-                                dpg.configure_item("status_badge_text", color=[210, 75, 75])
+                                dpg.configure_item("status_badge_text", color=COL_TEXT_2)
                                 dpg.configure_item("btn_toggle", label="START", enabled=True)
                                 dpg.bind_item_theme("btn_toggle", self.theme_start_btn)
                             self._set_voice_test_button_state(True)
-                            self.set_status_pill(f"▲ {self._format_audio_error(e)}", [235, 75, 75])
+                            self.set_status_pill(f"▲ {self._format_audio_error(e)}", COL_ERROR)
                         finally:
                             self._release_state_lock()
                     else:
@@ -603,7 +625,7 @@ class GetsuGUI:
             if dpg.does_item_exist("input_combo"):
                 dpg.set_value("input_combo", current_label)
             self._update_selection_hint(current_label)
-            self.set_status_pill("▲ Stop noise cancellation first to switch microphone.", [240, 180, 50])
+            self.set_status_pill("▲ Stop noise cancellation first to switch microphone.", COL_WARNING)
             return
 
         try:
@@ -627,7 +649,7 @@ class GetsuGUI:
                 self.config["output_device_id"] = self.selected_output_idx
                 save_config(self.config)
                 self._update_selection_hint(app_data)
-                self.set_status_pill(f"● Microphone selected: {clean_device_label(app_data)}", [65, 205, 130])
+                self.set_status_pill(f"● Microphone selected: {clean_device_label(app_data)}", COL_ACCENT)
         finally:
             self._release_state_lock()
 
@@ -653,13 +675,13 @@ class GetsuGUI:
             return "● Ready • Default Mic Routing ON"
         return "● Ready • Manual Routing Mode"
 
-    def _get_idle_color(self) -> List[int]:
+    def _get_idle_color(self) -> Sequence[int]:
         """Returns the color for the idle status pill."""
         if not self.is_vbcable_installed:
-            return [235, 180, 55]  # Warning Amber
-        return [140, 155, 175]  # Muted Slate
+            return COL_WARNING
+        return COL_TEXT_2
 
-    def set_status_pill(self, text: str, color: Optional[List[int]] = None):
+    def set_status_pill(self, text: str, color: Optional[Sequence[int]] = None):
         """Updates the compact single-line status pill with text and optional color."""
         if not self._ui_built or not dpg.does_item_exist("active_notice"):
             return
@@ -695,7 +717,7 @@ class GetsuGUI:
             current_setting = self.config.get("auto_route", True)
             if dpg.does_item_exist("chk_auto_route"):
                 dpg.set_value("chk_auto_route", current_setting)
-            self.set_status_pill("▲ Stop noise cancellation first to change routing preference.", [240, 180, 50])
+            self.set_status_pill("▲ Stop noise cancellation first to change routing preference.", COL_WARNING)
             return
 
         try:
@@ -748,7 +770,7 @@ class GetsuGUI:
             return
 
         if self._is_testing_voice:
-            self.set_status_pill("▲ Microphone voice test in progress. Please wait.", [240, 180, 50])
+            self.set_status_pill("▲ Microphone voice test in progress. Please wait.", COL_WARNING)
             return
 
         if not self._state_lock.acquire(blocking=False):
@@ -758,11 +780,11 @@ class GetsuGUI:
         if not self.is_running:
             # START FLOW
             if self.selected_input_idx is None or self.selected_input_idx < 0:
-                self.set_status_pill("▲ No microphone detected. Please connect a mic.", [235, 75, 75])
+                self.set_status_pill("▲ No microphone detected. Please connect a mic.", COL_ERROR)
                 self._release_state_lock()
                 return
             if self.selected_output_idx is None or self.selected_output_idx < 0:
-                self.set_status_pill("▲ No audio output device detected.", [235, 75, 75])
+                self.set_status_pill("▲ No audio output device detected.", COL_ERROR)
                 self._release_state_lock()
                 return
 
@@ -771,7 +793,7 @@ class GetsuGUI:
                 self._refresh_devices(reinit_portaudio=True)
                 if not self.is_vbcable_installed:
                     self.show_install_modal()
-                    self.set_status_pill("▲ Virtual Cable required to route clean voice.", [235, 75, 75])
+                    self.set_status_pill("▲ Virtual Cable required to route clean voice.", COL_ERROR)
                     self._release_state_lock()
                     return
 
@@ -779,9 +801,9 @@ class GetsuGUI:
             dpg.configure_item("btn_toggle", label="Starting...", enabled=False)
             dpg.bind_item_theme("btn_toggle", self.theme_stop_btn)
             dpg.set_value("status_badge_text", "[ STARTING... ]")
-            dpg.configure_item("status_badge_text", color=[240, 180, 50])
+            dpg.configure_item("status_badge_text", color=COL_TEXT_2)
             self._set_voice_test_button_state(False)
-            self.set_status_pill("◌ Starting AI Filter • Routing to CABLE Output...", [240, 180, 50])
+            self.set_status_pill("◌ Starting AI Filter • Routing to CABLE Output...", COL_WARNING)
 
             def _start_worker():
                 start_time = time.monotonic()
@@ -830,7 +852,7 @@ class GetsuGUI:
                             pass
                         self.engine = None
                     self.is_running = False
-                    self.set_status_pill(f"▲ {self._format_audio_error(e)}", [235, 75, 75])
+                    self.set_status_pill(f"▲ {self._format_audio_error(e)}", COL_ERROR)
                 finally:
                     # Enforce symmetric 3-second state lock
                     elapsed = time.monotonic() - start_time
@@ -840,23 +862,23 @@ class GetsuGUI:
 
                     if success and self.is_running:
                         dpg.set_value("status_badge_text", "[ ACTIVE ]")
-                        dpg.configure_item("status_badge_text", color=[45, 215, 115])
+                        dpg.configure_item("status_badge_text", color=COL_ACCENT)
                         dpg.configure_item("btn_toggle", label="STOP", enabled=True)
                         dpg.bind_item_theme("btn_toggle", self.theme_stop_btn)
                         pair = getattr(self.engine, 'resolved_pair', None)
                         if pair and pair.ambiguous:
-                            self.set_status_pill("● Active • Default mic selected (Confirm in dropdown)", [240, 180, 50])
+                            self.set_status_pill("● Active • Default mic selected (Confirm in dropdown)", COL_WARNING)
                         elif self.config.get("auto_route", True):
                             if getattr(self.engine, 'router_swap_success', True):
-                                self.set_status_pill("● AI Filter Active • Clean Voice Routed", [45, 215, 115])
+                                self.set_status_pill("● AI Filter Active • Clean Voice Routed", COL_ACCENT)
                             else:
-                                self.set_status_pill("▲ AI Filter Active • Auto-Route Failed (Select CABLE in Apps)", [240, 180, 50])
+                                self.set_status_pill("▲ AI Filter Active • Auto-Route Failed (Select CABLE in Apps)", COL_WARNING)
                         else:
-                            self.set_status_pill("● AI Filter Active • Manual Output Mode", [45, 215, 115])
+                            self.set_status_pill("● AI Filter Active • Manual Output Mode", COL_ACCENT)
                         self._set_voice_test_button_state(False)
                     else:
                         dpg.set_value("status_badge_text", "[ STOPPED ]")
-                        dpg.configure_item("status_badge_text", color=[210, 75, 75])
+                        dpg.configure_item("status_badge_text", color=COL_TEXT_2)
                         dpg.configure_item("btn_toggle", label="START", enabled=True)
                         dpg.bind_item_theme("btn_toggle", self.theme_start_btn)
                         self._set_voice_test_button_state(True)
@@ -870,8 +892,8 @@ class GetsuGUI:
             # Lock UI immediately into Stopping state
             dpg.configure_item("btn_toggle", label="Stopping...", enabled=False)
             dpg.set_value("status_badge_text", "[ STOPPING... ]")
-            dpg.configure_item("status_badge_text", color=[240, 180, 50])
-            self.set_status_pill("◌ Restoring physical microphone...", [240, 180, 50])
+            dpg.configure_item("status_badge_text", color=COL_TEXT_2)
+            self.set_status_pill("◌ Restoring physical microphone...", COL_WARNING)
 
             def _stop_worker():
                 start_time = time.monotonic()
@@ -893,7 +915,7 @@ class GetsuGUI:
                         time.sleep(remaining)
 
                     dpg.set_value("status_badge_text", "[ STOPPED ]")
-                    dpg.configure_item("status_badge_text", color=[210, 75, 75])
+                    dpg.configure_item("status_badge_text", color=COL_TEXT_2)
                     dpg.configure_item("btn_toggle", label="START", enabled=True)
                     dpg.bind_item_theme("btn_toggle", self.theme_start_btn)
                     self._set_voice_test_button_state(True)
@@ -905,10 +927,10 @@ class GetsuGUI:
     def start_voice_test(self, sender=None, app_data=None):
         """Starts the 11-second in-memory voice preview test."""
         if not self.is_vbcable_installed:
-            self.set_status_pill("▲ Virtual Cable required • Please install driver", [235, 180, 55])
+            self.set_status_pill("▲ Virtual Cable required • Please install driver", COL_WARNING)
             return
         if self.is_running:
-            self.set_status_pill("▲ Stop noise cancellation first to run voice test.", [240, 180, 50])
+            self.set_status_pill("▲ Stop noise cancellation first to run voice test.", COL_WARNING)
             return
         if self._is_testing_voice:
             return
@@ -934,7 +956,7 @@ class GetsuGUI:
         rn = None
         try:
             if self.selected_input_idx is None or self.selected_input_idx < 0:
-                self.set_status_pill("▲ No microphone selected for voice test.", [235, 75, 75])
+                self.set_status_pill("▲ No microphone selected for voice test.", COL_ERROR)
                 return
 
             # Resolve safe non-WDM-KS input endpoint for voice preview
@@ -1038,7 +1060,7 @@ class GetsuGUI:
                     # Update countdown UI once every 100 chunks (~1.0s)
                     if chunk_idx % 100 == 0:
                         sec_left = 11 - (chunk_idx // 100)
-                        self.set_status_pill(f"◌ Voice Test: Recording to RAM... ({sec_left}s left)", [80, 195, 240])
+                        self.set_status_pill(f"◌ Voice Test: Recording to RAM... ({sec_left}s left)", COL_ACCENT)
                         dpg.configure_item("btn_voice_test", label=f"Recording... ({sec_left}s)")
 
             if not self._app_running or self._cancel_voice_test or not processed_chunks:
@@ -1083,7 +1105,7 @@ class GetsuGUI:
                 if not self._app_running or self._cancel_voice_test:
                     sd.stop()
                     break
-                self.set_status_pill(f"◌ Voice Test: Playing back clean voice... ({sec}s left)", [80, 195, 240])
+                self.set_status_pill(f"◌ Voice Test: Playing back clean voice... ({sec}s left)", COL_ACCENT)
                 dpg.configure_item("btn_voice_test", label=f"Playing back... ({sec}s)")
                 time.sleep(1.0)
             sd.stop()
@@ -1093,11 +1115,11 @@ class GetsuGUI:
             del playback_data
             del processed_chunks
             print("[VOICE TEST] Phase 3: RAM buffer purged. Zero disk clutter.")
-            self.set_status_pill("● Voice test complete • Clean audio verified", [45, 215, 115])
+            self.set_status_pill("● Voice test complete • Clean audio verified", COL_ACCENT)
 
         except Exception as e:
             print(f"[VOICE TEST] Error during voice preview: {e}")
-            self.set_status_pill(f"▲ {self._format_audio_error(e)}", [235, 75, 75])
+            self.set_status_pill(f"▲ {self._format_audio_error(e)}", COL_ERROR)
         finally:
             if rn is not None:
                 try:
@@ -1226,7 +1248,7 @@ class GetsuGUI:
         """Updates the status card and bottom status pill."""
         if self.is_vbcable_installed:
             dpg.set_value("banner_text", "Virtual Mic: Ready for All Voice Apps & Games")
-            dpg.configure_item("banner_text", color=[65, 205, 130])
+            dpg.configure_item("banner_text", color=COL_ACCENT)
             dpg.hide_item("banner_install_btn")
             dpg.configure_item("banner_install_btn", enabled=False)
             if dpg.does_item_exist("banner_how_to_use_btn"):
@@ -1237,7 +1259,7 @@ class GetsuGUI:
                 self.set_status_pill(self._get_idle_status(), self._get_idle_color())
         else:
             dpg.set_value("banner_text", "Driver not installed")
-            dpg.configure_item("banner_text", color=[235, 180, 55])
+            dpg.configure_item("banner_text", color=COL_WARNING)
             dpg.show_item("banner_install_btn")
             dpg.configure_item("banner_install_btn", enabled=True)
             if dpg.does_item_exist("banner_how_to_use_btn"):
@@ -1418,151 +1440,163 @@ class GetsuGUI:
 
         print(f"[GUI] Active Font Engine: {font_family}")
 
+        # Type scale from the mockup: 11, 12, 13, 14 and 16 px. SemiBold for titles and buttons.
         with dpg.font_registry():
             if path_regular and os.path.exists(path_regular):
-                self.font_body = dpg.add_font(path_regular, self.s(17))
                 bold_file = path_semibold if (path_semibold and os.path.exists(path_semibold)) else path_bold
-                self.font_header = dpg.add_font(bold_file, self.s(18)) if (bold_file and os.path.exists(bold_file)) else self.font_body
-                self.font_btn = dpg.add_font(path_bold if (path_bold and os.path.exists(path_bold)) else bold_file, self.s(20))
-                # Notice text reduced by -1 as requested (from 19 to 18)
-                self.font_notice = dpg.add_font(path_regular, self.s(18))
-                self.font_small = dpg.add_font(path_regular, self.s(17))
+                if not (bold_file and os.path.exists(bold_file)):
+                    bold_file = path_regular
+                self.font_body = dpg.add_font(path_regular, self.s(13))
+                self.font_small = dpg.add_font(path_regular, self.s(11))
+                self.font_notice = dpg.add_font(path_regular, self.s(12))
+                self.font_header = dpg.add_font(bold_file, self.s(14))
+                self.font_btn = dpg.add_font(bold_file, self.s(13))
+                self.font_start = dpg.add_font(bold_file, self.s(16))
                 dpg.bind_font(self.font_body)
             else:
                 self.font_body = None
                 self.font_header = None
                 self.font_btn = None
+                self.font_start = None
                 self.font_notice = None
                 self.font_small = None
 
-        # Dark theme with DPI-scaled rounding and padding
+        # Dark theme from the approved mockup palette. Rounding: cards 14, buttons 10, segmented 9.
         with dpg.theme() as global_theme:
             with dpg.theme_component(dpg.mvAll):
-                dpg.add_theme_color(dpg.mvThemeCol_WindowBg, (16, 20, 26))
-                dpg.add_theme_color(dpg.mvThemeCol_ChildBg, (22, 28, 36))
-                dpg.add_theme_color(dpg.mvThemeCol_FrameBg, (30, 37, 48))
-                dpg.add_theme_color(dpg.mvThemeCol_FrameBgHovered, (40, 50, 66))
-                dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(7))
-                dpg.add_theme_style(dpg.mvStyleVar_WindowRounding, self.s(8))
-                dpg.add_theme_style(dpg.mvStyleVar_ChildRounding, self.s(7))
+                dpg.add_theme_color(dpg.mvThemeCol_WindowBg, COL_WINDOW)
+                dpg.add_theme_color(dpg.mvThemeCol_ChildBg, COL_CARD)
+                dpg.add_theme_color(dpg.mvThemeCol_PopupBg, COL_CARD)
+                dpg.add_theme_color(dpg.mvThemeCol_Text, COL_TEXT)
+                dpg.add_theme_color(dpg.mvThemeCol_TextDisabled, COL_TEXT_3)
+                dpg.add_theme_color(dpg.mvThemeCol_Border, COL_SEPARATOR)
+                dpg.add_theme_color(dpg.mvThemeCol_Separator, COL_SEPARATOR)
+                dpg.add_theme_color(dpg.mvThemeCol_FrameBg, COL_FILL)
+                dpg.add_theme_color(dpg.mvThemeCol_FrameBgHovered, COL_FILL_2)
+                dpg.add_theme_color(dpg.mvThemeCol_FrameBgActive, COL_FILL_3)
+                dpg.add_theme_color(dpg.mvThemeCol_Button, COL_FILL)
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, COL_FILL_2)
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, COL_FILL_3)
+                dpg.add_theme_color(dpg.mvThemeCol_Header, COL_ACCENT_SOFT)
+                dpg.add_theme_color(dpg.mvThemeCol_HeaderHovered, COL_CARD_HOVER)
+                dpg.add_theme_color(dpg.mvThemeCol_HeaderActive, COL_ACCENT_SOFT_2)
+                dpg.add_theme_color(dpg.mvThemeCol_CheckMark, COL_ACCENT)
+                dpg.add_theme_color(dpg.mvThemeCol_SliderGrab, COL_ACCENT)
+                dpg.add_theme_color(dpg.mvThemeCol_SliderGrabActive, COL_ACCENT_HOVER)
+                dpg.add_theme_color(dpg.mvThemeCol_ScrollbarBg, (0, 0, 0, 0))
+                dpg.add_theme_color(dpg.mvThemeCol_ScrollbarGrab, COL_FILL_3)
+                dpg.add_theme_color(dpg.mvThemeCol_ScrollbarGrabHovered, COL_FILL_3)
+                dpg.add_theme_color(dpg.mvThemeCol_ScrollbarGrabActive, COL_FILL_3)
+                dpg.add_theme_color(dpg.mvThemeCol_TextSelectedBg, COL_ACCENT_SOFT_2)
+                dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(10))
+                dpg.add_theme_style(dpg.mvStyleVar_GrabRounding, self.s(2))
+                dpg.add_theme_style(dpg.mvStyleVar_ChildRounding, self.s(14))
+                dpg.add_theme_style(dpg.mvStyleVar_PopupRounding, self.s(10))
+                dpg.add_theme_style(dpg.mvStyleVar_WindowRounding, 0)
                 dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, self.s(10), self.s(8))
                 dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, self.s(14), self.s(12))
 
-        # Start button theme (Emerald Green)
-        with dpg.theme() as self.theme_start_btn:
-            with dpg.theme_component(dpg.mvButton):
-                dpg.add_theme_color(dpg.mvThemeCol_Button, (30, 130, 75))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (38, 160, 92))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (24, 105, 60))
-
-        # Stop button theme (Crimson Red)
-        with dpg.theme() as self.theme_stop_btn:
-            with dpg.theme_component(dpg.mvButton):
-                dpg.add_theme_color(dpg.mvThemeCol_Button, (175, 45, 45))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (205, 55, 55))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (140, 35, 35))
-
-        # Banner install button theme (Muted Blue with Electric Blue rounded border)
-        with dpg.theme() as theme_banner_btn:
-            with dpg.theme_component(dpg.mvButton):
-                dpg.add_theme_color(dpg.mvThemeCol_Button, (30, 55, 95))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (42, 78, 135))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (24, 45, 78))
-                dpg.add_theme_color(dpg.mvThemeCol_Border, (59, 130, 246, 220))
-                dpg.add_theme_color(dpg.mvThemeCol_Text, (180, 215, 255))
-                dpg.add_theme_style(dpg.mvStyleVar_FrameBorderSize, 1.0)
-                dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(6))
-
-        # Status card child window theme (Symmetrical margins and calibrated padding)
+        # Status card: flat card without border.
         with dpg.theme() as theme_status_card:
             with dpg.theme_component(dpg.mvChildWindow):
                 dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, self.s(14), self.s(6))
-                dpg.add_theme_style(dpg.mvStyleVar_ChildRounding, self.s(8))
+                dpg.add_theme_style(dpg.mvStyleVar_ChildRounding, self.s(14))
+                dpg.add_theme_style(dpg.mvStyleVar_ChildBorderSize, 0)
 
         # Status text group theme (Zero item spacing so spacer sets exact vertical offset)
         with dpg.theme() as theme_status_text_group:
             with dpg.theme_component(dpg.mvGroup):
                 dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, 0, 0)
 
-        # Sponsor link button theme (Cyan text, transparent background)
+        # Primary accent button: START. The running state (STOP) uses the same accent, it is an "on" state.
+        with dpg.theme() as self.theme_start_btn:
+            with dpg.theme_component(dpg.mvButton):
+                dpg.add_theme_color(dpg.mvThemeCol_Button, COL_ACCENT)
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, COL_ACCENT_HOVER)
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, COL_ACCENT_PRESSED)
+                dpg.add_theme_color(dpg.mvThemeCol_Text, COL_WHITE)
+                dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(10))
+        self.theme_stop_btn = self.theme_start_btn
+
+        # Tinted accent button: install driver, how to use.
+        with dpg.theme() as theme_banner_btn:
+            with dpg.theme_component(dpg.mvButton):
+                dpg.add_theme_color(dpg.mvThemeCol_Button, COL_ACCENT_SOFT)
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, COL_ACCENT_SOFT_2)
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, COL_ACCENT_SOFT_2)
+                dpg.add_theme_color(dpg.mvThemeCol_Text, COL_ACCENT)
+                dpg.add_theme_style(dpg.mvStyleVar_FrameBorderSize, 0.0)
+                dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(10))
+
+        # Link button (sponsor): accent text, no background.
         with dpg.theme() as theme_link_btn:
             with dpg.theme_component(dpg.mvButton):
                 dpg.add_theme_color(dpg.mvThemeCol_Button, (0, 0, 0, 0))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (35, 60, 90, 130))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (25, 45, 75, 180))
-                dpg.add_theme_color(dpg.mvThemeCol_Text, (85, 195, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, COL_ACCENT_SOFT)
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, COL_ACCENT_SOFT_2)
+                dpg.add_theme_color(dpg.mvThemeCol_Text, COL_ACCENT)
 
-        # Boost active button theme (Muted Blue with Electric Blue rounded border, like Install Driver)
+        # Selected segment: filled accent with white text.
         with dpg.theme() as self.theme_boost_active:
             with dpg.theme_component(dpg.mvButton):
-                dpg.add_theme_color(dpg.mvThemeCol_Button, (30, 55, 95))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (42, 78, 135))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (24, 45, 78))
-                dpg.add_theme_color(dpg.mvThemeCol_Border, (59, 130, 246, 220))
-                dpg.add_theme_color(dpg.mvThemeCol_Text, (180, 215, 255))
-                dpg.add_theme_style(dpg.mvStyleVar_FrameBorderSize, 1.0)
-                dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(6))
+                dpg.add_theme_color(dpg.mvThemeCol_Button, COL_ACCENT)
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, COL_ACCENT_HOVER)
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, COL_ACCENT_PRESSED)
+                dpg.add_theme_color(dpg.mvThemeCol_Text, COL_WHITE)
+                dpg.add_theme_style(dpg.mvStyleVar_FrameBorderSize, 0.0)
+                dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(9))
 
-        # Boost inactive button theme (Muted dark frame with subtle border)
+        # Unselected segment: translucent fill, primary text.
         with dpg.theme() as self.theme_boost_inactive:
             with dpg.theme_component(dpg.mvButton):
-                dpg.add_theme_color(dpg.mvThemeCol_Button, (22, 28, 38))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (32, 42, 58))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (18, 24, 32))
-                dpg.add_theme_color(dpg.mvThemeCol_Border, (40, 50, 68, 160))
-                dpg.add_theme_color(dpg.mvThemeCol_Text, (130, 145, 165))
-                dpg.add_theme_style(dpg.mvStyleVar_FrameBorderSize, 1.0)
-                dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(6))
+                dpg.add_theme_color(dpg.mvThemeCol_Button, COL_FILL)
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, COL_FILL_2)
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, COL_FILL_3)
+                dpg.add_theme_color(dpg.mvThemeCol_Text, COL_TEXT)
+                dpg.add_theme_style(dpg.mvStyleVar_FrameBorderSize, 0.0)
+                dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(9))
 
-        # Voice test button theme (Option A: Electric Ocean Blue - Available)
+        # Tinted button (voice test, dialog confirm): accent text on a soft accent fill.
         with dpg.theme() as self.theme_voice_btn:
             with dpg.theme_component(dpg.mvButton):
-                dpg.add_theme_color(dpg.mvThemeCol_Button, (35, 78, 130))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (48, 105, 175))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (28, 62, 105))
-                dpg.add_theme_color(dpg.mvThemeCol_Text, (240, 248, 255))
-                dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(6))
+                dpg.add_theme_color(dpg.mvThemeCol_Button, COL_ACCENT_SOFT)
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, COL_ACCENT_SOFT_2)
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, COL_ACCENT_SOFT_2)
+                dpg.add_theme_color(dpg.mvThemeCol_Text, COL_ACCENT)
+                dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(10))
 
-        # Voice test button theme (Sunken Charcoal - Unavailable while active, dead on hover)
+        # Disabled tinted button: grey text on the neutral fill, no hover change.
         with dpg.theme() as self.theme_voice_btn_disabled:
             for state in (True, False):
                 with dpg.theme_component(dpg.mvButton, enabled_state=state):
-                    dpg.add_theme_color(dpg.mvThemeCol_Button, (20, 24, 30))
-                    dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (20, 24, 30))
-                    dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (20, 24, 30))
-                    dpg.add_theme_color(dpg.mvThemeCol_Text, (85, 95, 110))
-                    dpg.add_theme_color(dpg.mvThemeCol_TextDisabled, (85, 95, 110))
-                    dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(6))
+                    dpg.add_theme_color(dpg.mvThemeCol_Button, COL_FILL)
+                    dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, COL_FILL)
+                    dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, COL_FILL)
+                    dpg.add_theme_color(dpg.mvThemeCol_Text, COL_TEXT_3)
+                    dpg.add_theme_color(dpg.mvThemeCol_TextDisabled, COL_TEXT_3)
+                    dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(10))
 
-        # Unified Modal theme (Unified dark background, larger title padding, red close button)
+        # Unified modal theme: window background, hairline border, 12 px corners.
         with dpg.theme() as theme_modal:
             with dpg.theme_component(dpg.mvAll):
-                dpg.add_theme_color(dpg.mvThemeCol_WindowBg, (16, 20, 26))
-                dpg.add_theme_color(dpg.mvThemeCol_TitleBg, (16, 20, 26))
-                dpg.add_theme_color(dpg.mvThemeCol_TitleBgActive, (16, 20, 26))
-                dpg.add_theme_color(dpg.mvThemeCol_TitleBgCollapsed, (16, 20, 26))
-                dpg.add_theme_color(dpg.mvThemeCol_Border, (40, 52, 70))
+                dpg.add_theme_color(dpg.mvThemeCol_WindowBg, COL_WINDOW)
+                dpg.add_theme_color(dpg.mvThemeCol_TitleBg, COL_WINDOW)
+                dpg.add_theme_color(dpg.mvThemeCol_TitleBgActive, COL_WINDOW)
+                dpg.add_theme_color(dpg.mvThemeCol_TitleBgCollapsed, COL_WINDOW)
+                dpg.add_theme_color(dpg.mvThemeCol_Border, COL_SEPARATOR)
                 dpg.add_theme_style(dpg.mvStyleVar_FramePadding, self.s(10), self.s(10))
                 dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, self.s(18), self.s(16))
-                dpg.add_theme_style(dpg.mvStyleVar_WindowRounding, self.s(8))
-                dpg.add_theme_color(dpg.mvThemeCol_Button, (175, 45, 45))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (215, 55, 55))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (140, 35, 35))
-            with dpg.theme_component(dpg.mvButton):
-                dpg.add_theme_color(dpg.mvThemeCol_Button, (175, 45, 45))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (215, 55, 55))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (140, 35, 35))
+                dpg.add_theme_style(dpg.mvStyleVar_WindowRounding, self.s(12))
 
-        # Modal secondary/cancel button theme (Subtle dark frame)
+        # Secondary button (Not now, Cancel): neutral fill.
         with dpg.theme() as theme_secondary_btn:
             with dpg.theme_component(dpg.mvButton):
-                dpg.add_theme_color(dpg.mvThemeCol_Button, (28, 36, 48))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (38, 48, 64))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (22, 28, 38))
-                dpg.add_theme_color(dpg.mvThemeCol_Border, (48, 60, 80))
-                dpg.add_theme_color(dpg.mvThemeCol_Text, (180, 195, 215))
-                dpg.add_theme_style(dpg.mvStyleVar_FrameBorderSize, 1.0)
-                dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(6))
+                dpg.add_theme_color(dpg.mvThemeCol_Button, COL_FILL)
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, COL_FILL_2)
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, COL_FILL_3)
+                dpg.add_theme_color(dpg.mvThemeCol_Text, COL_TEXT)
+                dpg.add_theme_style(dpg.mvStyleVar_FrameBorderSize, 0.0)
+                dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(10))
 
         dpg.bind_theme(global_theme)
 
@@ -1584,8 +1618,8 @@ class GetsuGUI:
                         if self.has_icon_texture:
                             dpg.add_image("app_icon_texture", width=self.s(22), height=self.s(22))
                             dpg.add_spacer(width=self.s(3))
-                        dpg.add_text("GETSU - AI NOISE CANCELLATION", color=[255, 255, 255], tag="header_title_text")
-                    dpg.add_text("[ STOPPED ]", tag="status_badge_text", color=[210, 75, 75])
+                        dpg.add_text("GETSU - AI NOISE CANCELLATION", color=COL_TEXT, tag="header_title_text")
+                    dpg.add_text("[ STOPPED ]", tag="status_badge_text", color=COL_TEXT_2)
 
             dpg.add_spacer(height=self.s(3))
 
@@ -1600,7 +1634,7 @@ class GetsuGUI:
                             dpg.add_text(
                                 "Virtual Mic Status",
                                 tag="banner_text",
-                                color=[65, 205, 130]
+                                color=COL_ACCENT
                             )
                         with dpg.group(tag="status_btn_group"):
                             dpg.add_button(
@@ -1628,7 +1662,7 @@ class GetsuGUI:
             dpg.add_spacer(height=self.s(3))
 
             # --- INPUT DEVICE SELECTION ---
-            dpg.add_text("Microphone Input:", color=[180, 195, 215])
+            dpg.add_text("Microphone Input:", color=COL_TEXT_2)
             combo_items = list(self.device_map.keys())
             dpg.add_combo(
                 items=combo_items,
@@ -1637,13 +1671,13 @@ class GetsuGUI:
                 tag="input_combo",
                 width=-1
             )
-            dpg.add_text("", tag="input_selection_hint", wrap=self.s(360), color=[240, 180, 50], show=False)
+            dpg.add_text("", tag="input_selection_hint", wrap=self.s(360), color=COL_WARNING, show=False)
 
             dpg.add_spacer(height=self.s(4))
 
 
             # --- MICROPHONE BOOST (0, 5, 10, 15 dB) ---
-            dpg.add_text("Microphone Boost:", color=[180, 195, 215])
+            dpg.add_text("Microphone Boost:", color=COL_TEXT_2)
             with dpg.table(header_row=False, policy=dpg.mvTable_SizingStretchSame):
                 dpg.add_table_column(init_width_or_weight=1.0)
                 dpg.add_table_column(init_width_or_weight=1.0)
@@ -1682,7 +1716,7 @@ class GetsuGUI:
             dpg.add_spacer(height=self.s(5))
 
             # --- VOICE SENSITIVITY THRESHOLD SLIDER ---
-            dpg.add_text("Voice Sensitivity Threshold:", color=[180, 195, 215])
+            dpg.add_text("Voice Sensitivity Threshold:", color=COL_TEXT_2)
             dpg.add_slider_float(
                 default_value=float(self.config.get("vad_threshold", 0.70)),
                 min_value=0.40,
@@ -1754,7 +1788,7 @@ class GetsuGUI:
 
             # --- FOOTER: CREATOR & SPONSOR ---
             with dpg.group(horizontal=True, tag="footer_sponsor_row"):
-                dpg.add_text("Created by Ihsan  |  Sponsored by", color=[120, 135, 155], tag="footer_creator_text")
+                dpg.add_text("Created by Ihsan  |  Sponsored by", color=COL_TEXT_3, tag="footer_creator_text")
                 dpg.add_button(
                     label="Kopi Reman",
                     callback=lambda: webbrowser.open("https://www.instagram.com/kopireman/"),
@@ -1767,9 +1801,8 @@ class GetsuGUI:
             if self.font_header:
                 dpg.bind_item_font("header_title_text", self.font_header)
                 dpg.bind_item_font("status_badge_text", self.font_header)
-            if self.font_btn:
-                dpg.bind_item_font("btn_toggle", self.font_btn)
-                dpg.bind_item_font("btn_voice_test", self.font_body if self.font_body else self.font_btn)
+            if self.font_start:
+                dpg.bind_item_font("btn_toggle", self.font_start)
             if self.font_notice:
                 dpg.bind_item_font("active_notice", self.font_notice)
             if self.font_small:
@@ -1801,7 +1834,7 @@ class GetsuGUI:
                     "and calls, the Virtual Audio driver is required.\n\n"
                     "Do you want me to install this now?",
                     tag="install_status_text",
-                    color=[215, 225, 240]
+                    color=COL_TEXT
                 )
                 dpg.add_spacer(height=self.s(8))
                 dpg.add_loading_indicator(tag="install_spinner", show=False, radius=float(self.s(3)))
@@ -1855,18 +1888,18 @@ class GetsuGUI:
                 height=guide_h,
                 pos=[guide_x, guide_y]
             ):
-                dpg.add_text("Just click START. Most apps will switch to clean\naudio automatically.", color=[215, 225, 240])
+                dpg.add_text("Just click START. Most apps will switch to clean\naudio automatically.", color=COL_TEXT)
                 dpg.add_spacer(height=self.s(6))
 
-                dpg.add_text("Notes: Only When Needed (Games & Voice Apps)", color=[85, 175, 255])
+                dpg.add_text("Notes: Only When Needed (Games & Voice Apps)", color=COL_ACCENT)
                 dpg.add_text(
                     "If an app or game doesn't pick up the noise filter,\ngo to its audio settings and choose:",
-                    color=[180, 195, 215]
+                    color=COL_TEXT_2
                 )
                 dpg.add_spacer(height=self.s(2))
-                dpg.add_text("Microphone  ->  CABLE Output", color=[65, 205, 130])
+                dpg.add_text("Microphone  ->  CABLE Output", color=COL_ACCENT)
                 dpg.add_spacer(height=self.s(2))
-                dpg.add_text("(This guarantees clean voice, no restart needed.)", color=[140, 155, 175])
+                dpg.add_text("(This guarantees clean voice, no restart needed.)", color=COL_TEXT_2)
 
                 dpg.add_spacer(height=self.s(12))
                 with dpg.group(horizontal=True):
@@ -1880,6 +1913,15 @@ class GetsuGUI:
                     )
             dpg.bind_item_theme("modal_how_to_use", theme_modal)
             dpg.bind_item_theme("btn_how_to_use_ok", self.theme_voice_btn)
+
+            # Buttons use the SemiBold 13 px face; this runs after every button has been created.
+            if self.font_btn:
+                for tag in ("btn_voice_test", "banner_install_btn", "banner_how_to_use_btn",
+                            "btn_boost_0", "btn_boost_5", "btn_boost_10", "btn_boost_15",
+                            "btn_install_confirm", "btn_install_cancel", "btn_install_done",
+                            "btn_how_to_use_ok"):
+                    if dpg.does_item_exist(tag):
+                        dpg.bind_item_font(tag, self.font_btn)
 
         # Viewport configuration - center on active monitor work area (taskbar-aware) from frame 0
         vp_w = self.s(520)

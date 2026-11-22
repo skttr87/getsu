@@ -35,5 +35,23 @@ class MusicModeToggleTests(unittest.TestCase):
         self.assertTrue(fake.engine.denoise_enabled)
 
 
+class PaletteTests(unittest.TestCase):
+    """Colours follow the approved mockup: one blue accent, red for errors, orange for warnings, no green."""
+
+    def test_accent_is_apple_system_blue(self):
+        self.assertEqual(gui.COL_ACCENT, (10, 132, 255))
+
+    def test_error_and_warning_colours(self):
+        self.assertEqual(gui.COL_ERROR, (255, 69, 58))
+        self.assertEqual(gui.COL_WARNING, (255, 159, 10))
+
+    def test_no_green_colour_in_palette(self):
+        for name in dir(gui):
+            if not name.startswith("COL_"):
+                continue
+            r, g, b = getattr(gui, name)[:3]
+            self.assertFalse(g > r and g > b, f"{name} is green-dominant")
+
+
 if __name__ == "__main__":
     unittest.main()

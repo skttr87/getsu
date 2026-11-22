@@ -451,6 +451,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Install bundled VB-Audio Virtual Cable driver and exit",
     )
+    parser.add_argument(
+        "--probe-mic",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="INDEX|NAME",
+        help="Try to open a microphone one second per method and print a table (no default device change)",
+    )
+    parser.add_argument(
+        "--no-duplex",
+        action="store_true",
+        help="With --probe-mic: skip the duplex step with CABLE Input (input-only attempts)",
+    )
     return parser
 
 
@@ -467,6 +480,10 @@ def main() -> int:
     if args.install_driver:
         from src.devices import install_vbcable_driver
         return 0 if install_vbcable_driver() else 1
+
+    if args.probe_mic is not None:
+        from src.mic_probe import run_probe
+        return run_probe(args.probe_mic or None, duplex=not args.no_duplex)
 
     if not args.clean:
         parser.print_help()

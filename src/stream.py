@@ -73,8 +73,6 @@ class AudioEngine:
         self.last_start_error: Optional[ExplainedError] = None
         self._lock = threading.RLock()
 
-        self._watchdog_lock = threading.Lock()
-
         # DSP Components
         self.denoise_available = True
         try:
@@ -137,8 +135,8 @@ class AudioEngine:
     def _audio_callback(self, indata, outdata, frames, time_info, status):
         """10ms real-time audio processing callback."""
         try:
-            with self._watchdog_lock:
-                self._last_callback_time = time.monotonic()
+            # Single float store: atomic under the GIL, read by is_stream_alive() without a lock
+            self._last_callback_time = time.monotonic()
             if status:
                 if status.input_overflow:
                     self.overflow_count += 1
@@ -419,8 +417,7 @@ class AudioEngine:
                 return False
         except Exception:
             return False
-        with self._watchdog_lock:
-            elapsed = time.monotonic() - self._last_callback_time
+        elapsed = time.monotonic() - self._last_callback_time
         if elapsed > 2.0:
             return False
         return True

@@ -12,10 +12,29 @@ v1.2.6 gate changes:
 - Speech-guarded startup ambient profiler (median of non-speech frames).
 - Guarded dual-rate noise-floor tracking with a per-frame rise cap (0.5 dB) and lower clamp (-75 dBFS).
 """
+import bisect
 import math
+import threading
 from collections import deque
 from typing import Tuple, Optional, Any
 import numpy as np
+
+
+BLOCK_FRAME_LEN = 480       # frame length the block HPF is precomputed for (10 ms at 48 kHz)
+_ANTI_DENORMAL = 1e-15
+
+
+def _biquad_response(coef, x_ext, ym2, ym1):
+    """
+    Direct Form I biquad with zero input history given by x_ext and output history (ym2, ym1).
+    x_ext holds [x[-2], x[-1], x[0], ..., x[n-1]] (length n + 2). Returns y[0..n-1] as a list.
+    """
+    b0, b1, b2, a1, a2 = coef
+    n = len(x_ext) - 2
+    y = [ym2, ym1] + [0.0] * n
+    for i in range(n):
+        y[i + 2] = b0 * x_ext[i + 2] + b1 * x_ext[i + 1] + b2 * x_ext[i] - a1 * y[i + 1] - a2 * y[i]
+    return y[2:]
 
 
 class HighPassFilter:
@@ -23,6 +42,12 @@ class HighPassFilter:
     2nd-order IIR Butterworth High-Pass Filter (Biquad).
     Cuts out sub-bass frequencies (< 80 Hz) like laptop cooling pad vibrations,
     desk thumps, and electrical hum before it reaches the AI model.
+
+    For frames of BLOCK_FRAME_LEN samples the filter is evaluated as one block:
+        y = T @ x + S @ [x1, x2, y1, y2]
+    where T is the lower-triangular Toeplitz matrix of the biquad impulse response and S holds the
+    responses to the four state values. T and S depend only on the coefficients and the frame length,
+    so they are built once in the constructor. Other frame lengths use the per-sample loop.
     """
 
     def __init__(self, cutoff_hz: float = 80.0, sample_rate: float = 48000.0):
@@ -30,6 +55,37 @@ class HighPassFilter:
         self.sample_rate = sample_rate
         self.reset()
         self._calculate_coefficients()
+        self._block_n = 0
+        self._prepare_block(BLOCK_FRAME_LEN)
+
+    def _prepare_block(self, n: int):
+        """Build T (n x n), S (n x 4) and the float64 scratch buffers for frame length n."""
+        coef = (self.b0, self.b1, self.b2, self.a1, self.a2)
+        zeros = [0.0] * n
+        impulse = [0.0, 0.0, 1.0] + [0.0] * (n - 1)          # unit impulse at x[0]
+        h = _biquad_response(coef, impulse, 0.0, 0.0)
+        T = np.zeros((n, n), dtype=np.float64)
+        for j in range(n):
+            T[j:, j] = h[:n - j]                               # column j: impulse at sample j
+
+        cols = [
+            _biquad_response(coef, [0.0, 1.0] + zeros, 0.0, 0.0),   # x1 = x[-1] = 1
+            _biquad_response(coef, [1.0, 0.0] + zeros, 0.0, 0.0),   # x2 = x[-2] = 1
+            _biquad_response(coef, [0.0, 0.0] + zeros, 0.0, 1.0),   # y1 = y[-1] = 1
+            _biquad_response(coef, [0.0, 0.0] + zeros, 1.0, 0.0),   # y2 = y[-2] = 1
+        ]
+        S = np.array(cols, dtype=np.float64).T
+        self._T = T
+        self._S = np.ascontiguousarray(S)
+        # [T | S] applied to [x ; state] in one matrix-vector product
+        self._Z = np.ascontiguousarray(np.concatenate([T, S], axis=1))
+        self._z = np.zeros(n + 4, dtype=np.float64)
+        self._zx = self._z[:n]
+        self._zs = self._z[n:]
+        self._y64 = np.zeros(n, dtype=np.float64)
+        self._tmp64 = np.zeros(n, dtype=np.float64)
+        self._mask = np.zeros(n, dtype=bool)
+        self._block_n = n
 
     def _calculate_coefficients(self):
         w0 = 2.0 * math.pi * self.cutoff_hz / self.sample_rate
@@ -65,13 +121,45 @@ class HighPassFilter:
 
     def process(self, frame: np.ndarray) -> np.ndarray:
         """
-        Process a 1D float32 audio frame through the filter.
-        Uses Direct Form I for numerical stability.
+        Process a 1D float32 audio frame through the filter. Returns the internal output buffer
+        (overwritten by the next call). Uses Direct Form I for numerical stability.
         """
         n = len(frame)
         if self._out_buffer is None or len(self._out_buffer) != n:
             self._out_buffer = np.empty(n, dtype=np.float32)
 
+        if n == self._block_n and n >= 2:
+            return self._process_block(frame)
+        return self._process_loop(frame)
+
+    def _process_block(self, frame) -> np.ndarray:
+        """Block evaluation y = T x + S s with state update. Scratch buffers are reused (no per-frame allocation)."""
+        out = self._out_buffer
+        x = self._zx
+        zs = self._zs
+        y = self._y64
+        np.copyto(x, frame)
+        zs[0] = self.x1
+        zs[1] = self.x2
+        zs[2] = self.y1
+        zs[3] = self.y2
+
+        np.dot(self._Z, self._z, out=y)
+        # Anti-denormal flush (same rule as the per-sample path)
+        np.abs(y, out=self._tmp64)
+        np.less(self._tmp64, _ANTI_DENORMAL, out=self._mask)
+        np.copyto(y, 0.0, where=self._mask)
+
+        np.copyto(out, y)
+        self.x1 = float(x[-1])
+        self.x2 = float(x[-2])
+        self.y1 = float(y[-1])
+        self.y2 = float(y[-2])
+        return out
+
+    def _process_loop(self, frame) -> np.ndarray:
+        """Per-sample Direct Form I reference path, used for frame lengths other than BLOCK_FRAME_LEN."""
+        n = len(frame)
         out = self._out_buffer
         b0, b1, b2 = self.b0, self.b1, self.b2
         a1, a2 = self.a1, self.a2
@@ -82,7 +170,7 @@ class HighPassFilter:
             x0 = frame_list[i]
             y0 = b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
             # Anti-denormal flush: prevent CPU microcode stalling on exponential decay silence
-            if -1e-15 < y0 < 1e-15:
+            if -_ANTI_DENORMAL < y0 < _ANTI_DENORMAL:
                 y0 = 0.0
             out[i] = y0
             x2 = x1
@@ -202,6 +290,7 @@ class AdaptiveNoiseGate:
         self._zero_buffer: np.ndarray | None = None
         self._delay_buffer: np.ndarray | None = None
         self._work_buffer: np.ndarray | None = None
+        self._ramp_buf: np.ndarray | None = None
 
         # Flutter state
         self._frame_idx = 0
@@ -219,6 +308,7 @@ class AdaptiveNoiseGate:
         self.user_anchor_db: float = -24.0
         self.nearfield_margin_db: float = 14.0
         self._voiced_anchor_buffer: deque = deque(maxlen=150)
+        self._anchor_sorted: list = []   # same values as the deque, kept sorted for the 90th percentile
         self._frames_since_nearfield: int = 1000
 
     # ------------------------------------------------------------------ control
@@ -237,7 +327,7 @@ class AdaptiveNoiseGate:
         self._frames_since_voiced = 1000
         self._frames_since_nearfield = 1000
         self.user_anchor_db = -24.0
-        self._voiced_anchor_buffer.clear()
+        self._clear_anchor_buffer()
         self._flutter_events.clear()
         if self._delay_buffer is not None:
             self._delay_buffer.fill(0.0)
@@ -249,10 +339,41 @@ class AdaptiveNoiseGate:
         self._cal_buffer = []
         self._calibrated = not self._calibrate_startup
         self.user_anchor_db = -24.0
-        self._voiced_anchor_buffer.clear()
+        self._clear_anchor_buffer()
         self._frames_since_nearfield = 1000
 
     # ------------------------------------------------------------------ helpers
+
+    def _clear_anchor_buffer(self):
+        self._voiced_anchor_buffer.clear()
+        self._anchor_sorted.clear()
+
+    def _anchor_push(self, value: float):
+        """Append a voiced level to the 150-frame anchor window, keeping the sorted copy in step."""
+        buf = self._voiced_anchor_buffer
+        if len(buf) == buf.maxlen:
+            oldest = buf[0]
+            del self._anchor_sorted[bisect.bisect_left(self._anchor_sorted, oldest)]
+        buf.append(value)
+        bisect.insort(self._anchor_sorted, value)
+
+    def _anchor_percentile90(self) -> float:
+        """90th percentile with linear interpolation (same definition as np.percentile default)."""
+        srt = self._anchor_sorted
+        n = len(srt)
+        pos = 0.9 * (n - 1)
+        lo = int(pos)
+        if lo + 1 >= n:
+            return float(srt[lo])
+        frac = pos - lo
+        return float(srt[lo] + (srt[lo + 1] - srt[lo]) * frac)
+
+    def _ramp_scratch(self, n: int, dtype) -> np.ndarray:
+        buf = self._ramp_buf
+        if buf is None or buf.shape[0] != n or buf.dtype != dtype:
+            buf = np.empty(n, dtype=dtype)
+            self._ramp_buf = buf
+        return buf
 
     def _current_cooldown_frames(self) -> int:
         ev = self._flutter_events
@@ -341,9 +462,9 @@ class AdaptiveNoiseGate:
         if input_rms_db is not None and speech_prob >= 0.80:
             snr = input_rms_db - self.noise_floor_db
             if snr >= 15.0:
-                self._voiced_anchor_buffer.append(input_rms_db)
+                self._anchor_push(input_rms_db)
                 if len(self._voiced_anchor_buffer) >= 10:
-                    self.user_anchor_db = float(np.clip(np.percentile(self._voiced_anchor_buffer, 90), -36.0, -12.0))
+                    self.user_anchor_db = min(-12.0, max(-36.0, self._anchor_percentile90()))
 
         # 2. Near-Field Qualification
         is_nearfield = (input_rms_db is None) or (input_rms_db >= (self.user_anchor_db - self.nearfield_margin_db))
@@ -472,7 +593,9 @@ class AdaptiveNoiseGate:
                 t = np.linspace(0.0, 1.0, len(target_frame), dtype=np.float64)
                 s_f64 = t**4 * (35.0 + t * (-84.0 + t * (70.0 - 20.0 * t)))
                 s_curve = np.maximum.accumulate(np.clip(s_f64, 0.0, 1.0).astype(target_frame.dtype))
-            ramp = (start_gain + (end_gain - start_gain) * s_curve).astype(target_frame.dtype, copy=False)
+            ramp = self._ramp_scratch(len(target_frame), target_frame.dtype)
+            np.multiply(s_curve, end_gain - start_gain, out=ramp)
+            ramp += start_gain
             target_frame *= ramp
         else:
             target_frame *= end_gain
@@ -490,7 +613,8 @@ def calculate_levels(frame: np.ndarray):
     """Calculate Peak and RMS levels in dBFS using BLAS dot product."""
     if len(frame) == 0:
         return -100.0, -100.0
-    peak = float(np.max(np.abs(frame)))
+    # max(|x|) without an absolute-value temporary
+    peak = max(float(frame.max()), -float(frame.min()))
     rms = float(np.sqrt(np.dot(frame, frame) / len(frame)))
 
     # Convert to dBFS (reference 1.0 for normalized float32; 32767 only if PCM range > 100)
@@ -506,6 +630,8 @@ def soft_preclip(frame: np.ndarray, knee: float = 0.75) -> np.ndarray:
     Uses hyperbolic tangent saturation above knee (default 0.75), eliminating
     square-wave splatter from unshielded plosives and breath blasts.
     """
+    if frame.size == 0 or (frame.max() <= knee and frame.min() >= -knee):
+        return frame                      # common case: nothing above the knee, no temporaries
     mask = np.abs(frame) > knee
     if np.any(mask):
         excess = np.abs(frame[mask]) - knee
@@ -513,20 +639,51 @@ def soft_preclip(frame: np.ndarray, knee: float = 0.75) -> np.ndarray:
     return frame
 
 
-def soft_limit(x: np.ndarray, threshold: float = 0.85) -> np.ndarray:
+def soft_limit(x: np.ndarray, threshold: float = 0.85, out: Optional[np.ndarray] = None) -> np.ndarray:
     """
     Smooth transparent soft-saturation limiter.
     Passes audio transparently (1:1) when |x| <= threshold.
     Softens loud screaming/laughter peaks using tanh saturation, eliminating hard digital clipping.
+    With out=x the limiting is done in place; otherwise a copy is returned when samples are limited.
     """
+    if x.size == 0 or (x.max() <= threshold and x.min() >= -threshold):
+        if out is not None and out is not x:
+            np.copyto(out, x)
+            return out
+        return x
     abs_x = np.abs(x)
     over = abs_x > threshold
     if not np.any(over):
         return x
-    out = x.copy()
+    if out is None:
+        out = x.copy()
+    elif out is not x:
+        np.copyto(out, x)
     scale = 1.0 - threshold
     out[over] = np.sign(x[over]) * (threshold + scale * np.tanh((abs_x[over] - threshold) / scale))
     return out
+
+
+TS_RADIUS = 24                       # 0.5 ms each side = 1.0 ms dip at 48 kHz
+TS_WINDOW_MAX = 2 * TS_RADIUS + 1
+TS_SKIP_SPEECH_PROB = 0.20           # below this speech probability the stage is skipped (see TransientSuppressor)
+
+
+def _build_bell_table() -> np.ndarray:
+    """
+    Row L holds sin^2 over a window of L samples (linspace 0..pi, float32), zero-padded to TS_WINDOW_MAX.
+    Windows at a frame edge are shorter than 49 samples and are stretched over their own length, so each
+    length needs its own row.
+    """
+    table = np.zeros((TS_WINDOW_MAX + 1, TS_WINDOW_MAX), dtype=np.float32)
+    for length in range(1, TS_WINDOW_MAX + 1):
+        t = np.linspace(0.0, np.pi, length, dtype=np.float32)
+        table[length, :length] = np.sin(t) ** 2
+    return table
+
+
+_TS_BELL = _build_bell_table()
+_TS_OFFSETS = np.arange(TS_WINDOW_MAX, dtype=np.int64)
 
 
 class TransientSuppressor:
@@ -535,6 +692,10 @@ class TransientSuppressor:
     Attenuates sharp mechanical keyboard switch clicks (fast rise time, high HF energy)
     and impulsive desk thumps occurring during active speech by 6-10 dB,
     using smooth S-curve / Hann envelope windowing to eliminate harmonic step clicks.
+
+    skip_when_no_speech (default True): when speech_prob is below TS_SKIP_SPEECH_PROB (0.20) the
+    stage returns the frame unchanged. Its state (previous sample) is still updated. Set it to False
+    to run the stage on every frame.
     """
 
     def __init__(
@@ -542,60 +703,88 @@ class TransientSuppressor:
         threshold_crest: float = 4.5,
         max_attenuation_db: float = 8.0,
         sample_rate: int = 48000,
+        skip_when_no_speech: bool = True,
     ):
         self.threshold_crest = threshold_crest
         self.max_attenuation_db = max_attenuation_db
         self.sample_rate = sample_rate
+        self.skip_when_no_speech = skip_when_no_speech
         self.min_gain = float(10.0 ** (-max_attenuation_db / 20.0))
         self._prev_sample = 0.0
+        self._buf_n = 0
+        self._buf_dtype = None
+        self._diff: Optional[np.ndarray] = None
 
     def reset(self):
         """Reset internal filter memory."""
         self._prev_sample = 0.0
 
+    def _ensure_buffers(self, n: int, dtype):
+        if self._buf_n != n or self._buf_dtype != dtype:
+            self._diff = np.zeros(n, dtype=dtype)
+            self._sq = np.zeros(n, dtype=dtype)
+            self._crest = np.zeros(n, dtype=dtype)
+            self._mask = np.zeros(n, dtype=bool)
+            self._gain = np.ones(n, dtype=dtype)
+            self._buf_n = n
+            self._buf_dtype = dtype
+
     def process(self, frame: np.ndarray, speech_prob: float = 1.0) -> np.ndarray:
         """
         Detects high-frequency impulsive spikes and smoothly suppresses them.
+        The result is written into frame and frame is returned.
         """
         n = len(frame)
         if n == 0:
             return frame
 
-        # High-frequency derivative across frame
-        diff = np.diff(frame, prepend=self._prev_sample)
+        if self.skip_when_no_speech and speech_prob < TS_SKIP_SPEECH_PROB:
+            self._prev_sample = float(frame[-1])
+            return frame
+
+        self._ensure_buffers(n, frame.dtype)
+        diff = self._diff
+        # High-frequency derivative across frame (same values as np.diff(frame, prepend=prev))
+        diff[0] = frame[0] - frame.dtype.type(self._prev_sample)
+        np.subtract(frame[1:], frame[:-1], out=diff[1:])
         self._prev_sample = float(frame[-1])
 
         # Energy of high-frequency differential
-        rms_diff = float(np.sqrt(np.mean(diff ** 2)))
+        sq = self._sq
+        np.square(diff, out=sq)
+        rms_diff = float(np.sqrt(np.mean(sq)))
         if rms_diff < 1e-4:
             return frame
 
         # Instantaneous HF crest factor
-        abs_diff = np.abs(diff)
-        crest = abs_diff / (rms_diff + 1e-6)
-        spike_mask = crest >= self.threshold_crest
-        if not np.any(spike_mask):
+        crest = self._crest
+        np.abs(diff, out=crest)
+        crest /= (rms_diff + 1e-6)
+        mask = self._mask
+        np.greater_equal(crest, self.threshold_crest, out=mask)
+        spikes = np.flatnonzero(mask)
+        if spikes.size == 0:
             return frame
 
-        gain_env = np.ones(n, dtype=frame.dtype)
-        spike_indices = np.where(spike_mask)[0]
+        # Per-spike attenuation and window placement, all spikes at once
+        peak = crest[spikes].astype(np.float64)
+        att_db = np.minimum(self.max_attenuation_db, 6.0 + (peak - self.threshold_crest) * 0.8)
+        spike_gain = 10.0 ** (-att_db / 20.0)
+        i_start = np.maximum(0, spikes - TS_RADIUS)
+        i_end = np.minimum(n, spikes + TS_RADIUS + 1)
+        lengths = i_end - i_start
 
-        radius = 24  # 0.5 ms each side = 1.0 ms dip at 48kHz
-        for s_idx in spike_indices:
-            peak_val = crest[s_idx]
-            att_db = min(self.max_attenuation_db, 6.0 + (peak_val - self.threshold_crest) * 0.8)
-            spike_gain = float(10.0 ** (-att_db / 20.0))
+        bell = _TS_BELL[lengths]                                   # (spikes, 49), zero padded
+        local = 1.0 - (1.0 - spike_gain)[:, None] * bell           # padding entries stay 1.0
+        valid = _TS_OFFSETS[None, :] < lengths[:, None]
+        positions = i_start[:, None] + _TS_OFFSETS[None, :]
 
-            i_start = max(0, s_idx - radius)
-            i_end = min(n, s_idx + radius + 1)
-            win_len = i_end - i_start
+        gain_env = self._gain
+        gain_env.fill(1.0)
+        np.minimum.at(gain_env, positions[valid], local[valid].astype(gain_env.dtype))
 
-            t = np.linspace(0.0, np.pi, win_len, dtype=np.float32)
-            bell = np.sin(t) ** 2
-            local_env = 1.0 - (1.0 - spike_gain) * bell
-            gain_env[i_start:i_end] = np.minimum(gain_env[i_start:i_end], local_env)
-
-        return frame * gain_env
+        np.multiply(frame, gain_env, out=frame)
+        return frame
 
 
 class SpeechLeveler:
@@ -675,8 +864,21 @@ class SpeechLeveler:
             self.current_gain = 10.0 ** (current_gain_db / 20.0)
 
         if self.current_gain != 1.0:
-            return frame * self.current_gain, self.current_gain
+            np.multiply(frame, self.current_gain, out=frame)
+            return frame, self.current_gain
         return frame, 1.0
+
+
+_tls = threading.local()
+
+
+def _scale_scratch(n: int) -> np.ndarray:
+    """Per-thread float32 scratch for the RNNoise input scaling (the live engine and the voice test run on different threads)."""
+    buf = getattr(_tls, "scale", None)
+    if buf is None or buf.shape[0] != n:
+        buf = np.empty(n, dtype=np.float32)
+        _tls.scale = buf
+    return buf
 
 
 def process_mono_frame(
@@ -716,20 +918,20 @@ def process_mono_frame(
     frame_mono = soft_preclip(frame_mono, knee=0.75)
     np.clip(frame_mono, -1.0, 1.0, out=frame_mono)
 
-    # 3. RNNoise Neural Core
+    # 3. RNNoise Neural Core (scaled into a per-thread scratch buffer, result written back in place)
     speech_prob = 0.0
     if denoise_enabled and rnnoise is not None:
-        frame_rn = frame_mono * 32767.0
+        frame_rn = np.multiply(frame_mono, 32767.0, out=_scale_scratch(len(frame_mono)))
         frame_rn, speech_prob = rnnoise.process_frame(frame_rn)
-        frame_mono = frame_rn / 32767.0
+        np.divide(frame_rn, 32767.0, out=frame_mono)
     else:
         speech_prob = min(1.0, max(0.0, (input_rms_db + 45.0) / 20.0))
 
-    # 4. In-Speech Transient Suppression
+    # 4. In-Speech Transient Suppression (in place)
     if transient_suppressor is not None:
         frame_mono = transient_suppressor.process(frame_mono, speech_prob)
 
-    # 5. Dynamic Speech Leveler (if enabled, de-stacking manual mic boost)
+    # 5. Dynamic Speech Leveler (if enabled, de-stacking manual mic boost; in place)
     if leveler is not None:
         frame_mono, _ = leveler.process(frame_mono, speech_prob, input_rms_db, mic_boost_db=mic_boost_db)
 
@@ -740,10 +942,8 @@ def process_mono_frame(
     # 7. Soft-Knee Adaptive Noise Gate
     frame_mono, _ = gate.process(frame_mono, speech_prob, input_rms_db=input_rms_db, in_place=True)
 
-    # 8. Soft Saturation Limiter
-    frame_mono = soft_limit(frame_mono, threshold=0.85)
-
-    return frame_mono, speech_prob, input_peak_db, input_rms_db
+    # 8. Soft Saturation Limiter (in place)
+    frame_mono = soft_limit(frame_mono, threshold=0.85, out=frame_mono)
 
     return frame_mono, speech_prob, input_peak_db, input_rms_db
 

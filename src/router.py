@@ -398,6 +398,29 @@ def native_get_device_bus_type(device_id_or_name: Optional[str] = None, is_input
         _release_com_ptr(pEnum)
 
 
+_bus_type_cache: dict = {}
+
+
+def clear_device_bus_type_cache():
+    """Forget cached bus types. Call at the start of every device rescan (hotplug, manual refresh)."""
+    _bus_type_cache.clear()
+
+
+def native_get_device_bus_type_cached(device_id_or_name: Optional[str] = None, is_input: bool = True) -> str:
+    """
+    native_get_device_bus_type() memoised per (device_id_or_name, is_input).
+    Used by device enumeration, where the same endpoint is classified several times in one pass.
+    The cache lives until clear_device_bus_type_cache(). It is never read from the audio callback.
+    """
+    key = (device_id_or_name, bool(is_input))
+    cached = _bus_type_cache.get(key)
+    if cached is not None:
+        return cached
+    value = native_get_device_bus_type(device_id_or_name, is_input=is_input)
+    _bus_type_cache[key] = value
+    return value
+
+
 def native_get_cable_capture_guid() -> Optional[str]:
     """
     Direct in-process scan of active eCapture endpoints to locate CABLE Output GUID.

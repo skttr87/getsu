@@ -9,8 +9,18 @@ from typing import List, Dict, Optional, Tuple, Any, Union
 import sounddevice as sd
 
 
+def _start_enumeration_pass():
+    """Each enumeration pass starts with an empty bus-type cache, so hotplugged devices are classified fresh."""
+    try:
+        from src.router import clear_device_bus_type_cache
+        clear_device_bus_type_cache()
+    except Exception:
+        pass
+
+
 def get_all_devices(force_rescan: bool = False) -> List[Dict]:
     """Retrieve all sound devices with HostAPI details."""
+    _start_enumeration_pass()
     try:
         if force_rescan:
             try:
@@ -102,8 +112,8 @@ def is_virtual_input_device(name: str) -> bool:
     if any(keyword in name_lower for keyword in VIRTUAL_INPUT_BLACKLIST):
         return True
     try:
-        from src.router import native_get_device_bus_type, DeviceBusType
-        bus = native_get_device_bus_type(name, is_input=True)
+        from src.router import native_get_device_bus_type_cached, DeviceBusType
+        bus = native_get_device_bus_type_cached(name, is_input=True)
         if bus == DeviceBusType.VIRTUAL:
             return True
     except Exception:
@@ -113,6 +123,7 @@ def is_virtual_input_device(name: str) -> bool:
 
 def get_input_devices(include_virtual: bool = False) -> List[Dict]:
     """Return all recording/microphone devices (WASAPI preferred), deduplicated across host APIs."""
+    _start_enumeration_pass()
     try:
         from src.host_api_resolver import list_selectable_inputs
         selectable = list_selectable_inputs(sd.query_devices(), sd.query_hostapis(), include_virtual=include_virtual)
@@ -143,6 +154,7 @@ def get_input_devices(include_virtual: bool = False) -> List[Dict]:
 
 def get_output_devices() -> List[Dict]:
     """Return all playback/speaker devices (WASAPI preferred)."""
+    _start_enumeration_pass()
     devices = get_all_devices()
     outputs = [d for d in devices if d['outputs'] > 0]
     wasapi_outputs = [d for d in outputs if 'WASAPI' in d['hostapi']]
@@ -403,9 +415,9 @@ def get_physical_output_device(force_rescan: bool = False) -> Optional[Dict]:
 
     # Priority 2: Hardware bus priority (BTHENUM or USB headset over HDAUDIO)
     try:
-        from src.router import native_get_device_bus_type, DeviceBusType
+        from src.router import native_get_device_bus_type_cached, DeviceBusType
         for d in physical_outputs:
-            bus = native_get_device_bus_type(d['name'], is_input=False)
+            bus = native_get_device_bus_type_cached(d['name'], is_input=False)
             if bus in (DeviceBusType.BLUETOOTH_A2DP, DeviceBusType.BLUETOOTH_LE, DeviceBusType.USB):
                 return d
     except Exception:

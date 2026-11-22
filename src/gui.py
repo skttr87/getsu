@@ -39,7 +39,7 @@ from src.devices import (
 )
 from src.config import load_config, save_config
 from src.stream import AudioEngine, create_engine_from_config
-from src.router import SmartMicRouter
+from src.router import SmartMicRouter, clear_device_bus_type_cache
 from src.rnnoise import RNNoise, FRAME_SIZE, SAMPLE_RATE
 from src.dsp import (
     HighPassFilter,
@@ -391,6 +391,7 @@ class GetsuGUI:
 
     def _refresh_devices(self, reinit_portaudio: bool = True):
         """Scans connected devices and updates status."""
+        clear_device_bus_type_cache()
         if reinit_portaudio and not self.is_running:
             try:
                 sd._terminate()
@@ -442,6 +443,7 @@ class GetsuGUI:
 
     def _on_device_change_event(self):
         """Debounced listener for Windows WM_DEVICECHANGE hotplug signals."""
+        clear_device_bus_type_cache()
         with self._device_change_lock:
             if self._device_change_timer and self._device_change_timer.is_alive():
                 self._device_change_timer.cancel()
@@ -453,6 +455,7 @@ class GetsuGUI:
     def _handle_hardware_rescan(self):
         """Processes hardware changes, updates dropdown UI, and auto-switches to newly plugged mic if stopped."""
         print("[HARDWARE] Audio device change detected. Rescanning...")
+        clear_device_bus_type_cache()
         with self._device_change_lock:
             self._is_rescanning = True
             try:

@@ -172,17 +172,22 @@ def _form_factor(name: str, is_input: bool) -> Optional[int]:
 
 
 def _is_virtual(name: str, bus: str) -> bool:
-    """Virtual cable or virtual software device: SWD bus, or name fragments only when the bus is unknown."""
+    """Virtual cable or virtual software device.
+    Software buses (SWD) and the ROOT enumerator are virtual: real audio hardware never enumerates under ROOT.
+    The VB-Audio cable names are virtual whatever the bus says. The product fallback names apply only when the
+    bus is unknown."""
     try:
         from src.router import DeviceBusType
     except Exception:
         return False
-    if bus == DeviceBusType.VIRTUAL:
+    if bus in (DeviceBusType.VIRTUAL, DeviceBusType.ROOT):
+        return True
+    name_lower = name.lower()
+    if any(fragment in name_lower for fragment in VIRTUAL_INPUT_BLACKLIST):
         return True
     if bus != DeviceBusType.UNKNOWN:
         return False
-    name_lower = name.lower()
-    return any(fragment in name_lower for fragment in VIRTUAL_INPUT_BLACKLIST + VIRTUAL_PRODUCT_FALLBACK)
+    return any(fragment in name_lower for fragment in VIRTUAL_PRODUCT_FALLBACK)
 
 
 def is_virtual_input_device(name: str) -> bool:
@@ -196,7 +201,7 @@ def classify_device(name: str, is_input: bool = True) -> str:
     """
     Classifies an endpoint by Windows data only (no brand or product names):
     - bus enumerator BTHHFENUM / BTHENUM / BTHLEENUM -> bluetooth_headset
-    - bus enumerator SWD, or a virtual cable name when the bus is unknown -> virtual
+    - bus enumerator SWD or ROOT, or a VB-Audio cable name (any bus) -> virtual
     - bus enumerator USB with form factor Headset, Headphones or Handset -> usb_headset
     - bus enumerator USB with form factor Microphone -> usb_mic
     - bus enumerator HDAUDIO / INTELAUDIO: LineLevel -> line_in; Headset or Headphones (3.5 mm jack) -> wired_headset;

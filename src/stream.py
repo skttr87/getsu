@@ -51,9 +51,11 @@ class AudioEngine:
         mic_boost_db: float = 0.0,
         preclip_knee: float = PRECLIP_KNEE_DEFAULT,
         stereo_downmix: str = InputDownmixer.MODE_AUTO,
+        vad_floor_tilt_hz: float = 0.0,
     ):
         self.input_device = input_device
         self.output_device = output_device
+        self.vad_floor_tilt_hz = float(vad_floor_tilt_hz)
         self.preclip_knee = float(preclip_knee)
         self._downmixer = InputDownmixer(frame_len=FRAME_SIZE, sample_rate=int(SAMPLE_RATE), mode=stereo_downmix)
         self.denoise_enabled = denoise_enabled
@@ -103,6 +105,8 @@ class AudioEngine:
             lookahead=True,
             floor_gain=self.vad_floor_gain,
             cooldown_ms=150.0,
+            floor_tilt_hz=self.vad_floor_tilt_hz,
+            sample_rate=float(SAMPLE_RATE),
         )
         self.leveler: Optional[SpeechLeveler] = SpeechLeveler() if auto_level else None
 
@@ -514,4 +518,5 @@ def create_engine_from_config(
         mic_boost_db=float(boost_db),
         preclip_knee=float(config.get("preclip_knee", PRECLIP_KNEE_DEFAULT)),
         stereo_downmix=config.get("stereo_downmix", InputDownmixer.MODE_AUTO),
+        vad_floor_tilt_hz=float(config.get("vad_floor_tilt_hz", 0.0) or 0.0),
     )

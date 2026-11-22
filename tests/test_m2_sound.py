@@ -191,5 +191,90 @@ class StereoDownmixTests(unittest.TestCase):
             self.assertEqual(cfg["stereo_downmix"], "auto")
 
 
+def _band_ratio_db(y, fs=48000):
+    """Energy above 6 kHz relative to energy below 1 kHz, in dB."""
+    spec = np.abs(np.fft.rfft(y.astype(np.float64))) ** 2
+    f = np.fft.rfftfreq(len(y), d=1.0 / fs)
+    hi = np.sum(spec[f > 6000.0])
+    lo = np.sum(spec[f < 1000.0]) + 1e-30
+    return 10.0 * np.log10(hi / lo + 1e-30)
+
+
+class GateTiltTests(unittest.TestCase):
+
+    def test_fir_has_unity_dc_gain_and_cuts_highs(self):
+        from src.dsp import _design_tilt_fir
+        h = np.array(_design_tilt_fir(4000.0, 48000.0))
+        self.assertAlmostEqual(float(np.sum(h)), 1.0, places=9)
+        f = np.array([500.0, 4000.0, 8000.0, 12000.0])
+        k = np.arange(len(h))
+        resp = np.abs(np.exp(-2j * np.pi * np.outer(f, k) / 48000.0) @ h)
+        self.assertAlmostEqual(float(resp[0]), 1.0, places=2)
+        self.assertLess(20 * np.log10(resp[2]), -6.0)      # 8 kHz at least 6 dB down
+        self.assertLess(20 * np.log10(resp[3]), -20.0)     # 12 kHz at least 20 dB down
+
+    def test_closed_path_loses_more_highs_with_tilt(self):
+        rng = np.random.default_rng(11)
+        noise = (0.05 * rng.standard_normal(480 * 150)).astype(np.float32)
+
+        def run(tilt_hz):
+            gate = AdaptiveNoiseGate(lookahead=True, floor_gain=0.06, calibrate_startup=False,
+                                     floor_tilt_hz=tilt_hz)
+            outs = []
+            for i in range(150):
+                blk = noise[i * 480:(i + 1) * 480].copy()
+                out, _ = gate.process(blk, 0.0, input_rms_db=-30.0, in_place=False)
+                outs.append(np.array(out, dtype=np.float32))
+            return np.concatenate(outs[30:])               # skip the attack/decay settling
+
+        plain = _band_ratio_db(run(0.0))
+        tilted = _band_ratio_db(run(4000.0))
+        self.assertLess(tilted, plain - 3.0)
+
+    def test_open_path_is_unchanged_by_tilt(self):
+        rng = np.random.default_rng(5)
+        x = (0.2 * rng.standard_normal(480 * 80)).astype(np.float32)
+        gate = AdaptiveNoiseGate(lookahead=True, floor_gain=0.06, calibrate_startup=False, floor_tilt_hz=4000.0)
+        outs = []
+        for i in range(80):
+            blk = x[i * 480:(i + 1) * 480].copy()
+            out, _ = gate.process(blk, 0.95, input_rms_db=-14.0, in_place=False)
+            outs.append(np.array(out, dtype=np.float32))
+        y = np.concatenate(outs)
+        # lookahead: output frame t is input frame t-1 once the gain has reached 1.0
+        np.testing.assert_allclose(y[60 * 480:], x[59 * 480:79 * 480], rtol=1e-5, atol=1e-6)
+
+    def test_transitions_stay_finite_and_bounded(self):
+        rng = np.random.default_rng(9)
+        gate = AdaptiveNoiseGate(lookahead=True, floor_gain=0.06, calibrate_startup=False, floor_tilt_hz=4000.0)
+        peak_in = 0.0
+        peak_out = 0.0
+        for i in range(120):
+            blk = (0.3 * rng.standard_normal(480)).astype(np.float32)
+            sp = 0.9 if (i // 20) % 2 == 0 else 0.0          # open and close repeatedly
+            out, _ = gate.process(blk.copy(), sp, input_rms_db=-14.0 if sp > 0.5 else -50.0, in_place=False)
+            out = np.array(out, dtype=np.float32)
+            self.assertTrue(np.all(np.isfinite(out)))
+            peak_in = max(peak_in, float(np.max(np.abs(blk))))
+            peak_out = max(peak_out, float(np.max(np.abs(out))))
+        self.assertLessEqual(peak_out, peak_in + 1e-6)
+
+    def test_reset_clears_filter_history(self):
+        gate = AdaptiveNoiseGate(lookahead=True, floor_gain=0.06, calibrate_startup=False, floor_tilt_hz=4000.0)
+        # lookahead delays the frame by one block, so feed two blocks before the history is non-zero
+        gate.process(np.ones(480, dtype=np.float32), 0.0, input_rms_db=-50.0, in_place=False)
+        gate.process(np.ones(480, dtype=np.float32), 0.0, input_rms_db=-50.0, in_place=False)
+        self.assertGreater(float(np.max(np.abs(gate._tilt_hist))), 0.0)
+        gate.reset()
+        self.assertEqual(float(np.max(np.abs(gate._tilt_hist))), 0.0)
+
+    def test_tilt_disabled_without_floor_or_with_zero_hz(self):
+        self.assertIsNone(AdaptiveNoiseGate(floor_gain=0.06, floor_tilt_hz=0.0)._tilt_h)
+        self.assertIsNone(AdaptiveNoiseGate(floor_gain=0.0, floor_tilt_hz=4000.0)._tilt_h)
+
+    def test_default_config_tilt_is_off(self):
+        self.assertEqual(DEFAULT_CONFIG["vad_floor_tilt_hz"], 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()

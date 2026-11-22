@@ -35,6 +35,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "auto_route": True,             # Settings toggle: Auto-Route to Apps (switch default mic when active)
     "preclip_knee": 0.95,           # Soft pre-clip knee before RNNoise (1.0 = stage off)
     "stereo_downmix": "auto",       # "auto": use the live channel for dead or inverted stereo mics; "average": (L+R)/2
+    "vad_floor_tilt_hz": 0.0,       # 0 = off. Above 0: closed-gate path is low-passed at this frequency (more HF cut)
 }
 
 import sys

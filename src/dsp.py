@@ -188,6 +188,22 @@ _S_CURVE_F64 = _T_480**4 * (35.0 + _T_480 * (-84.0 + _T_480 * (70.0 - 20.0 * _T_
 _S_CURVE_TABLE_480 = np.maximum.accumulate(np.clip(_S_CURVE_F64, 0.0, 1.0).astype(np.float32))
 
 
+TILT_FIR_TAPS = 9
+
+
+def _design_tilt_fir(cutoff_hz: float, sample_rate: float, taps: int = TILT_FIR_TAPS) -> list:
+    """
+    Causal linear-phase low-pass (Hamming-windowed sinc, unity DC gain). Used only on the gate's closed path.
+    A short FIR is used instead of a one-pole IIR because the block filter must stay vectorised: a one-pole
+    needs a per-sample recursion, and a 480x480 matrix product would cost more than the whole budget allows.
+    """
+    fc = cutoff_hz / sample_rate
+    m = np.arange(taps, dtype=np.float64) - (taps - 1) / 2.0
+    h = 2.0 * fc * np.sinc(2.0 * fc * m) * (0.54 - 0.46 * np.cos(2.0 * np.pi * np.arange(taps) / (taps - 1)))
+    h /= np.sum(h)
+    return [float(v) for v in h]
+
+
 class AdaptiveNoiseGate:
     """
     Adaptive Dual-Threshold (Hysteresis) Soft-Knee Noise Gate with Dynamic Onset Detection.
@@ -263,6 +279,8 @@ class AdaptiveNoiseGate:
         calibrate_startup: bool = True,
         sustain_snr_db: float = 6.0,
         sustain_threshold: float = 0.25,
+        floor_tilt_hz: float = 0.0,
+        sample_rate: float = 48000.0,
     ):
         self.threshold = threshold
         self.close_threshold = close_threshold
@@ -291,6 +309,16 @@ class AdaptiveNoiseGate:
         self._delay_buffer: np.ndarray | None = None
         self._work_buffer: np.ndarray | None = None
         self._ramp_buf: np.ndarray | None = None
+
+        # Spectral tilt of the closed path (0 Hz = off). Only active when the floor is above silence.
+        self._tilt_h: list | None = None
+        if floor_tilt_hz > 0.0 and 0.0 < floor_gain < 1.0:
+            self._tilt_h = _design_tilt_fir(float(floor_tilt_hz), float(sample_rate))
+            self._tilt_hist = np.zeros(len(self._tilt_h) - 1, dtype=np.float32)
+            self._tilt_ext: np.ndarray | None = None
+            self._tilt_lp: np.ndarray | None = None
+            self._tilt_tmp: np.ndarray | None = None
+            self._tilt_o: np.ndarray | None = None
 
         # Flutter state
         self._frame_idx = 0
@@ -331,6 +359,8 @@ class AdaptiveNoiseGate:
         self._flutter_events.clear()
         if self._delay_buffer is not None:
             self._delay_buffer.fill(0.0)
+        if self._tilt_h is not None:
+            self._tilt_hist.fill(0.0)
 
     def recalibrate(self):
         """Restart the startup ambient profiler (call on stream start / device change)."""
@@ -421,6 +451,51 @@ class AdaptiveNoiseGate:
             else:
                 rate = self.FLOOR_SLOW_RISE_RATE
             self.noise_floor_db += min(diff * rate, self.FLOOR_RISE_CAP_DB)
+
+    def _tilt_filter(self, x: np.ndarray) -> np.ndarray:
+        """Low-passed copy of x (the closed-path signal). Its history is updated on every frame."""
+        taps = self._tilt_h
+        k1 = len(taps) - 1
+        n = len(x)
+        if self._tilt_lp is None or len(self._tilt_lp) != n:
+            self._tilt_ext = np.zeros(k1 + n, dtype=x.dtype)
+            self._tilt_lp = np.zeros(n, dtype=x.dtype)
+            self._tilt_tmp = np.zeros(n, dtype=x.dtype)
+            self._tilt_o = np.zeros(n, dtype=x.dtype)
+        ext = self._tilt_ext
+        lp = self._tilt_lp
+        tmp = self._tilt_tmp
+        ext[:k1] = self._tilt_hist
+        ext[k1:] = x
+        np.multiply(ext[k1:], taps[0], out=lp)
+        for k in range(1, k1 + 1):
+            np.multiply(ext[k1 - k:k1 - k + n], taps[k], out=tmp)
+            lp += tmp
+        self._tilt_hist[:] = ext[n:]
+        return lp
+
+    def _tilt_blend_scalar(self, x: np.ndarray, lp: np.ndarray, gain: float):
+        """x <- gain * (lp + o * (x - lp)), where o = openness in [0, 1] derived from gain."""
+        floor = self.floor_gain
+        o = min(1.0, max(0.0, (gain - floor) / (1.0 - floor)))
+        tmp = self._tilt_tmp
+        np.subtract(x, lp, out=tmp)
+        tmp *= o
+        tmp += lp
+        np.multiply(tmp, gain, out=x)
+
+    def _tilt_blend_array(self, x: np.ndarray, lp: np.ndarray, gain: np.ndarray):
+        """Per-sample version of _tilt_blend_scalar for the S-curve ramp."""
+        floor = self.floor_gain
+        o = self._tilt_o
+        np.subtract(gain, floor, out=o)
+        o *= 1.0 / (1.0 - floor)
+        np.clip(o, 0.0, 1.0, out=o)
+        tmp = self._tilt_tmp
+        np.subtract(x, lp, out=tmp)
+        tmp *= o
+        tmp += lp
+        np.multiply(tmp, gain, out=x)
 
     # ------------------------------------------------------------------ main
 
@@ -553,10 +628,18 @@ class AdaptiveNoiseGate:
 
         end_gain = self.current_gain
 
+        # Closed-path spectral tilt: computed on the unscaled frame so the filter history stays continuous
+        tilt = self._tilt_h is not None
+        if tilt:
+            lp = self._tilt_filter(target_frame)
+
         # Fast path 1: Steady silence (gain is at floor_gain)
         if end_gain <= self.floor_gain + 0.0001 and start_gain <= self.floor_gain + 0.0001:
             if self.floor_gain > 0.0:
-                target_frame *= self.floor_gain
+                if tilt:
+                    np.multiply(lp, self.floor_gain, out=target_frame)
+                else:
+                    target_frame *= self.floor_gain
                 if self.lookahead and in_place:
                     np.copyto(frame, target_frame)
                     return frame, self.floor_gain
@@ -596,9 +679,15 @@ class AdaptiveNoiseGate:
             ramp = self._ramp_scratch(len(target_frame), target_frame.dtype)
             np.multiply(s_curve, end_gain - start_gain, out=ramp)
             ramp += start_gain
-            target_frame *= ramp
+            if tilt:
+                self._tilt_blend_array(target_frame, lp, ramp)
+            else:
+                target_frame *= ramp
         else:
-            target_frame *= end_gain
+            if tilt:
+                self._tilt_blend_scalar(target_frame, lp, end_gain)
+            else:
+                target_frame *= end_gain
 
         if self.lookahead:
             if in_place:

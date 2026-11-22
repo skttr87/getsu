@@ -102,6 +102,12 @@ COL_WARNING = (255, 159, 10)        # --orange
 COL_ERROR = (255, 69, 58)           # --red
 COL_WHITE = (255, 255, 255)
 
+# Windows 11 DWM title bar. COLORREF is 0x00BBGGRR: caption #1C1C1E, text #A1A1A6, border #2C2C2E.
+TITLE_CAPTION_COLOR = 0x001E1C1C
+TITLE_TEXT_COLOR = 0x00A6A1A1
+TITLE_BORDER_COLOR = 0x002E2C2C
+
+
 def init_dpi_awareness() -> tuple[int, float]:
     """
     Enables Windows Per-Monitor V2 DPI awareness and queries active monitor DPI.
@@ -175,16 +181,16 @@ def apply_dwm_title_bar(hwnd: int):
         if dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(true_val), ctypes.sizeof(true_val)) != 0:
             dwmapi.DwmSetWindowAttribute(hwnd, 19, ctypes.byref(true_val), ctypes.sizeof(true_val))
 
-        # DWMWA_CAPTION_COLOR: 35 (Win11 COLORREF 0x00BBGGRR -> RGB(16, 20, 26) is 0x001A1410)
-        caption_color = ctypes.c_int(0x001A1410)
+        # DWMWA_CAPTION_COLOR: 35
+        caption_color = ctypes.c_int(TITLE_CAPTION_COLOR)
         dwmapi.DwmSetWindowAttribute(hwnd, 35, ctypes.byref(caption_color), ctypes.sizeof(caption_color))
 
-        # DWMWA_TEXT_COLOR: 36 (Win11 COLORREF pure white 0x00FFFFFF)
-        text_color = ctypes.c_int(0x00FFFFFF)
+        # DWMWA_TEXT_COLOR: 36
+        text_color = ctypes.c_int(TITLE_TEXT_COLOR)
         dwmapi.DwmSetWindowAttribute(hwnd, 36, ctypes.byref(text_color), ctypes.sizeof(text_color))
 
-        # DWMWA_BORDER_COLOR: 34 (Win11 COLORREF RGB(40, 52, 70) is 0x00463428)
-        border_color = ctypes.c_int(0x00463428)
+        # DWMWA_BORDER_COLOR: 34
+        border_color = ctypes.c_int(TITLE_BORDER_COLOR)
         dwmapi.DwmSetWindowAttribute(hwnd, 34, ctypes.byref(border_color), ctypes.sizeof(border_color))
     except Exception as e:
         print(f"[WARN] Failed to apply DWM title bar styling: {e}")

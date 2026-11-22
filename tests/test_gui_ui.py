@@ -1,4 +1,5 @@
 import math
+import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -33,6 +34,29 @@ class MusicModeToggleTests(unittest.TestCase):
         self.assertAlmostEqual(fake.engine.gate.decay_rate, math.exp(-10.0 / 80.0))
         self.assertEqual(fake.engine.gate.hangover_frames, 32)
         self.assertTrue(fake.engine.denoise_enabled)
+
+
+def _colorref_to_rgb(value):
+    return (value & 0xFF, (value >> 8) & 0xFF, (value >> 16) & 0xFF)
+
+
+class TitleBarTests(unittest.TestCase):
+    def test_title_bar_colours_match_mockup(self):
+        self.assertEqual(_colorref_to_rgb(gui.TITLE_CAPTION_COLOR), (28, 28, 30))
+        self.assertEqual(_colorref_to_rgb(gui.TITLE_TEXT_COLOR), (161, 161, 166))
+        self.assertEqual(_colorref_to_rgb(gui.TITLE_BORDER_COLOR), (44, 44, 46))
+
+    @unittest.skipUnless(sys.platform == "win32", "DWM is Windows only")
+    def test_apply_sends_mockup_colours_to_dwm(self):
+        with patch("src.gui.ctypes.windll") as windll:
+            gui.apply_dwm_title_bar(1234)
+        sent = {}
+        for call in windll.dwmapi.DwmSetWindowAttribute.call_args_list:
+            attr = call.args[1]
+            sent[attr] = call.args[2]._obj.value
+        self.assertEqual(_colorref_to_rgb(sent[35]), (28, 28, 30))
+        self.assertEqual(_colorref_to_rgb(sent[36]), (161, 161, 166))
+        self.assertEqual(_colorref_to_rgb(sent[34]), (44, 44, 46))
 
 
 class PaletteTests(unittest.TestCase):

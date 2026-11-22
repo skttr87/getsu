@@ -62,6 +62,8 @@ class AudioEngine:
             DryBlend(mix_db=float(rnnoise_dry_mix_db)) if rnnoise_dry_mix_db is not None else None
         )
         self.preclip_knee = float(preclip_knee)
+        # Set at start: the VB-Cable sample rate when it is not 48 kHz, else None (see _check_cable_rate)
+        self.cable_rate_mismatch: Optional[int] = None
         self._downmixer = InputDownmixer(frame_len=FRAME_SIZE, sample_rate=int(SAMPLE_RATE), mode=stereo_downmix)
         self.denoise_enabled = denoise_enabled
         self.high_pass_enabled = high_pass_enabled
@@ -146,6 +148,33 @@ class AudioEngine:
     @property
     def last_input_peak_db(self) -> float:
         return self._metrics[3]
+
+    def _check_cable_rate(self):
+        """
+        Reads the default sample rate of the VB-Cable endpoints when the engine writes to CABLE Input.
+        Called once at stream start (never from the audio callback). Sets cable_rate_mismatch to the
+        offending rate, or None when the rates are 48 kHz or the output is not a VB-Cable device.
+        """
+        self.cable_rate_mismatch = None
+        try:
+            from src.devices import check_vbcable_status
+            installed, cable_in, cable_out = check_vbcable_status()
+        except Exception:
+            return
+        if not installed or not isinstance(cable_in, dict) or not isinstance(cable_out, dict):
+            return
+        if cable_in.get("index") != self.output_device:
+            return
+        for dev in (cable_in, cable_out):
+            try:
+                rate = int(round(float(sd.query_devices(dev["index"])["default_samplerate"])))
+            except Exception:
+                continue
+            if rate != int(SAMPLE_RATE):
+                self.cable_rate_mismatch = rate
+                print(f"[ENGINE] VB-Cable is set to {rate} Hz (Getsu uses {int(SAMPLE_RATE)} Hz). "
+                      f"Set both CABLE devices to 48 kHz in Sound settings for best quality.")
+                return
 
     def _audio_callback(self, indata, outdata, frames, time_info, status):
         """10ms real-time audio processing callback."""
@@ -266,6 +295,8 @@ class AudioEngine:
                         "Could not move the microphone off the WDM-KS audio path. "
                         "Please re-select your microphone."
                     ) from e
+
+            self._check_cable_rate()
 
             # Query channel configuration for resolved endpoints
             in_dev_info = sd.query_devices(self.input_device)

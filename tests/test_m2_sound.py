@@ -341,5 +341,62 @@ class DryBlendTests(unittest.TestCase):
         self.assertIsNone(DEFAULT_CONFIG["rnnoise_dry_mix_db"])
 
 
+class CableRateTests(unittest.TestCase):
+
+    def _engine(self, output_device, rates, installed=True):
+        from src.stream import AudioEngine
+        cable_in = {"index": 4, "name": "CABLE Input"}
+        cable_out = {"index": 5, "name": "CABLE Output"}
+
+        def query(idx=None, *a, **k):
+            if idx is None:
+                return []
+            return {"max_input_channels": 2, "max_output_channels": 2, "name": "x",
+                    "default_samplerate": float(rates.get(idx, 48000))}
+
+        with patch("src.stream.sd") as sd_mock, \
+                patch("src.devices.check_vbcable_status",
+                      return_value=(installed, cable_in, cable_out)):
+            sd_mock.query_devices.side_effect = query
+            eng = AudioEngine(0, output_device)
+            eng._check_cable_rate()
+        return eng
+
+    def test_cable_at_44100_is_reported(self):
+        eng = self._engine(4, {4: 44100, 5: 48000})
+        self.assertEqual(eng.cable_rate_mismatch, 44100)
+
+    def test_cable_output_rate_reported_when_input_is_48k(self):
+        eng = self._engine(4, {4: 48000, 5: 44100})
+        self.assertEqual(eng.cable_rate_mismatch, 44100)
+
+    def test_matching_rates_give_none(self):
+        eng = self._engine(4, {4: 48000, 5: 48000})
+        self.assertIsNone(eng.cable_rate_mismatch)
+
+    def test_non_cable_output_gives_none(self):
+        eng = self._engine(9, {9: 44100, 4: 44100, 5: 44100})
+        self.assertIsNone(eng.cable_rate_mismatch)
+
+    def test_cable_not_installed_gives_none(self):
+        eng = self._engine(4, {4: 44100}, installed=False)
+        self.assertIsNone(eng.cable_rate_mismatch)
+
+    def test_failed_query_gives_none_and_no_exception(self):
+        from src.stream import AudioEngine
+        with patch("src.stream.sd") as sd_mock:
+            sd_mock.query_devices.return_value = {"max_input_channels": 2, "max_output_channels": 2, "name": "x"}
+            eng = AudioEngine(0, 4)
+        with patch("src.devices.check_vbcable_status", side_effect=RuntimeError("boom")):
+            eng._check_cable_rate()
+        self.assertIsNone(eng.cable_rate_mismatch)
+
+    def test_attribute_defaults_to_none(self):
+        from src.stream import AudioEngine
+        with patch("src.stream.sd") as sd_mock:
+            sd_mock.query_devices.return_value = {"max_input_channels": 2, "max_output_channels": 2, "name": "x"}
+            self.assertIsNone(AudioEngine(0, 1).cable_rate_mismatch)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -45,6 +45,7 @@ from src.devices import classify_device, DeviceKind
 from src.device_labels import split_name, subtitle
 from src import ui_icons as icons
 from src import ui_hit
+from src import win_theme
 from src.rnnoise import RNNoise, FRAME_SIZE, SAMPLE_RATE
 from src.dsp import (
     HighPassFilter,
@@ -1432,6 +1433,8 @@ class GetsuGUI:
             item("Exit", on_exit),
         )
 
+        # Dark right-click menu: must be requested before pystray creates the menu (best effort, see win_theme).
+        win_theme.enable_dark_menus()
         self._tray_icon = pystray.Icon("getsu", create_tray_icon_image(self.is_running), "Getsu Noise Cancellation", menu)
         threading.Thread(target=self._tray_icon.run, daemon=True).start()
 

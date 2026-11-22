@@ -20,5 +20,9 @@
     "music_mode": false,
     "is_swapped": false,
     "original_mic_id": null,
-    "auto_route": true
+    "auto_route": true,
+    "preclip_knee": 0.95,
+    "stereo_downmix": "auto",
+    "vad_floor_tilt_hz": 0.0,
+    "rnnoise_dry_mix_db": null
 }

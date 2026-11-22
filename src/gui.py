@@ -50,6 +50,7 @@ from src.dsp import (
 )
 from src.host_api_resolver import resolve_single, selection_hint
 from src.audio_errors import explain_start_error
+from src.frame_pacing import frame_sleep_s
 
 
 # Win32 Constants for System Tray Minimize/Close hook
@@ -74,6 +75,8 @@ user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_
 user32.SetWindowLongPtrW.restype = ctypes.c_void_p
 user32.CallWindowProcW.argtypes = [ctypes.c_void_p, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
 user32.CallWindowProcW.restype = ctypes.c_longlong
+user32.IsWindowVisible.argtypes = [wintypes.HWND]
+user32.IsIconic.argtypes = [wintypes.HWND]
 
 
 def init_dpi_awareness() -> tuple[int, float]:
@@ -1332,6 +1335,23 @@ class GetsuGUI:
             except Exception:
                 pass
 
+    def _is_window_visible(self) -> bool:
+        """True when the window is on screen (not hidden to the tray, not minimized). Unknown handle counts as visible."""
+        if not self._hwnd:
+            return True
+        return bool(user32.IsWindowVisible(self._hwnd)) and not bool(user32.IsIconic(self._hwnd))
+
+    def _run_ui_loop(self):
+        """
+        Render loop that replaces dpg.start_dearpygui(), paced by window visibility (see src/frame_pacing.py).
+        Each frame pumps the window message queue, so the longest gap between frames is 100 ms.
+        dpg.stop_dearpygui() ends the loop within one frame interval.
+        """
+        while dpg.is_dearpygui_running():
+            started = time.perf_counter()
+            dpg.render_dearpygui_frame()
+            time.sleep(frame_sleep_s(self._is_window_visible(), time.perf_counter() - started))
+
     def _start_tray_icon(self):
         """Starts system tray icon in background thread."""
         def on_open(icon, item):
@@ -1973,7 +1993,7 @@ class GetsuGUI:
             pass
 
         # Run UI event loop
-        dpg.start_dearpygui()
+        self._run_ui_loop()
 
         # Teardown background workers and restore audio before destroying DPG context
         self._teardown_engine_and_timers()

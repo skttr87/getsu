@@ -251,5 +251,6 @@ python -m PyInstaller --clean --noconfirm build/getsu.spec
 - **[pyrnnoise](https://github.com/pengzhendong/pyrnnoise)**: Precompiled Windows x64 native binary distribution by Zhendong Peng.
 - **[VB-Audio](https://vb-audio.com/Cable/)**: High-fidelity virtual audio cable driver.
 - **[DearPyGui](https://github.com/hoffstadt/DearPyGui)**: Fast GPU-accelerated immediate-mode GUI engine.
+- **[SpeexDSP](https://github.com/xiph/speexdsp)**: Resampler and noise preprocessor library by Jean-Marc Valin and contributors (Xiph.Org), BSD-3-Clause ([license](licenses/SpeexDSP-COPYING)).
 
 This project is open-source under the **[MIT License](LICENSE)**.

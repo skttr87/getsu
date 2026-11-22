@@ -9,6 +9,7 @@ project_root = os.path.abspath(os.path.join(SPECPATH, ".."))
 
 datas = [
     (os.path.join(project_root, "src", "native", "rnnoise.dll"), os.path.join("src", "native")),
+    (os.path.join(project_root, "src", "native", "speexdsp.dll"), os.path.join("src", "native")),
     (os.path.join(project_root, "drivers", "vbcable"), os.path.join("drivers", "vbcable")),
     (os.path.join(project_root, "assets", "fonts"), os.path.join("assets", "fonts")),
     (os.path.join(project_root, "getsu-icon.png"), "."),

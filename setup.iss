@@ -70,6 +70,7 @@ Source: "config.json"; DestDir: "{app}"; Flags: onlyifdoesntexist
 Source: "drivers\vbcable\*"; DestDir: "{app}\drivers\vbcable"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Project assets & license
 Source: "LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "licenses\SpeexDSP-COPYING"; DestDir: "{app}"; Flags: ignoreversion
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "getsu.ico"; DestDir: "{app}"; Flags: ignoreversion
 

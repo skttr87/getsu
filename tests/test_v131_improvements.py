@@ -50,10 +50,10 @@ class TestV131BusDetection(unittest.TestCase):
         with patch("src.router.native_get_device_bus_type", return_value=DeviceBusType.BLUETOOTH_HFP):
             self.assertFalse(is_laptop_microphone("Bluetooth Headset", device_id=2))
 
-        # Fallback to name keywords when bus is UNKNOWN
+        # Bus UNKNOWN: no name keyword fallback any more (M4.5), so the endpoint is not a built-in mic
         with patch("src.router.native_get_device_bus_type", return_value=DeviceBusType.UNKNOWN):
-            self.assertTrue(is_laptop_microphone("Realtek High Definition Audio", device_id=3))
-            self.assertTrue(is_laptop_microphone("Microphone Array", device_id=4))
+            self.assertFalse(is_laptop_microphone("Realtek High Definition Audio", device_id=3))
+            self.assertFalse(is_laptop_microphone("Microphone Array", device_id=4))
             self.assertFalse(is_laptop_microphone("Fifine K669 Microphone", device_id=5))
 
 

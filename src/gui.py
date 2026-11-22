@@ -117,7 +117,7 @@ TITLE_BORDER_COLOR = 0x002E2C2C
 WINDOW_W = 420
 CONTENT_PAD = 24
 CONTENT_W = WINDOW_W - 2 * CONTENT_PAD  # 372 px between the gutters
-HERO_H = 232  # logical px: hero block and first-run card share this slot
+HERO_H = 212  # logical px: hero block and first-run card share this slot (the hero content ends at the meter)
 
 # First-run card copy (mockup "First run" and "Installing cable" screens).
 SETUP_BODY_OFFER = ("Getsu needs a free virtual audio cable to send your clean voice to Discord, Zoom and games. "
@@ -2102,7 +2102,7 @@ class GetsuGUI:
                 x = i * self.s(7)
                 dpg.draw_rectangle((x, self.s(15)), (x + self.s(4), self.s(18)), color=COL_FILL_2, fill=COL_FILL_2,
                                    rounding=self.s(2), tag=f"meter_bar_{i}", parent="meter")
-        dpg.add_spacer(height=self.s(32))
+        dpg.add_spacer(height=self.s(20))
 
     def _build_mic_card(self, width: int):
         modes_h = self.s(85) if FEATURE_MODES else 0
@@ -2195,16 +2195,16 @@ class GetsuGUI:
         """Creator on the left, sponsor link on the right. The gap between them is set from the rendered widths (_place_footer)."""
         with dpg.group(horizontal=True, tag="footer_row"):
             dpg.add_text("Created by Ihsan", color=COL_TEXT_3, tag="footer_creator_text")
-            dpg.bind_item_font("footer_creator_text", self.font_small)
+            dpg.bind_item_font("footer_creator_text", self.font_footer)
             dpg.add_spacer(width=0, tag="footer_gap")
             with dpg.group(horizontal=True, tag="footer_sponsor"):
                 dpg.add_text("Sponsored by", color=COL_TEXT_3, tag="footer_sponsor_text")
-                dpg.bind_item_font("footer_sponsor_text", self.font_small)
+                dpg.bind_item_font("footer_sponsor_text", self.font_footer)
                 dpg.add_spacer(width=self.s(4))
                 dpg.add_button(label="Kopi Reman", callback=lambda: webbrowser.open("https://www.instagram.com/kopireman/"),
                                tag="sponsor_link_btn")
                 dpg.bind_item_theme("sponsor_link_btn", self.theme_link_btn)
-                dpg.bind_item_font("sponsor_link_btn", self.font_small)
+                dpg.bind_item_font("sponsor_link_btn", self.font_footer)
 
     def _place_footer(self):
         """Right-aligns the sponsor group: the gap is the content width minus the two groups as rendered."""
@@ -2467,6 +2467,7 @@ class GetsuGUI:
                     bold_file = path_regular
                 self.font_body = dpg.add_font(path_regular, self.s(15))
                 self.font_small = dpg.add_font(path_regular, self.s(12))
+                self.font_footer = dpg.add_font(path_regular, self.s(13))
                 self.font_notice = dpg.add_font(path_regular, self.s(14))
                 self.font_list = dpg.add_font(path_regular, self.s(16))
                 self.font_header = dpg.add_font(bold_file, self.s(16))
@@ -2476,6 +2477,7 @@ class GetsuGUI:
                 dpg.bind_font(self.font_body)
             else:
                 self.font_body = self.font_small = self.font_notice = None
+                self.font_footer = None
                 self.font_list = self.font_header = self.font_btn = None
                 self.font_title = self.font_state = None
 

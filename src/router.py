@@ -104,6 +104,34 @@ PKEY_Device_EnumeratorName = PROPERTYKEY(
 )
 
 
+# PKEY_AudioEndpoint_FormFactor: VT_UI4 holding an EndpointFormFactor value (see EndpointFormFactor below).
+# Source: https://learn.microsoft.com/en-us/windows/win32/coreaudio/pkey-audioendpoint-formfactor
+PKEY_AudioEndpoint_FormFactor = PROPERTYKEY(
+    GUID(0x1DA5D803, 0xD492, 0x4EDD, (wintypes.BYTE * 8)(0x8C, 0x23, 0xE0, 0xC0, 0xFF, 0xEE, 0x7F, 0x0E)),
+    0
+)
+
+VT_UI4 = 19
+VT_LPWSTR = 31
+
+
+class EndpointFormFactor:
+    """EndpointFormFactor enumeration from mmdeviceapi.h (values in declaration order, starting at 0).
+    Source: https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/ne-mmdeviceapi-endpointformfactor
+    """
+    REMOTE_NETWORK_DEVICE = 0
+    SPEAKERS = 1
+    LINE_LEVEL = 2
+    HEADPHONES = 3
+    MICROPHONE = 4
+    HEADSET = 5
+    HANDSET = 6
+    UNKNOWN_DIGITAL_PASSTHROUGH = 7
+    SPDIF = 8
+    DIGITAL_AUDIO_DISPLAY_DEVICE = 9
+    UNKNOWN_FORM_FACTOR = 10
+
+
 class DeviceBusType:
     BLUETOOTH_HFP = "BTHHFENUM"   # Bluetooth Hands-Free Profile (Mic + Bidirectional)
     BLUETOOTH_A2DP = "BTHENUM"    # Bluetooth High-Quality Stereo Playback
@@ -401,9 +429,13 @@ def native_get_device_bus_type(device_id_or_name: Optional[str] = None, is_input
 _bus_type_cache: dict = {}
 
 
+_form_factor_cache: dict = {}
+
+
 def clear_device_bus_type_cache():
-    """Forget cached bus types. Call at the start of every device rescan (hotplug, manual refresh)."""
+    """Forget cached bus types and form factors. Call at the start of every device rescan (hotplug, manual refresh)."""
     _bus_type_cache.clear()
+    _form_factor_cache.clear()
 
 
 def native_get_device_bus_type_cached(device_id_or_name: Optional[str] = None, is_input: bool = True) -> str:
@@ -418,6 +450,124 @@ def native_get_device_bus_type_cached(device_id_or_name: Optional[str] = None, i
         return cached
     value = native_get_device_bus_type(device_id_or_name, is_input=is_input)
     _bus_type_cache[key] = value
+    return value
+
+
+def _form_factor_from_variant(pv: PROPVARIANT) -> Optional[int]:
+    """Decodes a VT_UI4 PROPVARIANT holding an EndpointFormFactor value. The ulVal member is at offset 8."""
+    if pv.vt != VT_UI4:
+        return None
+    return int(ctypes.c_uint32.from_buffer(pv, 8).value)
+
+
+def _endpoint_name_matches(item_dev, target_name_lower: str) -> bool:
+    """True when the endpoint's PKEY_Device_FriendlyName matches target (same substring rule as the bus lookup)."""
+    item_store = ctypes.c_void_p()
+    matched = False
+    try:
+        item_vtable = ctypes.cast(ctypes.cast(item_dev, ctypes.POINTER(ctypes.c_void_p)).contents, ctypes.POINTER(ctypes.c_void_p))
+        item_OpenStore = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p))(item_vtable[4])
+        if item_OpenStore(item_dev, 0, ctypes.byref(item_store)) == 0 and item_store:
+            st_vtable = ctypes.cast(ctypes.cast(item_store, ctypes.POINTER(ctypes.c_void_p)).contents, ctypes.POINTER(ctypes.c_void_p))
+            st_GetValue = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(PROPERTYKEY), ctypes.POINTER(PROPVARIANT))(st_vtable[5])
+            pv = PROPVARIANT()
+            try:
+                if st_GetValue(item_store, ctypes.byref(PKEY_Device_FriendlyName), ctypes.byref(pv)) == 0:
+                    if pv.vt == VT_LPWSTR and pv.pwszVal:
+                        dev_name = str(pv.pwszVal).lower()
+                        matched = target_name_lower in dev_name or dev_name in target_name_lower
+            finally:
+                if ole32 and hasattr(ole32, 'PropVariantClear'):
+                    ole32.PropVariantClear(ctypes.byref(pv))
+    except Exception:
+        matched = False
+    finally:
+        _release_com_ptr(item_store)
+    return matched
+
+
+def native_get_device_form_factor(device_name: Optional[str], is_input: bool = True) -> Optional[int]:
+    """
+    Reads PKEY_AudioEndpoint_FormFactor (an EndpointFormFactor value) of the active capture (is_input) or
+    render endpoint whose friendly name matches device_name. Read-only: one property read per call.
+    Returns None when the endpoint or the property is not available.
+    """
+    if sys.platform != 'win32' or not ole32 or not device_name:
+        return None
+
+    pEnum = None
+    pCol = None
+    pDev = None
+    pStore = None
+    try:
+        _safe_co_initialize()
+        pEnum = ctypes.c_void_p()
+        if ole32.CoCreateInstance(ctypes.byref(CLSID_MMDeviceEnumerator), None, 1 | 2 | 4, ctypes.byref(IID_IMMDeviceEnumerator), ctypes.byref(pEnum)) != 0 or not pEnum:
+            return None
+
+        enum_vtable = ctypes.cast(ctypes.cast(pEnum, ctypes.POINTER(ctypes.c_void_p)).contents, ctypes.POINTER(ctypes.c_void_p))
+        EnumAudioEndpoints = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_int, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p))(enum_vtable[3])
+        dataflow = 1 if is_input else 0
+        pCol = ctypes.c_void_p()
+        # DEVICE_STATE_ACTIVE = 1
+        if EnumAudioEndpoints(pEnum, dataflow, 1, ctypes.byref(pCol)) != 0 or not pCol:
+            return None
+
+        col_vtable = ctypes.cast(ctypes.cast(pCol, ctypes.POINTER(ctypes.c_void_p)).contents, ctypes.POINTER(ctypes.c_void_p))
+        GetCount = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(wintypes.UINT))(col_vtable[3])
+        Item = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, wintypes.UINT, ctypes.POINTER(ctypes.c_void_p))(col_vtable[4])
+        count = wintypes.UINT()
+        GetCount(pCol, ctypes.byref(count))
+
+        target_name_lower = device_name.lower().strip()
+        for i in range(count.value):
+            item_dev = ctypes.c_void_p()
+            if Item(pCol, i, ctypes.byref(item_dev)) != 0 or not item_dev:
+                continue
+            if _endpoint_name_matches(item_dev, target_name_lower):
+                pDev = item_dev
+                break
+            _release_com_ptr(item_dev)
+
+        if not pDev:
+            return None
+
+        dev_vtable = ctypes.cast(ctypes.cast(pDev, ctypes.POINTER(ctypes.c_void_p)).contents, ctypes.POINTER(ctypes.c_void_p))
+        OpenPropertyStore = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p))(dev_vtable[4])
+        pStore = ctypes.c_void_p()
+        if OpenPropertyStore(pDev, 0, ctypes.byref(pStore)) != 0 or not pStore:
+            return None
+
+        store_vtable = ctypes.cast(ctypes.cast(pStore, ctypes.POINTER(ctypes.c_void_p)).contents, ctypes.POINTER(ctypes.c_void_p))
+        GetValue = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(PROPERTYKEY), ctypes.POINTER(PROPVARIANT))(store_vtable[5])
+        pv = PROPVARIANT()
+        try:
+            if GetValue(pStore, ctypes.byref(PKEY_AudioEndpoint_FormFactor), ctypes.byref(pv)) != 0:
+                return None
+            return _form_factor_from_variant(pv)
+        finally:
+            if ole32 and hasattr(ole32, 'PropVariantClear'):
+                ole32.PropVariantClear(ctypes.byref(pv))
+    except Exception as e:
+        logger.debug(f"native_get_device_form_factor exception: {e}")
+        return None
+    finally:
+        _release_com_ptr(pStore)
+        _release_com_ptr(pDev)
+        _release_com_ptr(pCol)
+        _release_com_ptr(pEnum)
+
+
+def native_get_device_form_factor_cached(device_name: Optional[str] = None, is_input: bool = True) -> Optional[int]:
+    """
+    native_get_device_form_factor() memoised per (device_name, is_input), including None results.
+    Cleared together with the bus-type cache by clear_device_bus_type_cache().
+    """
+    key = (device_name, bool(is_input))
+    if key in _form_factor_cache:
+        return _form_factor_cache[key]
+    value = native_get_device_form_factor(device_name, is_input=is_input)
+    _form_factor_cache[key] = value
     return value
 
 

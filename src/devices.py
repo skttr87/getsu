@@ -52,7 +52,7 @@ def get_all_devices(force_rescan: bool = False) -> List[Dict]:
                 host_name = 'WASAPI'
 
             # Exclude raw Windows WDM-KS devices: WDM-KS uses legacy kernel IOCTLs
-            # that fail with GLE 0x00000492 on modern Realtek/Intel HD audio drivers
+            # that fail with GLE 0x00000492 on modern HD audio drivers
             if 'WDM-KS' in host_name.upper():
                 continue
 
@@ -88,6 +88,9 @@ def check_vbcable_via_audiorestore() -> bool:
         return False
 
 
+# Name fragments that identify a virtual cable (VB-Audio CABLE and generic virtual-cable drivers).
+# Used only when the bus type cannot tell (bus UNKNOWN). VB-Audio endpoints enumerate as SWD, so the bus
+# type normally decides; these names are the fallback and match the names check_vbcable_status() uses.
 VIRTUAL_INPUT_BLACKLIST = [
     "cable output",
     "cable input",
@@ -95,30 +98,115 @@ VIRTUAL_INPUT_BLACKLIST = [
     "vb-cable",
     "virtual audio",
     "virtual cable",
+]
+
+# Product names of virtual software microphones/speakers. Used only when the bus type is UNKNOWN.
+# Not verified on this PC (none installed), so the bus type is not known to identify them.
+VIRTUAL_PRODUCT_FALLBACK = [
     "voicemeeter",
     "rtx voice",
     "nvidia broadcast",
     "krisp",
     "elgato wave link",
-    "soundflower",
 ]
 
 
-def is_virtual_input_device(name: str) -> bool:
-    """Detects whether an input device is a virtual cable bridge rather than a physical microphone."""
-    if not name:
+class DeviceKind:
+    """Device kinds returned by classify_device(). Derived from Windows bus enumerator and endpoint form factor."""
+    BLUETOOTH_HEADSET = "bluetooth_headset"
+    USB_HEADSET = "usb_headset"
+    BUILT_IN = "built_in"
+    LINE_IN = "line_in"
+    VIRTUAL = "virtual"
+    OTHER = "other"
+
+
+_KIND_LABELS = {
+    DeviceKind.BLUETOOTH_HEADSET: "Bluetooth headset",
+    DeviceKind.USB_HEADSET: "USB headset",
+    DeviceKind.BUILT_IN: "Built-in microphone",
+    DeviceKind.LINE_IN: "Line in",
+    DeviceKind.VIRTUAL: "Virtual device",
+    DeviceKind.OTHER: "Microphone",
+}
+
+
+def kind_label(kind: str) -> str:
+    """Display label for a device kind. Unknown kinds get the generic 'Microphone' label."""
+    return _KIND_LABELS.get(kind, "Microphone")
+
+
+def _bus_type(name: str, is_input: bool) -> str:
+    """Cached Windows bus enumerator for the endpoint with this friendly name ('UNKNOWN' when not available)."""
+    try:
+        from src.router import native_get_device_bus_type_cached
+        return native_get_device_bus_type_cached(name, is_input=is_input)
+    except Exception:
+        return "UNKNOWN"
+
+
+def _form_factor(name: str, is_input: bool) -> Optional[int]:
+    """Cached PKEY_AudioEndpoint_FormFactor value (EndpointFormFactor) or None when not available."""
+    try:
+        from src.router import native_get_device_form_factor_cached
+        return native_get_device_form_factor_cached(name, is_input=is_input)
+    except Exception:
+        return None
+
+
+def _is_virtual(name: str, bus: str) -> bool:
+    """Virtual cable or virtual software device: SWD bus, or name fragments only when the bus is unknown."""
+    try:
+        from src.router import DeviceBusType
+    except Exception:
+        return False
+    if bus == DeviceBusType.VIRTUAL:
+        return True
+    if bus != DeviceBusType.UNKNOWN:
         return False
     name_lower = name.lower()
-    if any(keyword in name_lower for keyword in VIRTUAL_INPUT_BLACKLIST):
-        return True
-    try:
-        from src.router import native_get_device_bus_type_cached, DeviceBusType
-        bus = native_get_device_bus_type_cached(name, is_input=True)
-        if bus == DeviceBusType.VIRTUAL:
-            return True
-    except Exception:
-        pass
-    return False
+    return any(fragment in name_lower for fragment in VIRTUAL_INPUT_BLACKLIST + VIRTUAL_PRODUCT_FALLBACK)
+
+
+def is_virtual_input_device(name: str) -> bool:
+    """Detects whether an endpoint is a virtual cable bridge rather than a physical device (bus type first)."""
+    if not name:
+        return False
+    return _is_virtual(name, _bus_type(name, True))
+
+
+def classify_device(name: str, is_input: bool = True) -> str:
+    """
+    Classifies an endpoint by Windows data only (no brand or product names):
+    - bus enumerator BTHHFENUM / BTHENUM / BTHLEENUM -> bluetooth_headset
+    - bus enumerator SWD, or a virtual cable name when the bus is unknown -> virtual
+    - bus enumerator USB with a headset-type form factor (Headset, Headphones, Microphone, Handset) -> usb_headset
+    - bus enumerator HDAUDIO / INTELAUDIO -> line_in when the form factor is LineLevel, otherwise built_in
+    - anything else (including an unknown enumerator) -> other
+    is_input selects the capture (True) or render (False) endpoint with this friendly name.
+    """
+    if not name:
+        return DeviceKind.OTHER
+    from src.router import DeviceBusType, EndpointFormFactor
+
+    bus = _bus_type(name, is_input)
+    if _is_virtual(name, bus):
+        return DeviceKind.VIRTUAL
+    if bus in (DeviceBusType.BLUETOOTH_HFP, DeviceBusType.BLUETOOTH_A2DP, DeviceBusType.BLUETOOTH_LE):
+        return DeviceKind.BLUETOOTH_HEADSET
+    if bus == DeviceBusType.USB:
+        headset_form_factors = (
+            EndpointFormFactor.HEADPHONES,
+            EndpointFormFactor.MICROPHONE,
+            EndpointFormFactor.HEADSET,
+            EndpointFormFactor.HANDSET,
+        )
+        return DeviceKind.USB_HEADSET if _form_factor(name, is_input) in headset_form_factors else DeviceKind.OTHER
+    if bus in (DeviceBusType.INTERNAL_HD, DeviceBusType.INTEL_AUDIO):
+        if _form_factor(name, is_input) == EndpointFormFactor.LINE_LEVEL:
+            return DeviceKind.LINE_IN
+        return DeviceKind.BUILT_IN
+    return DeviceKind.OTHER
 
 
 def get_input_devices(include_virtual: bool = False) -> List[Dict]:
@@ -253,38 +341,14 @@ def find_matching_cable_input(input_device_id: Optional[int]) -> Optional[Dict]:
     return None
 
 
-HEADSET_KEYWORDS = [
-    'mpow', 'headset', 'usb audio', 'wireless', 'corsair', 'hyperx',
-    'steelseries', 'razer', 'logitech', 'yeti', 'fifine', 'elgato',
-    'rode', 'jbl', 'sennheiser', 'epos', 'audio-technica', 'shure',
-    'plantronics', 'jabra', 'anker', 'soundcore', 'focusrite', 'behringer'
-]
-
-OUTPUT_HEADPHONE_KEYWORDS = [
-    'headset', 'headphones', 'mpow', 'speakers', 'razer', 'logitech',
-    'corsair', 'hyperx', 'steelseries', 'jbl', 'sennheiser', 'epos',
-    'audio-technica', 'realtek', 'soundcore', 'anker'
-]
-
-
 def is_laptop_microphone(device_name: str, device_id: Optional[Any] = None) -> bool:
     """
-    Detects whether a microphone is an integrated motherboard/laptop chipset (Realtek/Intel HD).
-    Uses hardware bus enumerator (HDAUDIO/INTELAUDIO) first, with fallback to localized name strings.
+    True when the capture endpoint is a built-in (HDAUDIO / INTELAUDIO) microphone, i.e. classify_device() == built_in.
+    device_id is accepted for call compatibility and is not used: the endpoint is looked up by friendly name.
     """
     if not device_name:
         return False
-    try:
-        from src.router import native_get_device_bus_type, DeviceBusType
-        bus = native_get_device_bus_type(str(device_id) if device_id is not None else device_name, is_input=True)
-        if bus in (DeviceBusType.INTERNAL_HD, DeviceBusType.INTEL_AUDIO):
-            return True
-        if bus in (DeviceBusType.BLUETOOTH_HFP, DeviceBusType.BLUETOOTH_LE, DeviceBusType.USB):
-            return False
-    except Exception:
-        pass
-    name_lower = device_name.lower()
-    return any(k in name_lower for k in ["realtek", "array", "built-in", "internal"])
+    return classify_device(device_name, is_input=True) == DeviceKind.BUILT_IN
 
 
 def validate_device_index(device_id: Optional[int], is_input: bool = True) -> Optional[int]:
@@ -310,20 +374,20 @@ def validate_device_index(device_id: Optional[int], is_input: bool = True) -> Op
 def auto_select_input_device() -> Dict:
     """
     Select best input microphone:
-    1. External / USB Headset / Studio Mic (MPOW, Razer, Logitech, Yeti, etc.)
+    1. Bluetooth or USB headset (classify_device kind, device enumeration order)
     2. Windows default WASAPI recording endpoint
-    3. Laptop built-in Realtek / Array mic
-    4. General system fallback
+    3. PortAudio default input
+    4. Built-in microphone (classify_device kind built_in)
+    5. First available input
     """
     inputs = get_input_devices()
     if not inputs:
         all_in = [d for d in get_all_devices() if d['inputs'] > 0]
         return all_in[0] if all_in else {'index': 0, 'name': 'Default Mic'}
 
-    # 1. Look for USB / Wireless headset or external studio mic
+    # 1. Headset-class device, from bus type and form factor
     for d in inputs:
-        name_lower = d['name'].lower()
-        if any(k in name_lower for k in HEADSET_KEYWORDS):
+        if classify_device(d['name'], is_input=True) in (DeviceKind.BLUETOOTH_HEADSET, DeviceKind.USB_HEADSET):
             return d
 
     # 2. Windows default input from WASAPI host API
@@ -350,10 +414,9 @@ def auto_select_input_device() -> Dict:
         if d['index'] == default_in_idx:
             return d
 
-    # 4. Look for built-in laptop mic
+    # 4. Built-in laptop / motherboard mic
     for d in inputs:
-        name_lower = d['name'].lower()
-        if any(k in name_lower for k in ['realtek', 'array', 'built-in', 'internal']):
+        if classify_device(d['name'], is_input=True) == DeviceKind.BUILT_IN:
             return d
 
     return inputs[0]
@@ -385,7 +448,7 @@ def get_physical_output_device(force_rescan: bool = False) -> Optional[Dict]:
     strictly excluding virtual cables (CABLE Input, VoiceMeeter, etc.).
     Priority 1: Native Windows active default playback endpoint from CoreAudio.
     Priority 2: Hardware bus priority (Bluetooth Stereo BTHENUM or USB over HDAUDIO).
-    Priority 3: Keyword preference for headphones/headsets over onboard speakers.
+    Priority 3: Form factor Headphones/Headset preferred over other outputs (speakers, displays).
     Priority 4: Fallback to first physical output.
     """
     if force_rescan:
@@ -423,18 +486,17 @@ def get_physical_output_device(force_rescan: bool = False) -> Optional[Dict]:
     except Exception:
         pass
 
-    # Priority 3: Fallback keyword preference for headphones over onboard speakers
-    headphone_keywords = [
-        "headset", "headphones", "bluetooth", "wireless", "buds", "freebuds",
-        "airpods", "wh-", "wf-", "mpow", "usb", "hyperx", "razer", "logitech",
-        "corsair", "steelseries", "jbl", "sennheiser", "soundcore"
-    ]
-    for d in physical_outputs:
-        name_lower = d['name'].lower()
-        if any(k in name_lower for k in headphone_keywords):
-            return d
+    # Priority 3: Endpoint form factor Headphones or Headset over other outputs (speakers included)
+    try:
+        from src.router import EndpointFormFactor
+        headphone_form_factors = (EndpointFormFactor.HEADPHONES, EndpointFormFactor.HEADSET)
+        for d in physical_outputs:
+            if _form_factor(d['name'], is_input=False) in headphone_form_factors:
+                return d
+    except Exception:
+        pass
 
-    # Priority 4: First physical output (e.g. onboard Realtek speakers)
+    # Priority 4: First physical output (e.g. onboard speakers)
     return physical_outputs[0]
 
 

@@ -362,19 +362,19 @@ class TestBusTypeCache(unittest.TestCase):
     def tearDown(self):
         clear_device_bus_type_cache()
 
-    @patch("src.router.native_get_device_bus_type", return_value="USB")
+    @patch("src.win_audio.native_get_device_bus_type", return_value="USB")
     def test_repeated_lookup_queries_windows_once(self, raw):
         self.assertEqual(native_get_device_bus_type_cached("Mic A", is_input=True), "USB")
         self.assertEqual(native_get_device_bus_type_cached("Mic A", is_input=True), "USB")
         self.assertEqual(raw.call_count, 1)
 
-    @patch("src.router.native_get_device_bus_type", return_value="USB")
+    @patch("src.win_audio.native_get_device_bus_type", return_value="USB")
     def test_key_includes_direction(self, raw):
         native_get_device_bus_type_cached("Mic A", is_input=True)
         native_get_device_bus_type_cached("Mic A", is_input=False)
         self.assertEqual(raw.call_count, 2)
 
-    @patch("src.router.native_get_device_bus_type", return_value="USB")
+    @patch("src.win_audio.native_get_device_bus_type", return_value="USB")
     def test_clear_forces_requery(self, raw):
         native_get_device_bus_type_cached("Mic A", is_input=True)
         clear_device_bus_type_cache()
@@ -382,13 +382,13 @@ class TestBusTypeCache(unittest.TestCase):
         native_get_device_bus_type_cached("Mic A", is_input=True)
         self.assertEqual(raw.call_count, 2)
 
-    @patch("src.router.native_get_device_bus_type", return_value="SWD")
+    @patch("src.win_audio.native_get_device_bus_type", return_value="SWD")
     def test_enumeration_classifier_uses_cache(self, raw):
         self.assertTrue(is_virtual_input_device("Some Microphone"))
         self.assertTrue(is_virtual_input_device("Some Microphone"))
         self.assertEqual(raw.call_count, 1)
 
-    @patch("src.router.native_get_device_bus_type", return_value="SWD")
+    @patch("src.win_audio.native_get_device_bus_type", return_value="SWD")
     @patch("src.devices.sd")
     def test_new_enumeration_pass_clears_cache(self, mock_sd, raw):
         mock_sd.query_devices.return_value = []

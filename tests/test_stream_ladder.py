@@ -70,6 +70,7 @@ class LadderTests(unittest.TestCase):
         with patch("src.stream.sd", fake), \
                 patch("src.devices.check_vbcable_status", return_value=(False, None, None)), \
                 patch("src.router.native_get_device_bus_type", side_effect=RuntimeError("no COM in tests")), \
+                patch("src.win_audio.native_get_device_bus_type", side_effect=RuntimeError("no COM in tests")), \
                 patch("src.stream.time.sleep"):
             engine = AudioEngine(input_device=2, output_device=3, denoise_enabled=False)
             return engine
@@ -78,6 +79,7 @@ class LadderTests(unittest.TestCase):
         with patch("src.stream.sd", fake), \
                 patch("src.devices.check_vbcable_status", return_value=(False, None, None)), \
                 patch("src.router.native_get_device_bus_type", side_effect=RuntimeError("no COM in tests")), \
+                patch("src.win_audio.native_get_device_bus_type", side_effect=RuntimeError("no COM in tests")), \
                 patch("src.stream.time.sleep"):
             engine.start()
 

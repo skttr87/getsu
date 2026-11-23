@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Getsu app icon: Apple system blue tile, white voice waveform. -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2f97ff"/>
+      <stop offset="1" stop-color="#0a74e8"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="1024" height="1024" rx="232" fill="url(#g)"/>
+  <g fill="#ffffff">
+    <rect x="190" y="382" width="84" height="260" rx="42"/>
+    <rect x="330" y="277" width="84" height="470" rx="42"/>
+    <rect x="470" y="192" width="84" height="640" rx="42"/>
+    <rect x="610" y="262" width="84" height="500" rx="42"/>
+    <rect x="750" y="362" width="84" height="300" rx="42"/>
+  </g>
+</svg>

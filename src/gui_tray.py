@@ -14,6 +14,9 @@ from src.gui_common import ICON_ICO_PATH, ICON_PNG_PATH
 from src.gui_theme import COL_ERROR, COL_TEXT_2
 from src.gui_win32 import force_foreground_window
 
+# Opened in the browser by the tray action "Check for updates"; Getsu does not connect to it itself.
+RELEASES_URL = "https://github.com/skttr87/getsu/releases/latest"
+
 
 # Tray glyph on the 16 px grid of opt/mockup/logo/getsu-tray.svg: (x, y, width, height) of each bar.
 TRAY_BARS = ((1, 6, 2, 4), (4, 4, 2, 8), (7, 2, 2, 12), (10, 3, 2, 10), (13, 5, 2, 6))
@@ -107,6 +110,17 @@ class TrayMixin:
             print(f"[DIAG] Could not open Explorer: {e}")
         self.set_status_pill("Diagnostics saved to your Desktop", COL_TEXT_2)
 
+    def open_releases_page(self):
+        """
+        Tray action "Check for updates": opens the GitHub Releases page in the default browser. Getsu itself makes
+        no network connection; the browser shows the newest version. Never raises.
+        """
+        try:
+            os.startfile(RELEASES_URL)
+        except OSError as e:
+            print(f"[UPDATE] Could not open the releases page: {e}")
+            self.set_status_pill(f"Open {RELEASES_URL} to check for updates", COL_TEXT_2)
+
     def _start_tray_icon(self):
         """Starts system tray icon in background thread."""
         def on_open(icon, item):
@@ -117,6 +131,9 @@ class TrayMixin:
 
         def on_save_diagnostics(icon, item):
             self._start_thread(self.save_diagnostics_report)
+
+        def on_check_updates(icon, item):
+            self.open_releases_page()
 
         def on_exit(icon, item):
             print("[APP] Exiting Getsu...")
@@ -133,6 +150,7 @@ class TrayMixin:
             item("Open Getsu", on_open, default=True),
             item("Toggle Start / Stop", on_toggle),
             autostart_item,
+            item("Check for updates", on_check_updates),
             item("Save diagnostics", on_save_diagnostics),
             pystray.Menu.SEPARATOR,
             item("Exit", on_exit),

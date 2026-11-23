@@ -593,10 +593,87 @@ def get_physical_output_device(force_rescan: bool = False) -> Optional[Dict]:
 
 
 
+_WM_CLOSE = 0x0010
+_WM_COMMAND = 0x0111
+_IDOK = 1
+_SMTO_ABORTIFHUNG = 0x0002
+_SETUP_DIALOG_CLASS = "#32770"  # the window class of every standard message box and dialog
+
+
+def _enum_top_level_windows(user32) -> List[int]:
+    """Handles of all top-level windows (EnumWindows)."""
+    import ctypes
+    from ctypes import wintypes
+
+    handles: List[int] = []
+    callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    def collect(hwnd, _lparam):
+        handles.append(hwnd)
+        return True
+
+    user32.EnumWindows(callback_type(collect), 0)
+    return handles
+
+
+def _window_info(user32, hwnd) -> Tuple[int, str, str, bool]:
+    """(owning process id, window class, title, visible) of one window."""
+    import ctypes
+    from ctypes import wintypes
+
+    pid = wintypes.DWORD(0)
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    cls = ctypes.create_unicode_buffer(256)
+    user32.GetClassNameW(hwnd, cls, 256)
+    title = ctypes.create_unicode_buffer(512)
+    user32.GetWindowTextW(hwnd, title, 512)
+    return int(pid.value), cls.value, title.value, bool(user32.IsWindowVisible(hwnd))
+
+
+def close_setup_message_boxes(setup_pid: int, user32=None, log=print) -> int:
+    """
+    Closes the message boxes that the VB-Audio setup process left open (for example "installation complete").
+    Only a visible dialog window whose owning process is setup_pid is touched: other processes' windows, including
+    the UAC prompt, are never sent anything. Each box gets IDOK and, if it is still there, WM_CLOSE, both sent to
+    that window alone. Returns the number of boxes closed.
+    """
+    if not setup_pid:
+        return 0
+    if user32 is None:
+        import ctypes
+        user32 = ctypes.windll.user32
+    closed = 0
+    for hwnd in _enum_top_level_windows(user32):
+        pid, cls, title, visible = _window_info(user32, hwnd)
+        if pid != setup_pid or cls != _SETUP_DIALOG_CLASS or not visible:
+            continue
+        log(f"[INSTALL] Setup message box left open, closing it: {title!r}")
+        user32.SendMessageTimeoutW(hwnd, _WM_COMMAND, _IDOK, 0, _SMTO_ABORTIFHUNG, 1000, None)
+        if user32.IsWindow(hwnd):
+            user32.SendMessageTimeoutW(hwnd, _WM_CLOSE, 0, 0, _SMTO_ABORTIFHUNG, 1000, None)
+        closed += 1
+    return closed
+
+
+def _wait_for_setup(process_handle, timeout_s: float = 120.0) -> None:
+    """Waits for the setup process (up to timeout_s). While it runs, its own message boxes are closed as they appear."""
+    import ctypes
+    kernel32 = ctypes.windll.kernel32
+    pid = kernel32.GetProcessId(process_handle)
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if kernel32.WaitForSingleObject(process_handle, 500) == 0:  # WAIT_OBJECT_0: the process has exited
+            break
+        close_setup_message_boxes(pid)
+    close_setup_message_boxes(pid)
+
+
 def install_vbcable_driver() -> bool:
     """
     Triggers silent installation of bundled VB-Audio Virtual Cable with UAC elevation,
     automatically preserving the user's physical speakers/headphones as default playback.
+    The setup runs without a window (SW_HIDE); Windows still shows its UAC prompt. A message box the setup
+    leaves open is closed by close_setup_message_boxes().
     """
     if getattr(sys, 'frozen', False):
         base_driver_dir = os.path.join(getattr(sys, '_MEIPASS', ''), "drivers", "vbcable")
@@ -655,7 +732,7 @@ def install_vbcable_driver() -> bool:
             sei.lpFile = setup_exe
             sei.lpParameters = "-i -h"
             sei.lpDirectory = os.path.dirname(setup_exe)
-            sei.nShow = 1  # SW_SHOWNORMAL
+            sei.nShow = 0  # SW_HIDE: the setup has no window; only the UAC prompt is shown
 
             success = ctypes.windll.shell32.ShellExecuteExW(ctypes.byref(sei))
             if not success:
@@ -664,8 +741,8 @@ def install_vbcable_driver() -> bool:
 
             if sei.hProcess:
                 try:
-                    # Wait up to 120 seconds for driver installer to finish
-                    ctypes.windll.kernel32.WaitForSingleObject(sei.hProcess, 120000)
+                    # Wait up to 120 seconds for the driver installer to finish, closing its own message boxes meanwhile
+                    _wait_for_setup(sei.hProcess, 120.0)
                 finally:
                     ctypes.windll.kernel32.CloseHandle(sei.hProcess)
         else:

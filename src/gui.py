@@ -362,7 +362,16 @@ class GetsuGUI(
             def _start_worker():
                 start_time = time.monotonic()
                 success = False
+                level_note = None
                 try:
+                    # Levels first (owner decision 2026-11-24): Getsu's cable at 100 %, and a microphone below 65 %
+                    # raised once to 95 %, so the noise gate calibrates on the final level.
+                    try:
+                        from src.mic_level import apply_levels_on_start
+                        mic_full_name = self.device_raw.get(self.selected_input_name, self.selected_input_name)
+                        level_note = apply_levels_on_start(self.config, mic_full_name)
+                    except Exception as e:
+                        print(f"[LEVELS] Level check skipped: {e}")
                     self.engine = create_engine_from_config(
                         self.config,
                         self.selected_input_idx,
@@ -421,7 +430,11 @@ class GetsuGUI(
                             self.set_status_pill("Active. Default mic selected (Confirm in dropdown)", COL_WARNING)
                         elif self.config.get("auto_route", True):
                             if getattr(self.engine, 'router_swap_success', True):
-                                self.set_status_pill("AI Filter Active. Clean Voice Routed", COL_ACCENT)
+                                if level_note:  # the level message replaces the plain success line only
+                                    text, kind = level_note
+                                    self.set_status_pill(text, COL_WARNING if kind == "warn" else COL_ACCENT)
+                                else:
+                                    self.set_status_pill("AI Filter Active. Clean Voice Routed", COL_ACCENT)
                             else:
                                 self.set_status_pill("AI Filter Active. Auto-Route Failed (Select CABLE in Apps)", COL_WARNING)
                         else:

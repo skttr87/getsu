@@ -9,7 +9,7 @@ import sounddevice as sd
 from src import ui_icons as icons
 
 from src.config import save_config
-from src.device_labels import split_name, subtitle
+from src.device_labels import display_titles, subtitle
 from src.devices import (
     get_input_devices,
     auto_select_input_device,
@@ -400,6 +400,7 @@ class DevicesMixin:
         """One entry per detected microphone: label (for selection), title, subtitle, kind, full name."""
         raw_of = {label: self.device_raw.get(label, label) for label in self.device_map}
         kinds = {raw: classify_device(raw, is_input=True) for raw in raw_of.values()}
+        titles = display_titles(raw_of.values())
         entries = []
         for label, idx in self.device_map.items():
             raw = raw_of[label]
@@ -408,7 +409,7 @@ class DevicesMixin:
                 "label": label,
                 "index": idx,
                 "raw": raw,
-                "title": split_name(raw)["title"],
+                "title": titles[raw],
                 "subtitle": subtitle(raw, kind, kinds),
                 "kind": kind,
                 "glyph": _GLYPH_FOR_KIND.get(kind, "mic"),

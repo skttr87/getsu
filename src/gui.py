@@ -826,7 +826,7 @@ class GetsuGUI(
 
     def _fit_window_height(self):
         """
-        Fits the viewport to the content: client width 420 logical px, height = footer bottom plus 16 px,
+        Fits the viewport to the content: client width WINDOW_W logical px, height = footer bottom plus 16 px,
         capped at 640 px and at the work area. The frame (title bar, borders) is added back to both sizes.
         """
         self._place_footer()

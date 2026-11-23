@@ -53,6 +53,57 @@ class SaveDiagnosticsTests(unittest.TestCase):
         self.assertLess(texts.index("Save diagnostics"), texts.index("Exit"))
 
 
+class CheckForUpdatesTests(unittest.TestCase):
+    """Tray "Check for updates" opens the Releases page in the browser; Getsu makes no network request itself."""
+
+    def test_opens_the_latest_release_page_in_the_browser(self):
+        fake = MagicMock()
+        with patch.object(gui_tray.os, "startfile", create=True) as startfile:
+            gui_tray.TrayMixin.open_releases_page(fake)
+        startfile.assert_called_once_with("https://github.com/skttr87/getsu/releases/latest")
+        fake.set_status_pill.assert_not_called()
+
+    def test_failure_shows_the_address_instead(self):
+        fake = MagicMock()
+        with patch.object(gui_tray.os, "startfile", create=True, side_effect=OSError("no browser")):
+            gui_tray.TrayMixin.open_releases_page(fake)
+        fake.set_status_pill.assert_called_once()
+        self.assertIn(gui_tray.RELEASES_URL, fake.set_status_pill.call_args[0][0])
+
+    def test_tray_menu_order(self):
+        fake = MagicMock()
+        fake.is_running = False
+        with patch.object(gui_tray, "Menu") as menu, patch.object(gui_tray.pystray, "Icon"), \
+                patch.object(gui_tray.win_theme, "enable_dark_menus"), \
+                patch.object(gui_tray, "create_tray_icon_image", return_value=MagicMock()), \
+                patch.object(gui_tray.threading, "Thread"), \
+                patch.object(autostart, "is_supported", return_value=False):
+            gui_tray.TrayMixin._start_tray_icon(fake)
+        texts = [getattr(entry, "text", None) for entry in menu.call_args[0]]
+        self.assertLess(texts.index("Start with Windows"), texts.index("Check for updates"))
+        self.assertLess(texts.index("Check for updates"), texts.index("Save diagnostics"))
+        self.assertLess(texts.index("Save diagnostics"), texts.index("Exit"))
+
+    def test_getsu_source_makes_no_network_connection(self):
+        """The README promise: no module in src opens a network connection (no urllib, http, socket, requests)."""
+        import ast
+        import glob
+        src = os.path.join(os.path.dirname(__file__), "..", "src")
+        banned = {"urllib", "http", "socket", "requests", "httpx", "aiohttp", "ftplib", "smtplib", "websocket"}
+        found = []
+        for path in glob.glob(os.path.join(src, "*.py")):
+            with open(path, encoding="utf-8") as f:
+                tree = ast.parse(f.read())
+            for node in ast.walk(tree):
+                names = []
+                if isinstance(node, ast.Import):
+                    names = [a.name for a in node.names]
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    names = [node.module]
+                found += [(os.path.basename(path), n) for n in names if n.split(".")[0] in banned]
+        self.assertEqual(found, [])
+
+
 class VoiceTestStartMessageTests(unittest.TestCase):
     def _fake(self):
         fake = MagicMock()

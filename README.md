@@ -100,9 +100,8 @@ Krisp and NVIDIA Broadcast are different products. Check each vendor for current
 | | **Getsu** | Krisp | NVIDIA Broadcast |
 |---|---|---|---|
 | Price model | Free, open source | Subscription, with a free tier | Free |
-| Where it runs | CPU, no GPU needed | See the vendor | NVIDIA RTX graphics card |
-| Works in | Every app that uses the microphone | Inside Discord (Krisp in Discord) | Any app that uses its virtual microphone |
-| Account | Not needed, works offline | See the vendor | See the vendor |
+| Hardware | Any PC, no GPU needed | Any PC | NVIDIA RTX graphics card |
+| Works in | Every app that uses the microphone | Any app that uses its virtual microphone | Any app that uses its virtual microphone |
 
 ## Command line: getsu-cli
 

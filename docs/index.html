@@ -123,6 +123,13 @@
       font-style: normal;
       font-display: swap;
     }
+    @font-face {
+      font-family: "Inter";
+      src: url("assets/fonts/Inter-Bold.ttf") format("truetype");
+      font-weight: 700;
+      font-style: normal;
+      font-display: swap;
+    }
 
     :root {
       color-scheme: dark;
@@ -285,7 +292,7 @@
       background: var(--accent);
       color: #FFFFFF;
       font-size: 19px;
-      font-weight: 600;
+      font-weight: 700; /* bold: white on #0A84FF then meets WCAG AA for large text (3:1) */
       padding: 14px 32px;
       border-radius: 999px;
       transition: background-color 0.2s ease;
@@ -298,13 +305,10 @@
       color: var(--text-2);
       margin-top: 20px;
     }
+    /* The image already carries its own window frame and shadow, so no extra box around it. */
     .screenshot {
-      margin: 64px auto 0;
-      max-width: 460px;
-      border-radius: var(--radius-card);
-      overflow: hidden;
-      border: 1px solid var(--sep);
-      background: var(--card);
+      margin: 48px auto 0;
+      max-width: 520px;
     }
     .screenshot img {
       display: block;
@@ -383,7 +387,6 @@
       gap: 8px 12px;
       list-style: none;
       align-items: center;
-      min-width: max-content;
     }
     .pipeline li {
       background: var(--card-hi);
@@ -391,9 +394,15 @@
       border-radius: var(--radius-sm);
       padding: 8px 12px;
     }
+    /* Flow marker between steps: a small chevron drawn with borders (no arrow character, rules.md 7). */
     .pipeline li + li::before {
-      content: "+";
-      color: var(--text-3);
+      content: "";
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-top: 1.5px solid var(--text-3);
+      border-right: 1.5px solid var(--text-3);
+      transform: translateY(-2px) rotate(45deg);
       margin-right: 12px;
     }
 
@@ -895,22 +904,16 @@
                 <td>Free</td>
               </tr>
               <tr>
-                <td>Where it runs</td>
-                <td class="col-us">CPU, no GPU needed</td>
-                <td>Your PC (see the vendor for details)</td>
+                <td>Hardware</td>
+                <td class="col-us">Any PC, no GPU needed</td>
+                <td>Any PC</td>
                 <td>NVIDIA RTX graphics card</td>
               </tr>
               <tr>
                 <td>Works in</td>
                 <td class="col-us">Every app that uses the microphone</td>
-                <td>Inside Discord (Krisp in Discord)</td>
                 <td>Any app that uses its virtual microphone</td>
-              </tr>
-              <tr>
-                <td>Account</td>
-                <td class="col-us">Not needed, works offline</td>
-                <td>See the vendor for account requirements</td>
-                <td>See the vendor for account requirements</td>
+                <td>Any app that uses its virtual microphone</td>
               </tr>
             </tbody>
           </table>

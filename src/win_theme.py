@@ -45,6 +45,26 @@ def windows_build() -> int:
         return 0
 
 
+PERSONALIZE_KEY = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+
+
+def taskbar_uses_light_theme() -> bool:
+    """
+    True when the Windows taskbar (and so the notification area) is light: HKCU Personalize value
+    SystemUsesLightTheme = 1. Missing value or any error counts as dark, the Windows default for the taskbar.
+    Read-only. Windows broadcasts WM_SETTINGCHANGE "ImmersiveColorSet" when it changes.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, PERSONALIZE_KEY) as key:
+            value, _ = winreg.QueryValueEx(key, "SystemUsesLightTheme")
+        return int(value) == 1
+    except (OSError, ValueError, TypeError):
+        return False
+
+
 def supports_dark_menus(build: int) -> bool:
     """True when the running Windows build exports SetPreferredAppMode with the expected meaning."""
     return build >= MIN_BUILD_PREFERRED_APP_MODE

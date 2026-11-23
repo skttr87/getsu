@@ -211,28 +211,59 @@ def classify_device(name: str, is_input: bool = True) -> str:
     """
     if not name:
         return DeviceKind.OTHER
-    from src.router import DeviceBusType, EndpointFormFactor
+    from src.router import DeviceBusType
 
     bus = _bus_type(name, is_input)
+    form_factor = None
+    if bus in (DeviceBusType.USB, DeviceBusType.INTERNAL_HD, DeviceBusType.INTEL_AUDIO):
+        form_factor = _form_factor(name, is_input)
+    return kind_for_endpoint(name, bus, form_factor)
+
+
+def kind_for_endpoint(name: str, bus: str, form_factor: Optional[int]) -> str:
+    """
+    The classify_device() rules for an endpoint whose bus type and form factor are already known
+    (see native_list_active_endpoints). form_factor is only read for USB and HDAUDIO / INTELAUDIO buses.
+    """
+    if not name:
+        return DeviceKind.OTHER
+    from src.router import DeviceBusType, EndpointFormFactor
+
     if _is_virtual(name, bus):
         return DeviceKind.VIRTUAL
     if bus in (DeviceBusType.BLUETOOTH_HFP, DeviceBusType.BLUETOOTH_A2DP, DeviceBusType.BLUETOOTH_LE):
         return DeviceKind.BLUETOOTH_HEADSET
     if bus == DeviceBusType.USB:
-        form_factor = _form_factor(name, is_input)
         if form_factor in (EndpointFormFactor.HEADSET, EndpointFormFactor.HEADPHONES, EndpointFormFactor.HANDSET):
             return DeviceKind.USB_HEADSET
         if form_factor == EndpointFormFactor.MICROPHONE:
             return DeviceKind.USB_MIC
         return DeviceKind.OTHER
     if bus in (DeviceBusType.INTERNAL_HD, DeviceBusType.INTEL_AUDIO):
-        form_factor = _form_factor(name, is_input)
         if form_factor == EndpointFormFactor.LINE_LEVEL:
             return DeviceKind.LINE_IN
         if form_factor in (EndpointFormFactor.HEADSET, EndpointFormFactor.HEADPHONES):
             return DeviceKind.WIRED_HEADSET
         return DeviceKind.BUILT_IN
     return DeviceKind.OTHER
+
+
+# The cable Getsu installs (basic VB-CABLE). Its driver name is the part of the endpoint name in parentheses,
+# e.g. "CABLE Output (VB-Audio Virtual Cable)". Users can rename the first part in Sound settings, but not this
+# part, and Windows does not translate it. VB-CABLE A+B / C+D ("VB-Audio Cable A") and VoiceMeeter do not match.
+GETSU_CABLE_DRIVER_NAME = "(vb-audio virtual cable)"
+
+
+def is_getsu_cable_endpoint(name: str) -> bool:
+    """True only for the endpoints of the VB-CABLE that Getsu installs (CABLE Input / CABLE Output)."""
+    return GETSU_CABLE_DRIVER_NAME in (name or "").lower()
+
+
+def is_virtual_endpoint(name: str, bus: str) -> bool:
+    """Virtual cable or virtual software device, from the friendly name and bus type of an endpoint (see _is_virtual)."""
+    if not name:
+        return False
+    return _is_virtual(name, bus)
 
 
 def get_input_devices(include_virtual: bool = False) -> List[Dict]:

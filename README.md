@@ -249,7 +249,7 @@ python -m PyInstaller --clean --noconfirm build/getsu.spec
 
 - **[RNNoise](https://github.com/xiph/rnnoise)**: Recurrent neural network architecture for audio noise reduction by Jean-Marc Valin (Xiph.Org / Mozilla).
 - **[pyrnnoise](https://github.com/pengzhendong/pyrnnoise)**: Precompiled Windows x64 native binary distribution by Zhendong Peng.
-- **[VB-Audio](https://vb-audio.com/Cable/)**: High-fidelity virtual audio cable driver.
+- **[VB-CABLE](https://www.vb-cable.com)** by VB-Audio (Vincent Burel): the virtual audio cable that carries your clean voice to other apps. The Getsu installer includes the official, unmodified VB-CABLE package. VB-CABLE is donationware, all participations are welcome: if you find it useful, please support VB-Audio at [www.vb-cable.com](https://www.vb-cable.com).
 - **[DearPyGui](https://github.com/hoffstadt/DearPyGui)**: Fast GPU-accelerated immediate-mode GUI engine.
 - **[SpeexDSP](https://github.com/xiph/speexdsp)**: Resampler and noise preprocessor library by Jean-Marc Valin and contributors (Xiph.Org), BSD-3-Clause ([license](licenses/SpeexDSP-COPYING)).
 

@@ -14,6 +14,7 @@ import _isolation  # noqa: F401  (keeps config writes off the tracked config.jso
 import dearpygui.dearpygui as dpg
 
 from src import gui as g
+from src import gui_theme as theme
 
 PANEL_NAMES = ("mics", "settings", "help")
 
@@ -110,7 +111,7 @@ class GuiClickPathTests(unittest.TestCase):
         y = (rect[0][1] + rect[1][1]) / 2.0
         seg_w = (x1 - x0) / 4.0
         for i, db in enumerate(g.BOOST_DBS):
-            with patch.object(g, "save_config") as save:
+            with patch("src.gui_settings.save_config") as save:
                 self._click((x0 + seg_w * (i + 0.5), y))
             self.assertEqual(app.mic_boost_db, db, f"segment {db}")
             self.assertEqual(app.config["mic_boost_db"], db, f"segment {db}")
@@ -232,6 +233,146 @@ class GuiClickPathTests(unittest.TestCase):
         rect = app._item_rect("sheet_settings")
         self._click(_center(rect))
         self.assertEqual(app._open_panel_name, "settings")
+
+    def test_done_text_button_closes_the_panel(self):
+        app = self.app
+        self._open("settings")
+        rect = app._item_rect("sheet_done_settings")
+        self.assertIsNotNone(rect)
+        self._click_rect(rect)
+        self.assertIsNone(app._open_panel_name)
+
+    def test_done_hit_area_is_where_the_word_is_drawn(self):
+        """The click rectangle must come from the rendered text, not from the child window's sheet-relative position."""
+        app = self.app
+        for name in ("settings", "mics"):
+            self._open(name)
+            label = f"sheet_done_{name}_label"
+            drawn = (tuple(dpg.get_item_rect_min(label)), tuple(dpg.get_item_rect_max(label)))
+            rect = app._item_rect(f"sheet_done_{name}")
+            self.assertIsNotNone(rect, name)
+            cx, cy = _center(drawn)
+            self.assertTrue(rect[0][0] <= cx <= rect[1][0] and rect[0][1] <= cy <= rect[1][1], (name, rect, drawn))
+            sheet = app._item_rect(f"sheet_{name}")
+            self.assertGreaterEqual(rect[0][1], sheet[0][1], name)
+            app._close_panels()
+
+    # --- every clickable control ---------------------------------------------------------------
+
+    @staticmethod
+    def _drawn_rects(tag):
+        """Viewport rectangles of the visible items drawn inside tag (text, drawlists, buttons; windows have none)."""
+        out = []
+        stack = [tag]
+        while stack:
+            item = stack.pop()
+            for children in (dpg.get_item_children(item) or {}).values():
+                stack.extend(children)
+            if item == tag:
+                continue
+            try:
+                state = dpg.get_item_state(item)
+                if not state.get("visible", False) or "rect_min" not in state:
+                    continue
+                rmin, rmax = tuple(state["rect_min"]), tuple(state["rect_max"])
+            except Exception:
+                continue
+            if rmax[0] > rmin[0] and rmax[1] > rmin[1]:
+                out.append((item, (rmin, rmax)))
+        return out
+
+    def _assert_targets_match_drawing(self, targets, where):
+        checked = 0
+        for tag in targets:
+            rect = self.app._item_rect(tag)
+            self.assertIsNotNone(rect, f"{where}: {tag} has no click rectangle")
+            for item, drawn in self._drawn_rects(tag):
+                if dpg.get_item_type(item).endswith("mvSpacer"):
+                    continue
+                cx, cy = _center(drawn)
+                inside = rect[0][0] - 1 <= cx <= rect[1][0] + 1 and rect[0][1] - 1 <= cy <= rect[1][1] + 1
+                self.assertTrue(inside, f"{where}: {tag} click area {rect} misses drawn item "
+                                        f"{dpg.get_item_alias(item) or item} at {drawn}")
+                checked += 1
+        return checked
+
+    def test_every_click_area_covers_what_is_drawn(self):
+        """Main-window controls and every panel's controls: the click area covers the control as rendered."""
+        app = self.app
+        checked = self._assert_targets_match_drawing(list(app._click_targets), "main")
+        for name in PANEL_NAMES:
+            self._open(name)
+            targets = list(app._panel_targets.get(name, {}))
+            self.assertTrue(targets, name)
+            checked += self._assert_targets_match_drawing(targets, name)
+            sheet = app._item_rect(f"sheet_{name}")
+            for tag in targets:
+                rect = app._item_rect(tag)
+                self.assertGreaterEqual(rect[0][1], sheet[0][1] - 1, f"{name}: {tag} above its sheet")
+            app._close_panels()
+            self._frames()
+        self.assertGreater(checked, 0)
+
+    def test_every_click_target_runs_its_action(self):
+        """A click in the middle of each control's area reaches that control and nothing else."""
+        app = self.app
+        app._rebuild_mic_list()  # the real app rebuilds the rows on every device refresh after the panels exist
+        expected = {"mics": "sheet_done_mics", "settings": "sheet_done_settings", "help": "help_got_it"}
+        for name, close_tag in expected.items():
+            self.assertIn(close_tag, app._panel_targets.get(name, {}), f"{name}: {close_tag} is not clickable")
+        for name in PANEL_NAMES:
+            self._open(name)
+            targets = app._panel_targets.get(name, {})
+            for tag in list(targets):
+                self._open(name) if app._open_panel_name != name else None
+                calls = []
+                with patch.dict(targets, {t: (lambda t=t: calls.append(t)) for t in targets}):
+                    self.mouse.pos = _center(app._item_rect(tag))
+                    app._on_mouse_click()
+                self.assertEqual(calls, [tag], f"{name}: click on {tag}")
+            app._close_panels()
+            self._frames()
+        targets = app._click_targets
+        for tag in list(targets):
+            calls = []
+            with patch.dict(targets, {t: (lambda t=t: calls.append(t)) for t in targets}):
+                self.mouse.pos = _center(app._item_rect(tag))
+                app._on_mouse_click()
+            self.assertEqual(calls, [tag], f"main: click on {tag}")
+
+    def test_mic_list_rebuild_keeps_done_clickable(self):
+        """Device refreshes rebuild the microphone rows; Done must survive that and still close the panel."""
+        app = self.app
+        app._rebuild_mic_list()
+        app._rebuild_mic_list()
+        self._open("mics")
+        targets = app._panel_targets["mics"]
+        self.assertIn("sheet_done_mics", targets)
+        self.assertEqual(sorted(t for t in targets if t.startswith("mic_row_")),
+                         [f"mic_row_{i}" for i in range(len(app._mic_entries()))])
+        self._click_rect(app._item_rect("sheet_done_mics"))
+        self.assertIsNone(app._open_panel_name)
+
+    def test_done_hover_changes_only_the_text_colour(self):
+        app = self.app
+        self._open("settings")
+        rect = app._item_rect("sheet_done_settings")
+        label = "sheet_done_settings_label"
+        self.mouse.pos = _center(rect)
+        app._update_text_links()
+        self.assertEqual(self._text_color(label), theme.COL_LINK_HOVER)
+        self.mouse.down = True
+        app._update_text_links()
+        self.assertEqual(self._text_color(label), theme.COL_LINK_PRESSED)
+        self.mouse.down = False
+        self.mouse.pos = (-1000.0, -1000.0)
+        app._update_text_links()
+        self.assertEqual(self._text_color(label), theme.COL_ACCENT)
+
+    @staticmethod
+    def _text_color(tag):
+        # DearPyGui reports colours as floats in 0..1.
+        return tuple(int(round(c * 255)) for c in dpg.get_item_configuration(tag)["color"][:3])
 
     # --- layout ---------------------------------------------------------------------------------
 

@@ -199,7 +199,8 @@ def clean_file(
                 mono_frame *= linear_gain
                 proc = soft_limit(mono_frame, threshold=0.85)
 
-            out_chunks.append(proc.reshape(-1, 1))
+            # process_mono_frame may return a buffer it reuses for the next frame: keep a copy.
+            out_chunks.append(proc.reshape(-1, 1).copy())
             if report_json:
                 telemetry.append({
                     "frame_idx": c_idx,

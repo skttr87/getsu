@@ -1,4 +1,5 @@
 import ast
+import glob
 import math
 import os
 import struct
@@ -26,7 +27,7 @@ class MusicModeToggleTests(unittest.TestCase):
 
     def test_enabling_music_mode_sets_long_decay(self):
         fake = self._gui_with_engine()
-        with patch("src.gui.save_config"):
+        with patch("src.gui_settings.save_config"):
             gui.GetsuGUI.on_music_mode_toggled(fake, "chk_music_mode", True)
         self.assertAlmostEqual(fake.engine.gate.decay_rate, math.exp(-10.0 / 250.0))
         self.assertEqual(fake.engine.gate.hangover_frames, 80)
@@ -34,7 +35,7 @@ class MusicModeToggleTests(unittest.TestCase):
 
     def test_disabling_music_mode_restores_configured_decay(self):
         fake = self._gui_with_engine()
-        with patch("src.gui.save_config"):
+        with patch("src.gui_settings.save_config"):
             gui.GetsuGUI.on_music_mode_toggled(fake, "chk_music_mode", False)
         self.assertAlmostEqual(fake.engine.gate.decay_rate, math.exp(-10.0 / 80.0))
         self.assertEqual(fake.engine.gate.hangover_frames, 32)
@@ -53,7 +54,7 @@ class TitleBarTests(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == "win32", "DWM is Windows only")
     def test_apply_sends_mockup_colours_to_dwm(self):
-        with patch("src.gui.ctypes.windll") as windll:
+        with patch("src.gui_win32.ctypes.windll") as windll:
             gui.apply_dwm_title_bar(1234)
         sent = {}
         for call in windll.dwmapi.DwmSetWindowAttribute.call_args_list:
@@ -68,15 +69,21 @@ class TrayIconTests(unittest.TestCase):
     def test_tray_icon_is_64_px(self):
         self.assertEqual(gui.create_tray_icon_image(True).size, (64, 64))
 
+    # Dark-taskbar colours, pinned so the result does not depend on the theme of the PC running the tests.
     def test_status_dot_is_blue_when_on(self):
-        self.assertEqual(gui.create_tray_icon_image(True).getpixel((50, 50))[:3], (10, 132, 255))
+        self.assertEqual(gui.create_tray_icon_image(True, light_taskbar=False).getpixel((50, 50))[:3], (10, 132, 255))
 
     def test_status_dot_is_grey_when_off(self):
-        self.assertEqual(gui.create_tray_icon_image(False).getpixel((50, 50))[:3], (142, 142, 147))
+        self.assertEqual(gui.create_tray_icon_image(False, light_taskbar=False).getpixel((50, 50))[:3], (142, 142, 147))
 
     def test_glyph_bars_are_white(self):
         # Centre bar of the five-bar glyph (grid x 7..9, y 2..14).
-        self.assertEqual(gui.create_tray_icon_image(True).getpixel((32, 32))[:3], (255, 255, 255))
+        self.assertEqual(gui.create_tray_icon_image(True, light_taskbar=False).getpixel((32, 32))[:3], (255, 255, 255))
+
+    def test_light_taskbar_colours(self):
+        img = gui.create_tray_icon_image(True, light_taskbar=True)
+        self.assertEqual(img.getpixel((32, 32))[:3], (28, 28, 30))
+        self.assertEqual(img.getpixel((50, 50))[:3], (0, 122, 255))
 
 
 class AppIconFileTests(unittest.TestCase):
@@ -96,13 +103,15 @@ class AppIconFileTests(unittest.TestCase):
             self.assertEqual(img.size, (256, 256))
 
     def test_runtime_does_not_regenerate_icon_from_png(self):
-        with patch("src.gui.Image") as image_module:
+        with patch("src.gui_tray.Image") as image_module:
             gui.ensure_app_icon_ico()
         image_module.open.assert_not_called()
         image_module.open.return_value.save.assert_not_called()
 
 
-GUI_SOURCE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src", "gui.py")
+# gui.py and every gui_*.py module it is split into (M6 modular UI).
+GUI_SOURCES = sorted(glob.glob(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                            "src", "gui*.py")))
 
 # Emoji, pictographs, arrows, geometric shapes, misc symbols, and the bullet character.
 FORBIDDEN_CODEPOINT_RANGES = (
@@ -114,15 +123,18 @@ FORBIDDEN_CODEPOINT_RANGES = (
 
 class NoPictographTests(unittest.TestCase):
     def test_gui_string_literals_have_no_pictographic_symbols(self):
-        with open(GUI_SOURCE, encoding="utf-8") as fh:
-            tree = ast.parse(fh.read())
+        self.assertTrue(GUI_SOURCES, "no gui source files found")
         hits = []
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                for ch in node.value:
-                    cp = ord(ch)
-                    if any(lo <= cp <= hi for lo, hi in FORBIDDEN_CODEPOINT_RANGES):
-                        hits.append(f"line {node.lineno}: U+{cp:04X} in {node.value[:40]!r}")
+        for path in GUI_SOURCES:
+            with open(path, encoding="utf-8") as fh:
+                tree = ast.parse(fh.read())
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                    for ch in node.value:
+                        cp = ord(ch)
+                        if any(lo <= cp <= hi for lo, hi in FORBIDDEN_CODEPOINT_RANGES):
+                            hits.append(f"{os.path.basename(path)} line {node.lineno}: "
+                                        f"U+{cp:04X} in {node.value[:40]!r}")
         self.assertEqual(hits, [])
 
 

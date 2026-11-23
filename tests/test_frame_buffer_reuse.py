@@ -50,7 +50,7 @@ class TestStoredFramesAreCopies(unittest.TestCase):
 
     def test_voice_test_stores_copies(self):
         """The GUI voice test must append a copy of each processed frame (processed_chunks.append(x.copy()))."""
-        with open(os.path.join(ROOT, "src", "gui.py"), encoding="utf-8") as f:
+        with open(os.path.join(ROOT, "src", "gui_voice_test.py"), encoding="utf-8") as f:
             tree = ast.parse(f.read())
         appends = [
             node for node in ast.walk(tree)

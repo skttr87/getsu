@@ -487,10 +487,11 @@ class GetsuGUI(
                 dpg.add_text("Sponsored by", color=COL_TEXT_3, tag="footer_sponsor_text")
                 dpg.bind_item_font("footer_sponsor_text", self.font_footer)
                 dpg.add_spacer(width=self.s(4))
-                dpg.add_button(label="Kopi Reman", callback=lambda: webbrowser.open("https://www.instagram.com/kopireman/"),
-                               tag="sponsor_link_btn")
-                dpg.bind_item_theme("sponsor_link_btn", self.theme_link_btn)
-                dpg.bind_item_font("sponsor_link_btn", self.font_footer)
+                # Text link like Done: no fill in any state, the text lightens on hover (see _text_link).
+                self._text_link("sponsor_link_btn", "Kopi Reman", self.font_footer,
+                                self._text_w("Kopi Reman", self.font_footer) + self.s(8),
+                                self._text_h("Kopi Reman", self.font_footer), "",
+                                lambda: webbrowser.open("https://www.instagram.com/kopireman/"))
 
     def _place_footer(self):
         """Right-aligns the sponsor group: the gap is the content width minus the two groups as rendered."""
@@ -660,14 +661,6 @@ class GetsuGUI(
                 dpg.add_theme_color(dpg.mvThemeCol_Text, COL_WHITE)
                 dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(10))
         self.theme_stop_btn = self.theme_start_btn
-
-        # Link button (sponsor, Done): accent text, no background.
-        with dpg.theme() as self.theme_link_btn:
-            with dpg.theme_component(dpg.mvButton):
-                dpg.add_theme_color(dpg.mvThemeCol_Button, (0, 0, 0, 0))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, COL_ACCENT_SOFT)
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, COL_ACCENT_SOFT_2)
-                dpg.add_theme_color(dpg.mvThemeCol_Text, COL_ACCENT)
 
         # Selected segment: filled accent with white text.
         with dpg.theme() as self.theme_boost_active:

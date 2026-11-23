@@ -528,8 +528,9 @@ class DevicesMixin:
                 dpg.add_spacer(width=self.s(16))
                 dpg.add_text("Earbud mic drops audio to call quality.", color=COL_TEXT_2, tag="hint_text")
                 dpg.bind_item_font("hint_text", self.font_notice)
-                dpg.add_button(label="Use built-in mic", tag="btn_use_builtin", callback=self._use_builtin_mic)
-                dpg.bind_item_theme("btn_use_builtin", self.theme_link_btn)
+                self._text_link("btn_use_builtin", "Use built-in mic", self.font_body,
+                                self._text_w("Use built-in mic", self.font_body) + self.s(8),
+                                self._text_h("Use built-in mic", self.font_body), "", self._use_builtin_mic)
 
     def _bind_card(self, tag: str):
         if self.theme_card:

@@ -163,6 +163,7 @@ class PanelsMixin:
         """
         Text button with no fill or border in any state (Apple style). Hover lightens the text and press dims it
         (see _update_text_links). The child window is the click target, so the whole word is clickable.
+        panel names the sheet the button is on; "" means the main window (clicks only while no panel is open).
         """
         with dpg.child_window(tag=tag, width=width, height=height, border=False, no_scrollbar=True,
                               no_scroll_with_mouse=True):
@@ -176,19 +177,22 @@ class PanelsMixin:
         # The child window sits inside the sheet, so its own position is relative to the sheet, not the viewport.
         # Measure the control by its text item instead, which reports a viewport rectangle (see _item_rect).
         self._hit_parts[tag] = [f"{tag}_label"]
-        self._panel_targets.setdefault(panel, {})[tag] = callback
+        if panel:
+            self._panel_targets.setdefault(panel, {})[tag] = callback
+        else:
+            self._click_targets[tag] = callback
         self._text_links[tag] = {"panel": panel, "label": f"{tag}_label", "state": None}
 
     def _update_text_links(self):
-        """Per frame: text colour of the text buttons from the pointer (rest, hover or pressed). Only while their panel is open."""
+        """Per frame: text colour of the text buttons from the pointer (rest, hover or pressed). Only while their sheet is open (the main window: while no sheet is open)."""
         if not self._ui_built or not self._text_links:
             return
         point = dpg.get_mouse_pos(local=False)
         pressed = dpg.is_mouse_button_down(dpg.mvMouseButton_Left)
         for tag, meta in self._text_links.items():
             rect = self._item_rect(tag)
-            inside = (self._open_panel_name == meta["panel"] and rect is not None
-                      and ui_hit.point_in_rect(point, rect))
+            on_screen = (self._open_panel_name is None) if not meta["panel"] else (self._open_panel_name == meta["panel"])
+            inside = (on_screen and rect is not None and ui_hit.point_in_rect(point, rect))
             state = "rest" if not inside else ("pressed" if pressed else "hover")
             if state == meta["state"]:
                 continue

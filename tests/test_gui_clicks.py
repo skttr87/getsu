@@ -24,6 +24,16 @@ def _center(rect):
     return ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
 
 
+def _is_shown(tag):
+    """True when the item and every group or window around it is shown (a hidden group hides its children)."""
+    item = tag
+    while item:
+        if not dpg.is_item_shown(item):
+            return False
+        item = dpg.get_item_parent(item)
+    return True
+
+
 class _Mouse:
     """Stands in for the mouse: position and left button state."""
 
@@ -284,6 +294,8 @@ class GuiClickPathTests(unittest.TestCase):
     def _assert_targets_match_drawing(self, targets, where):
         checked = 0
         for tag in targets:
+            if not _is_shown(tag):
+                continue  # controls behind a feature flag are not drawn and have no click area
             rect = self.app._item_rect(tag)
             self.assertIsNotNone(rect, f"{where}: {tag} has no click rectangle")
             for item, drawn in self._drawn_rects(tag):
@@ -334,6 +346,8 @@ class GuiClickPathTests(unittest.TestCase):
             self._frames()
         targets = app._click_targets
         for tag in list(targets):
+            if not _is_shown(tag):
+                continue  # controls behind a feature flag (the built-in mic link) are not drawn and have no area
             calls = []
             with patch.dict(targets, {t: (lambda t=t: calls.append(t)) for t in targets}):
                 self.mouse.pos = _center(app._item_rect(tag))
@@ -368,6 +382,41 @@ class GuiClickPathTests(unittest.TestCase):
         self.mouse.pos = (-1000.0, -1000.0)
         app._update_text_links()
         self.assertEqual(self._text_color(label), theme.COL_ACCENT)
+
+    def test_sponsor_link_is_a_text_link_with_no_fill(self):
+        app = self.app
+        self.assertEqual(dpg.get_item_theme("sponsor_link_btn"), app.theme_flat)
+
+    def test_sponsor_link_hover_changes_only_the_text_colour(self):
+        app = self.app
+        rect = app._item_rect("sponsor_link_btn")
+        self.assertIsNotNone(rect)
+        self.mouse.pos = _center(rect)
+        app._update_text_links()
+        self.assertEqual(self._text_color("sponsor_link_btn_label"), theme.COL_LINK_HOVER)
+        self.mouse.pos = (-1000.0, -1000.0)
+        app._update_text_links()
+        self.assertEqual(self._text_color("sponsor_link_btn_label"), theme.COL_ACCENT)
+
+    def test_sponsor_link_does_not_hover_while_a_panel_is_open(self):
+        app = self.app
+        self._open("settings")
+        self.mouse.pos = (-1000.0, -1000.0)
+        app._update_text_links()
+        rect = app._item_rect("sponsor_link_btn")
+        self.mouse.pos = _center(rect) if rect is not None else (0.0, 0.0)
+        app._update_text_links()
+        self.assertNotEqual(self._text_color("sponsor_link_btn_label"), theme.COL_LINK_HOVER)
+
+    def test_sponsor_click_opens_the_site(self):
+        app = self.app
+        rect = app._item_rect("sponsor_link_btn")
+        with patch.object(g.webbrowser, "open") as opened:
+            self._click_rect(rect)
+        opened.assert_called_once_with("https://www.instagram.com/kopireman/")
+
+    def test_built_in_mic_link_is_a_text_link_with_no_fill(self):
+        self.assertEqual(dpg.get_item_theme("btn_use_builtin"), self.app.theme_flat)
 
     @staticmethod
     def _text_color(tag):

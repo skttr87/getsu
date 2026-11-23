@@ -23,6 +23,12 @@ from src.gui_theme import (
     POWER_D,
 )
 
+# Level meter geometry in logical px: 14 bars, 4 px wide, 7 px apart; the meter is exactly as wide as the bars.
+METER_BARS = 14
+METER_STEP = 7
+METER_BAR_W = 4
+METER_W = (METER_BARS - 1) * METER_STEP + METER_BAR_W  # 95
+
 
 class HeroMixin:
     """Methods mixed into GetsuGUI (see src/gui.py)."""
@@ -123,17 +129,25 @@ class HeroMixin:
         """Clicking the power button does what START / STOP did: toggle_stream keeps the 3 s lock."""
         self.toggle_stream()
 
+    def _meter_bar_x(self, i: int):
+        """
+        Left and right edge of meter bar i in physical px. Scaled from the logical position, not as i * s(step):
+        rounding the step first adds up over 14 bars and pushed the last bar past the meter (9 px steps at 125 %).
+        """
+        left = i * METER_STEP
+        return self.s(left), self.s(left + METER_BAR_W)
+
     def _draw_meter(self, level: float, live: bool):
         """Fourteen bars. Lit bars use the accent; when stopped every bar is flat and dim."""
-        for i in range(14):
+        for i in range(METER_BARS):
             if live:
                 shape = 0.55 + 0.45 * abs(math.sin(i * 1.7 + self._meter_phase))
                 h = self.s(3) + (self.s(18) - self.s(3)) * min(1.0, level * shape)
             else:
                 h = self.s(3)
-            x = i * self.s(7)
+            x0, x1 = self._meter_bar_x(i)
             fill = COL_ACCENT if (live and h > self.s(6)) else COL_FILL_2
-            dpg.configure_item(f"meter_bar_{i}", pmin=(x, self.s(18) - h), pmax=(x + self.s(4), self.s(18)),
+            dpg.configure_item(f"meter_bar_{i}", pmin=(x0, self.s(18) - h), pmax=(x1, self.s(18)),
                                color=fill, fill=fill)
 
     def _tick_ui(self):
@@ -184,9 +198,9 @@ class HeroMixin:
                 dpg.add_text("", tag="hero_sub_tip_text", wrap=self.s(340))
             dpg.add_spacer(height=self.s(12))
             with dpg.group(horizontal=True):
-                dpg.add_spacer(width=(width - self.s(95)) // 2)
-                dpg.add_drawlist(width=self.s(95), height=self.s(18), tag="meter")
-            for i in range(14):
-                x = i * self.s(7)
-                dpg.draw_rectangle((x, self.s(15)), (x + self.s(4), self.s(18)), color=COL_FILL_2, fill=COL_FILL_2,
+                dpg.add_spacer(width=(width - self.s(METER_W)) // 2)
+                dpg.add_drawlist(width=self.s(METER_W), height=self.s(18), tag="meter")
+            for i in range(METER_BARS):
+                x0, x1 = self._meter_bar_x(i)
+                dpg.draw_rectangle((x0, self.s(15)), (x1, self.s(18)), color=COL_FILL_2, fill=COL_FILL_2,
                                    rounding=self.s(2), tag=f"meter_bar_{i}", parent="meter")

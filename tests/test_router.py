@@ -254,7 +254,7 @@ class TestAutoRouteToggleLock(unittest.TestCase):
         mock_gui._get_idle_color.return_value = [100, 100, 100]
 
         from src.gui import GetsuGUI
-        with patch("src.gui.save_config") as mock_save:
+        with patch("src.gui_settings.save_config") as mock_save:
             GetsuGUI.on_auto_route_toggled(mock_gui, "chk_auto_route", False)
             self.assertFalse(mock_gui.config["auto_route"])
             mock_save.assert_called_once()

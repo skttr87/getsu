@@ -27,7 +27,7 @@ class MusicModeToggleTests(unittest.TestCase):
 
     def test_enabling_music_mode_sets_long_decay(self):
         fake = self._gui_with_engine()
-        with patch("src.gui.save_config"):
+        with patch("src.gui_settings.save_config"):
             gui.GetsuGUI.on_music_mode_toggled(fake, "chk_music_mode", True)
         self.assertAlmostEqual(fake.engine.gate.decay_rate, math.exp(-10.0 / 250.0))
         self.assertEqual(fake.engine.gate.hangover_frames, 80)
@@ -35,7 +35,7 @@ class MusicModeToggleTests(unittest.TestCase):
 
     def test_disabling_music_mode_restores_configured_decay(self):
         fake = self._gui_with_engine()
-        with patch("src.gui.save_config"):
+        with patch("src.gui_settings.save_config"):
             gui.GetsuGUI.on_music_mode_toggled(fake, "chk_music_mode", False)
         self.assertAlmostEqual(fake.engine.gate.decay_rate, math.exp(-10.0 / 80.0))
         self.assertEqual(fake.engine.gate.hangover_frames, 32)

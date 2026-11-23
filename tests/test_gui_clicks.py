@@ -110,7 +110,7 @@ class GuiClickPathTests(unittest.TestCase):
         y = (rect[0][1] + rect[1][1]) / 2.0
         seg_w = (x1 - x0) / 4.0
         for i, db in enumerate(g.BOOST_DBS):
-            with patch.object(g, "save_config") as save:
+            with patch("src.gui_settings.save_config") as save:
                 self._click((x0 + seg_w * (i + 0.5), y))
             self.assertEqual(app.mic_boost_db, db, f"segment {db}")
             self.assertEqual(app.config["mic_boost_db"], db, f"segment {db}")

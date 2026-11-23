@@ -31,12 +31,9 @@ from src.gui_theme import (
     COL_WHITE,
     CONTENT_W,
     FEATURE_EARBUD_HINT,
-    FEATURE_MODES,
     MIC_LIST_TEXT_W,
     MIC_ROW_H,
     MIC_TEXT_W,
-    MODE_DESCRIPTIONS,
-    MODE_NAMES,
 )
 from src.host_api_resolver import selection_hint
 from src.router import clear_device_bus_type_cache
@@ -502,10 +499,9 @@ class DevicesMixin:
             dpg.add_text("No microphone detected.", color=COL_TEXT_2, parent="mic_list")
 
     def _build_mic_card(self, width: int):
-        modes_h = self.s(85) if FEATURE_MODES else 0
         hint_h = self.s(28) if FEATURE_EARBUD_HINT else 0
         row_h = self.s(MIC_ROW_H)
-        card_h = row_h + hint_h + modes_h
+        card_h = row_h + hint_h
         with dpg.child_window(tag="mic_card", width=width, height=card_h, border=False, no_scrollbar=True):
             self._bind_card("mic_card")
             with dpg.child_window(tag="mic_row", width=width, height=row_h, border=False,
@@ -534,31 +530,6 @@ class DevicesMixin:
                 dpg.bind_item_font("hint_text", self.font_notice)
                 dpg.add_button(label="Use built-in mic", tag="btn_use_builtin", callback=self._use_builtin_mic)
                 dpg.bind_item_theme("btn_use_builtin", self.theme_link_btn)
-            with dpg.group(tag="mode_block", show=FEATURE_MODES):
-                with dpg.group(horizontal=True):
-                    dpg.add_spacer(width=self.s(16))
-                    dpg.add_drawlist(width=width - self.s(32), height=1, tag="mode_divider")
-                    dpg.draw_line((0, 0), (width - self.s(32), 0), color=COL_SEPARATOR, thickness=1.0, parent="mode_divider")
-                dpg.add_spacer(height=self.s(12))
-                with dpg.group(horizontal=True):
-                    dpg.add_spacer(width=self.s(16))
-                    dpg.add_text("Mode", color=COL_TEXT)
-                    dpg.bind_item_font(dpg.last_item(), self.font_btn)
-                    dpg.add_spacer(width=0, tag="mode_desc_pad")
-                    dpg.add_text(MODE_DESCRIPTIONS[self._mode], color=COL_TEXT_2, tag="mode_desc")
-                    dpg.bind_item_font("mode_desc", self.font_notice)
-                dpg.add_spacer(height=self.s(8))
-                seg_w = (width - self.s(32) - self.s(6)) // 4
-                with dpg.group(horizontal=True):
-                    dpg.add_spacer(width=self.s(16))
-                    for i, mode in enumerate(MODE_NAMES):
-                        dpg.add_button(label=mode, tag=f"mode_{i}", width=seg_w, height=self.s(30),
-                                       callback=lambda s, a, m=mode: self._set_mode(m))
-                        dpg.bind_item_font(f"mode_{i}", self.font_btn)
-                        if i < 3:
-                            dpg.add_spacer(width=self.s(2))
-                dpg.add_spacer(height=self.s(16))
-                self._set_mode(self._mode)
 
     def _bind_card(self, tag: str):
         if self.theme_card:

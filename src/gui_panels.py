@@ -17,8 +17,6 @@ from src.gui_theme import (
     HELP_BODY_H,
     HELP_STEP_H,
     MIC_ROW_H,
-    MODE_DESCRIPTIONS,
-    MODE_NAMES,
     SETTINGS_ROW_H,
     SHEET_HEAD_H,
     WINDOW_W,
@@ -126,14 +124,6 @@ class PanelsMixin:
     def show_how_to_use_modal(self, sender=None, app_data=None):
         """Opens the How to use panel over the window."""
         self._open_panel("help")
-
-    def _set_mode(self, name: str):
-        """Mode segment selection (UI only until the Modes backend lands in M2.4)."""
-        self._mode = name
-        for i, mode in enumerate(MODE_NAMES):
-            dpg.bind_item_theme(f"mode_{i}", self.theme_boost_active if mode == name else self.theme_boost_inactive)
-        desc = MODE_DESCRIPTIONS[name]
-        dpg.set_value("mode_desc", desc)
 
     # --- panels -----------------------------------------------------------
 

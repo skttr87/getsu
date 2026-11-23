@@ -58,7 +58,6 @@ from src.gui_theme import (
     CONTENT_W,
     FEATURE_EARBUD_HINT,
     FEATURE_LEARN_ROOM,
-    FEATURE_MODES,
     HELP_BODY_H,
     HELP_STEP_H,
     HERO_H,
@@ -66,8 +65,6 @@ from src.gui_theme import (
     MIC_LIST_TEXT_W,
     MIC_ROW_H,
     MIC_TEXT_W,
-    MODE_DESCRIPTIONS,
-    MODE_NAMES,
     POWER_D,
     SETTINGS_ROW_H,
     SETUP_BODY_INSTALLING,
@@ -203,7 +200,6 @@ class GetsuGUI(
         self._meter_flat = True
         self._last_meter_t = 0.0
         self._work_h = 0
-        self._mode = "Game"
         self.theme_flat = None
         self.theme_card = None
         self.theme_list = None

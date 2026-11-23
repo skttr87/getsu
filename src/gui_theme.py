@@ -81,13 +81,5 @@ SETUP_BODY_OFFER = ("Getsu needs a free virtual audio cable to send your clean v
 SETUP_BODY_INSTALLING = "Windows may ask for permission. Click Yes. This window updates by itself."
 
 # Features whose backend lands in a later task. Their controls are built but hidden.
-FEATURE_MODES = False          # Game / Meeting / Session / Music segments (backend: M2.4)
 FEATURE_EARBUD_HINT = False    # "Earbud mic drops audio to call quality." (earbud work: M5.x)
 FEATURE_LEARN_ROOM = False     # "Learn my room" row in Settings (backend: M2.3)
-MODE_NAMES = ("Game", "Meeting", "Session", "Music")
-MODE_DESCRIPTIONS = {
-    "Game": "Lowest delay, strong click removal",
-    "Meeting": "Steady voice level for long calls",
-    "Session": "Gentle, never cuts quiet speech",
-    "Music": "No noise filter, natural sound",
-}

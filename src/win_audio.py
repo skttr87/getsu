@@ -1073,6 +1073,107 @@ def set_getsu_cable_format(endpoint_id: str, rate: int = 48000) -> bool:
     return ok
 
 
+# --- Endpoint levels (owner decision 2026-11-24): the only code that sets a device level -----------------------------
+# Documented Core Audio: IMMDeviceEnumerator::GetDevice (slot 5) -> IMMDevice::Activate (slot 3) -> IAudioEndpointVolume
+# (slot 7 SetMasterVolumeLevelScalar, slot 9 GetMasterVolumeLevelScalar).
+IID_IAudioEndpointVolume = GUID(0x5CDF2C82, 0x841E, 0x4546,
+                                (wintypes.BYTE * 8)(0x97, 0x22, 0x0C, 0xF7, 0x40, 0x78, 0x22, 0x9A))
+_VT_EV_SET_LEVEL_SCALAR = 7
+_VT_EV_GET_LEVEL_SCALAR = 9
+_CLSCTX_ALL = 0x17
+
+
+def _with_endpoint_volume(endpoint_id: str, action):
+    """Runs action(pVolume, vtable) on the IAudioEndpointVolume of one endpoint. None when unavailable."""
+    if sys.platform != 'win32' or not ole32:
+        return None
+    pEnum = pDev = pVol = None
+    try:
+        _safe_co_initialize()
+        pEnum = ctypes.c_void_p()
+        if ole32.CoCreateInstance(ctypes.byref(CLSID_MMDeviceEnumerator), None, 1 | 2 | 4,
+                                  ctypes.byref(IID_IMMDeviceEnumerator), ctypes.byref(pEnum)) != 0 or not pEnum:
+            return None
+        enum_vt = ctypes.cast(ctypes.cast(pEnum, ctypes.POINTER(ctypes.c_void_p)).contents, ctypes.POINTER(ctypes.c_void_p))
+        get_device = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, wintypes.LPCWSTR,
+                                        ctypes.POINTER(ctypes.c_void_p))(enum_vt[5])
+        pDev = ctypes.c_void_p()
+        if get_device(pEnum, endpoint_id, ctypes.byref(pDev)) != 0 or not pDev:
+            return None
+        dev_vt = ctypes.cast(ctypes.cast(pDev, ctypes.POINTER(ctypes.c_void_p)).contents, ctypes.POINTER(ctypes.c_void_p))
+        activate = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(GUID), wintypes.DWORD,
+                                      ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p))(dev_vt[3])
+        pVol = ctypes.c_void_p()
+        if activate(pDev, ctypes.byref(IID_IAudioEndpointVolume), _CLSCTX_ALL, None, ctypes.byref(pVol)) != 0 or not pVol:
+            return None
+        vol_vt = ctypes.cast(ctypes.cast(pVol, ctypes.POINTER(ctypes.c_void_p)).contents, ctypes.POINTER(ctypes.c_void_p))
+        return action(pVol, vol_vt)
+    finally:
+        _release_com_ptr(pVol)
+        _release_com_ptr(pDev)
+        _release_com_ptr(pEnum)
+
+
+def native_get_endpoint_level(endpoint_id: str) -> Optional[float]:
+    """Windows level of an endpoint, 0.0 to 1.0 (the slider in Sound settings), or None. Read-only."""
+    if not endpoint_id or not ENDPOINT_GUID_PATTERN.match(endpoint_id.strip()):
+        return None
+
+    def action(pVol, vt):
+        get_level = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(ctypes.c_float))(vt[_VT_EV_GET_LEVEL_SCALAR])
+        level = ctypes.c_float()
+        return float(level.value) if get_level(pVol, ctypes.byref(level)) == 0 else None
+
+    try:
+        return _with_endpoint_volume(endpoint_id.strip(), action)
+    except (Exception, OSError) as e:
+        logger.warning(f"Reading the level of {endpoint_id} failed: {e}")
+        return None
+
+
+def set_endpoint_level_guarded(endpoint_id: str, level: float) -> bool:
+    """
+    The only function in src that sets a device level. Allowed targets (rules.md section 3, levels): an endpoint of
+    Getsu's own VB-CABLE (either direction), or a PHYSICAL recording device. Refuses every playback device that is not
+    Getsu's cable and every other virtual device. Never mutes or unmutes. Returns True when Windows reports the level.
+    """
+    from src.devices import is_getsu_cable_endpoint, is_virtual_endpoint
+
+    if not endpoint_id or not ENDPOINT_GUID_PATTERN.match(endpoint_id.strip()):
+        logger.warning(f"Level not changed: '{endpoint_id}' is not an endpoint ID.")
+        return False
+    endpoint_id = endpoint_id.strip()
+    level = min(1.0, max(0.0, float(level)))
+    capture = native_list_active_endpoints(is_input=True)
+    render = native_list_active_endpoints(is_input=False)
+    target = next((e for e in capture + render if e["id"] == endpoint_id), None)
+    if target is None:
+        logger.warning(f"Level not changed: {endpoint_id} is not an active endpoint.")
+        return False
+    is_cable = is_getsu_cable_endpoint(target["name"])
+    is_capture = any(e["id"] == endpoint_id for e in capture)
+    if not is_cable and (not is_capture or is_virtual_endpoint(target["name"], target["bus"])):
+        logger.warning(f"Level not changed: '{target['name']}' is not Getsu's cable or a physical microphone.")
+        return False
+
+    def action(pVol, vt):
+        set_level = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_float, ctypes.c_void_p)(vt[_VT_EV_SET_LEVEL_SCALAR])
+        return set_level(pVol, ctypes.c_float(level), None)
+
+    try:
+        hr = _with_endpoint_volume(endpoint_id, action)
+    except (Exception, OSError) as e:
+        logger.warning(f"Setting the level of '{target['name']}' failed: {e}")
+        return False
+    after = native_get_endpoint_level(endpoint_id)
+    ok = hr == 0 and after is not None and abs(after - level) < 0.02
+    if ok:
+        logger.info(f"[LEVELS] '{target['name']}' set to {round(level * 100)} %.")
+    else:
+        logger.warning(f"[LEVELS] '{target['name']}' not changed (hr {hr}, now {after}).")
+    return ok
+
+
 def get_audio_restore_exe() -> str:
     """Locates the bundled native AudioRestore.exe helper."""
     if getattr(sys, 'frozen', False):

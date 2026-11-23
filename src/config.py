@@ -39,6 +39,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "rnnoise_dry_mix_db": None,     # null = off. A number (e.g. -24) mixes the delayed pre-RNNoise signal back while the gate is open
     "was_running_on_exit": False,   # True when noise cancellation was on at the last exit; a Start with Windows launch resumes it
     "last_physical_playback_id": None,  # Endpoint ID of the last physical default playback device; the cable guard switches back to it
+    "mic_level_raised": [],  # Endpoint IDs of microphones whose low level Getsu raised once (mic_level.py); never again after
 }
 
 import sys
@@ -127,6 +128,12 @@ def sanitize_config(cfg: Dict[str, Any]) -> bool:
         if clamped != vad:
             cfg["vad_threshold"] = clamped
             changed = True
+
+    # A missing key is added by the load_config migration; only a present but unusable value is repaired here.
+    raised = cfg.get("mic_level_raised", [])
+    if not isinstance(raised, list) or not all(isinstance(i, str) for i in raised):
+        cfg["mic_level_raised"] = [i for i in raised if isinstance(i, str)] if isinstance(raised, list) else []
+        changed = True
     return changed
 
 
@@ -176,6 +183,9 @@ def load_config() -> Dict[str, Any]:
             migrated = True
         if "last_physical_playback_id" not in data:
             merged["last_physical_playback_id"] = None
+            migrated = True
+        if "mic_level_raised" not in data:
+            merged["mic_level_raised"] = []
             migrated = True
 
         # Repair values the app cannot use instead of failing at start-up (older builds could save

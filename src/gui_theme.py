@@ -42,6 +42,12 @@ TYPE_SUB = 13       # secondary and sub text, segmented labels (SemiBold)
 TYPE_FOOTER = 13    # footer line
 TYPE_SMALL = 12     # small labels (help step numbers)
 
+# Settings panel only: one CSS px smaller than the shared steps above (owner feedback at 125 %).
+TYPE_SET_TITLE = 17   # "Settings" panel title, SemiBold
+TYPE_SET_LABEL = 14   # settings row labels
+TYPE_SET_DETAIL = 12  # settings row detail text (two lines)
+TYPE_SET_SEG = 12     # mic boost segment labels, SemiBold
+
 # Window geometry (logical pixels, scaled with self.s()): 420 px wide, 24 px side gutters.
 WINDOW_W = 460       # widened from 420: hero notices up to 382 px wide and the microphone name column need it
 CONTENT_PAD = 24

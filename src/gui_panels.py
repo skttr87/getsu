@@ -152,14 +152,15 @@ class PanelsMixin:
                     dpg.bind_item_theme(f"sheet_{name}", self.theme_sheet)
                 self._panel_body(name)
 
-    def _sheet_head(self, title: str, done_callback, done_tag: str = ""):
+    def _sheet_head(self, title: str, done_callback, done_tag: str = "", title_font=None):
         width = self.s(CONTENT_W)
+        title_font = title_font or self.font_title
         dpg.add_spacer(height=self.s(16))
         with dpg.group(horizontal=True):
             dpg.add_spacer(width=self.s(24))
             dpg.add_text(title, color=COL_TEXT)
-            dpg.bind_item_font(dpg.last_item(), self.font_title)
-            dpg.add_spacer(width=max(0, width - self._text_w(title, self.font_title) - self.s(44)))
+            dpg.bind_item_font(dpg.last_item(), title_font)
+            dpg.add_spacer(width=max(0, width - self._text_w(title, title_font) - self.s(44)))
             if done_callback is not None:
                 dpg.add_button(label="Done", callback=done_callback, width=self.s(44), height=self.s(26),
                                tag=done_tag or dpg.generate_uuid())
@@ -181,7 +182,8 @@ class PanelsMixin:
                 dpg.add_text("", tag="input_selection_hint", wrap=width, color=COL_WARNING, show=False)
                 dpg.bind_item_font("input_selection_hint", self.font_notice)
         elif name == "settings":
-            self._sheet_head("Settings", lambda: self._close_panels(), done_tag="sheet_done_settings")
+            self._sheet_head("Settings", lambda: self._close_panels(), done_tag="sheet_done_settings",
+                             title_font=self.font_set_title)
             with dpg.group(horizontal=True):
                 dpg.add_spacer(width=self.s(24))
                 with dpg.child_window(tag="settings_card", width=width, height=self.s(4 * SETTINGS_ROW_H + 3),

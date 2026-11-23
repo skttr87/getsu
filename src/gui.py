@@ -82,6 +82,10 @@ from src.gui_theme import (
     TYPE_BUTTON,
     TYPE_FOOTER,
     TYPE_ROW,
+    TYPE_SET_DETAIL,
+    TYPE_SET_LABEL,
+    TYPE_SET_SEG,
+    TYPE_SET_TITLE,
     TYPE_SMALL,
     TYPE_STATE,
     TYPE_SUB,
@@ -549,12 +553,17 @@ class GetsuGUI(
                 self.font_btn = dpg.add_font(bold_file, fpx(TYPE_BUTTON))
                 self.font_title = dpg.add_font(bold_file, fpx(TYPE_TITLE))
                 self.font_state = dpg.add_font(bold_file, fpx(TYPE_STATE))
+                self.font_set_title = dpg.add_font(bold_file, fpx(TYPE_SET_TITLE))
+                self.font_set_label = dpg.add_font(path_regular, fpx(TYPE_SET_LABEL))
+                self.font_set_detail = dpg.add_font(path_regular, fpx(TYPE_SET_DETAIL))
+                self.font_set_seg = dpg.add_font(bold_file, fpx(TYPE_SET_SEG))
                 dpg.bind_font(self.font_body)
             else:
                 self.font_body = self.font_small = self.font_notice = None
                 self.font_list = self.font_header = self.font_btn = None
                 self.font_title = self.font_state = None
                 self.font_footer = self.font_seg = None
+                self.font_set_title = self.font_set_label = self.font_set_detail = self.font_set_seg = None
 
         # Dark theme from the approved mockup palette. Rounding: cards 14, buttons 10, segmented 9.
         # Spacing is zero by default: every gap in the layout is an explicit spacer.

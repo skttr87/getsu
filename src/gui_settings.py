@@ -209,12 +209,13 @@ class SettingsMixin:
             with dpg.child_window(width=self.s(SET_LABEL_W), height=row_h, border=False, no_scrollbar=True):
                 self._bind_flat(dpg.last_item())
                 # Label plus a two-line detail, centred in the row.
-                dpg.add_spacer(height=self._block_top(row_h, self._text_h("Ag", self.font_body),
-                                                      2 * self._text_h("Ag", self.font_notice)))
+                dpg.add_spacer(height=self._block_top(row_h, self._text_h("Ag", self.font_set_label),
+                                                      2 * self._text_h("Ag", self.font_set_detail)))
                 dpg.add_text("Sensitivity", color=COL_TEXT)
+                dpg.bind_item_font(dpg.last_item(), self.font_set_label)
                 dpg.add_text("Higher ignores more background voices", color=COL_TEXT_2,
                              wrap=self.s(SET_LABEL_W))
-                dpg.bind_item_font(dpg.last_item(), self.font_notice)
+                dpg.bind_item_font(dpg.last_item(), self.font_set_detail)
             with dpg.group():
                 dpg.add_spacer(height=self._block_top(row_h, self.s(30)))
                 dpg.add_drawlist(width=self.s(SET_CTRL_W), height=self.s(30), tag="slider_vad")
@@ -227,8 +228,9 @@ class SettingsMixin:
             dpg.add_spacer(width=self.s(16))
             with dpg.child_window(width=self.s(SET_LABEL_W), height=row_h, border=False, no_scrollbar=True):
                 self._bind_flat(dpg.last_item())
-                dpg.add_spacer(height=self._block_top(row_h, self._text_h("Ag", self.font_body)))
+                dpg.add_spacer(height=self._block_top(row_h, self._text_h("Ag", self.font_set_label)))
                 dpg.add_text("Mic boost", color=COL_TEXT)
+                dpg.bind_item_font(dpg.last_item(), self.font_set_label)
             with dpg.group():
                 dpg.add_spacer(height=self._block_top(row_h, self.s(30)))
                 with dpg.child_window(tag="seg_boost", width=self.s(SET_CTRL_W), height=self.s(30), border=False,
@@ -236,7 +238,7 @@ class SettingsMixin:
                     self._bind_flat("seg_boost")
                     dpg.add_drawlist(width=self.s(SET_CTRL_W), height=self.s(30), tag="seg_boost_bg")
                     # Labels are text items placed over the track (drawlist text cannot use the SemiBold font).
-                    label_font = self.font_seg or self.font_btn
+                    label_font = self.font_set_seg or self.font_btn
                     seg_w = (SET_CTRL_W - 4 - 2 * 3) / 4.0
                     for i, db in enumerate(BOOST_DBS):
                         label = "0" if db == 0 else f"+{db}"
@@ -257,14 +259,15 @@ class SettingsMixin:
             dpg.add_spacer(width=self.s(16))
             with dpg.child_window(width=self.s(SET_LABEL_W), height=row_h, border=False, no_scrollbar=True):
                 self._bind_flat(dpg.last_item())
-                lines = [self._text_h("Ag", self.font_body)]
+                lines = [self._text_h("Ag", self.font_set_label)]
                 if detail:
-                    lines.append(2 * self._text_h("Ag", self.font_notice))  # details wrap to two lines
+                    lines.append(2 * self._text_h("Ag", self.font_set_detail))  # details wrap to two lines
                 dpg.add_spacer(height=self._block_top(row_h, *lines))
                 dpg.add_text(label, color=COL_TEXT)
+                dpg.bind_item_font(dpg.last_item(), self.font_set_label)
                 if detail:
                     dpg.add_text(detail, color=COL_TEXT_2, wrap=self.s(SET_LABEL_W))
-                    dpg.bind_item_font(dpg.last_item(), self.font_notice)
+                    dpg.bind_item_font(dpg.last_item(), self.font_set_detail)
             with dpg.group(horizontal=True):
                 dpg.add_spacer(width=self.s(SET_CTRL_W - 42))
                 with dpg.group() as switch_group:
@@ -275,6 +278,7 @@ class SettingsMixin:
         with dpg.group(horizontal=True, show=show):
             dpg.add_spacer(width=self.s(16))
             dpg.add_text("Learn my room", color=COL_TEXT)
+            dpg.bind_item_font(dpg.last_item(), self.font_set_label)
             dpg.add_button(label="Learn", enabled=False, tag="btn_room_learn")
             dpg.bind_item_theme("btn_room_learn", self.theme_voice_btn)
 

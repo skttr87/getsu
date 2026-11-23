@@ -153,6 +153,15 @@ class TypeScaleLayoutTests(unittest.TestCase):
             app._close_panels()
             self._frames(2)
 
+    def test_settings_panel_text_is_one_css_px_smaller_than_the_shared_scale(self):
+        app = self.app
+        self.assertEqual(g.TYPE_SET_TITLE, g.TYPE_TITLE - 1)
+        self.assertEqual(g.TYPE_SET_LABEL, g.TYPE_BODY - 1)
+        self.assertEqual(g.TYPE_SET_DETAIL, g.TYPE_SUB - 1)
+        self.assertEqual(g.TYPE_SET_SEG, g.TYPE_SUB - 1)
+        for name in ("font_set_title", "font_set_label", "font_set_detail", "font_set_seg"):
+            self.assertIsNotNone(getattr(app, name), name)
+
     def test_sheet_head_keeps_done_inside_the_panel_on_the_microphone_panel(self):
         app = self.app
         app._open_panel("mics")

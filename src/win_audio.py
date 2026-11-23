@@ -6,7 +6,7 @@ import sys
 import logging
 import ctypes
 from ctypes import wintypes
-from typing import Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 try:
     from src.diagnostics import get_file_handler
@@ -304,6 +304,28 @@ def _is_endpoint_id(value: Optional[str]) -> bool:
     return bool(value) and ENDPOINT_GUID_PATTERN.match(value.strip()) is not None
 
 
+def _bus_from_enumerator(enumerator_name: str) -> str:
+    """Maps a PKEY_Device_EnumeratorName value to a DeviceBusType string (the upper-cased name when unknown)."""
+    enumerator = str(enumerator_name).strip().upper()
+    if "BTHHFENUM" in enumerator:
+        return DeviceBusType.BLUETOOTH_HFP
+    elif "BTHENUM" in enumerator:
+        return DeviceBusType.BLUETOOTH_A2DP
+    elif "BTHLEENUM" in enumerator:
+        return DeviceBusType.BLUETOOTH_LE
+    elif "USB" in enumerator:
+        return DeviceBusType.USB
+    elif "HDAUDIO" in enumerator:
+        return DeviceBusType.INTERNAL_HD
+    elif "INTELAUDIO" in enumerator:
+        return DeviceBusType.INTEL_AUDIO
+    elif "SWD" in enumerator:
+        return DeviceBusType.VIRTUAL
+    elif enumerator.split("\\")[0] == "ROOT":
+        return DeviceBusType.ROOT
+    return enumerator
+
+
 def native_get_device_bus_type(device_id_or_name: Optional[str] = None, is_input: bool = True) -> str:
     """
     Direct in-process query retrieving the hardware driver bus enumerator name (PKEY_Device_EnumeratorName).
@@ -387,24 +409,7 @@ def native_get_device_bus_type(device_id_or_name: Optional[str] = None, is_input
             try:
                 if GetValue(pStore, ctypes.byref(PKEY_Device_EnumeratorName), ctypes.byref(pv)) == 0:
                     if pv.vt == 31 and pv.pwszVal:
-                        enumerator = str(pv.pwszVal).strip().upper()
-                        if "BTHHFENUM" in enumerator:
-                            return DeviceBusType.BLUETOOTH_HFP
-                        elif "BTHENUM" in enumerator:
-                            return DeviceBusType.BLUETOOTH_A2DP
-                        elif "BTHLEENUM" in enumerator:
-                            return DeviceBusType.BLUETOOTH_LE
-                        elif "USB" in enumerator:
-                            return DeviceBusType.USB
-                        elif "HDAUDIO" in enumerator:
-                            return DeviceBusType.INTERNAL_HD
-                        elif "INTELAUDIO" in enumerator:
-                            return DeviceBusType.INTEL_AUDIO
-                        elif "SWD" in enumerator:
-                            return DeviceBusType.VIRTUAL
-                        elif enumerator.split("\\")[0] == "ROOT":
-                            return DeviceBusType.ROOT
-                        return enumerator
+                        return _bus_from_enumerator(str(pv.pwszVal))
             finally:
                 if ole32 and hasattr(ole32, 'PropVariantClear'):
                     ole32.PropVariantClear(ctypes.byref(pv))
@@ -720,6 +725,110 @@ def native_get_physical_capture_guid() -> Tuple[Optional[str], str]:
         _release_com_ptr(pEnum)
 
 
+def _describe_endpoint(pDev) -> Optional[Dict[str, Any]]:
+    """Reads id, friendly name, bus type and form factor of one IMMDevice. Read-only."""
+    pStore = ctypes.c_void_p()
+    pStr = wintypes.LPWSTR()
+    endpoint_id = None
+    try:
+        dev_vtable = ctypes.cast(ctypes.cast(pDev, ctypes.POINTER(ctypes.c_void_p)).contents, ctypes.POINTER(ctypes.c_void_p))
+        OpenPropertyStore = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p))(dev_vtable[4])
+        GetId = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(wintypes.LPWSTR))(dev_vtable[5])
+        if GetId(pDev, ctypes.byref(pStr)) == 0 and pStr.value:
+            endpoint_id = str(pStr.value)
+    finally:
+        if pStr.value and ole32 and hasattr(ole32, 'CoTaskMemFree'):
+            ole32.CoTaskMemFree(pStr)
+    if not endpoint_id:
+        return None
+
+    name = ""
+    bus = DeviceBusType.UNKNOWN
+    form_factor = None
+    try:
+        if OpenPropertyStore(pDev, 0, ctypes.byref(pStore)) == 0 and pStore.value:
+            store_vtable = ctypes.cast(ctypes.cast(pStore, ctypes.POINTER(ctypes.c_void_p)).contents, ctypes.POINTER(ctypes.c_void_p))
+            GetValue = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(PROPERTYKEY), ctypes.POINTER(PROPVARIANT))(store_vtable[5])
+            pv = PROPVARIANT()
+            try:
+                if GetValue(pStore, ctypes.byref(PKEY_Device_FriendlyName), ctypes.byref(pv)) == 0:
+                    if pv.vt == VT_LPWSTR and pv.pwszVal:
+                        name = str(pv.pwszVal)
+            finally:
+                if ole32 and hasattr(ole32, 'PropVariantClear'):
+                    ole32.PropVariantClear(ctypes.byref(pv))
+            pbus = PROPVARIANT()
+            try:
+                if GetValue(pStore, ctypes.byref(PKEY_Device_EnumeratorName), ctypes.byref(pbus)) == 0:
+                    if pbus.vt == VT_LPWSTR and pbus.pwszVal:
+                        bus = _bus_from_enumerator(str(pbus.pwszVal))
+            finally:
+                if ole32 and hasattr(ole32, 'PropVariantClear'):
+                    ole32.PropVariantClear(ctypes.byref(pbus))
+            pff = PROPVARIANT()
+            try:
+                if GetValue(pStore, ctypes.byref(PKEY_AudioEndpoint_FormFactor), ctypes.byref(pff)) == 0:
+                    form_factor = _form_factor_from_variant(pff)
+            finally:
+                if ole32 and hasattr(ole32, 'PropVariantClear'):
+                    ole32.PropVariantClear(ctypes.byref(pff))
+    finally:
+        if pStore.value:
+            _release_com_ptr(pStore)
+    return {"id": endpoint_id, "name": name, "bus": bus, "form_factor": form_factor}
+
+
+def native_list_active_endpoints(is_input: bool) -> List[Dict[str, Any]]:
+    """
+    Lists the active capture (is_input) or render endpoints in one COM pass.
+    Each entry is {"id", "name", "bus", "form_factor"}; bus is a DeviceBusType string and form_factor an
+    EndpointFormFactor value or None. Read-only. Returns an empty list when COM is not available.
+    """
+    if sys.platform != 'win32' or not ole32:
+        return []
+
+    pEnum = None
+    pCol = None
+    try:
+        _safe_co_initialize()
+        pEnum = ctypes.c_void_p()
+        if ole32.CoCreateInstance(ctypes.byref(CLSID_MMDeviceEnumerator), None, 1 | 2 | 4, ctypes.byref(IID_IMMDeviceEnumerator), ctypes.byref(pEnum)) != 0 or not pEnum:
+            return []
+
+        enum_vtable = ctypes.cast(ctypes.cast(pEnum, ctypes.POINTER(ctypes.c_void_p)).contents, ctypes.POINTER(ctypes.c_void_p))
+        EnumAudioEndpoints = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_int, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p))(enum_vtable[3])
+        dataflow = 1 if is_input else 0  # eCapture = 1, eRender = 0
+        pCol = ctypes.c_void_p()
+        # DEVICE_STATE_ACTIVE = 1
+        if EnumAudioEndpoints(pEnum, dataflow, 1, ctypes.byref(pCol)) != 0 or not pCol:
+            return []
+
+        col_vtable = ctypes.cast(ctypes.cast(pCol, ctypes.POINTER(ctypes.c_void_p)).contents, ctypes.POINTER(ctypes.c_void_p))
+        GetCount = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(wintypes.UINT))(col_vtable[3])
+        Item = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, wintypes.UINT, ctypes.POINTER(ctypes.c_void_p))(col_vtable[4])
+        count = wintypes.UINT()
+        GetCount(pCol, ctypes.byref(count))
+
+        result: List[Dict[str, Any]] = []
+        for i in range(count.value):
+            pDev = ctypes.c_void_p()
+            if Item(pCol, i, ctypes.byref(pDev)) != 0 or not pDev:
+                continue
+            try:
+                entry = _describe_endpoint(pDev)
+                if entry is not None:
+                    result.append(entry)
+            finally:
+                _release_com_ptr(pDev)
+        return result
+    except Exception as e:
+        logger.debug(f"native_list_active_endpoints exception: {e}")
+        return []
+    finally:
+        _release_com_ptr(pCol)
+        _release_com_ptr(pEnum)
+
+
 import re
 
 ENDPOINT_GUID_PATTERN = re.compile(r"^(\{[0-9a-fA-F\.\-]+\}\.)?\{[0-9a-zA-Z\-]+\}$")
@@ -784,6 +893,50 @@ def native_set_default_endpoint(dev_id: str) -> bool:
         return False
     finally:
         _release_com_ptr(pPolicy)
+
+
+PLAYBACK_ENDPOINT_PREFIX = "{0.0.0."
+
+
+def set_default_playback_away_from_cable(target_id: str) -> bool:
+    """
+    The only function in src that sets a playback (render) default. It moves the default playback
+    (all three roles) from the virtual cable to target_id, a physical device, and nothing else.
+    Refuses, logs a warning and returns False unless all of these hold:
+    - target_id is a render endpoint ID (prefix {0.0.0.);
+    - the target is an active render endpoint and is not virtual;
+    - the current default playback (console role) is a virtual cable.
+    """
+    if sys.platform != 'win32' or not ole32:
+        return False
+    if not target_id or not ENDPOINT_GUID_PATTERN.match(target_id.strip()) or not target_id.strip().startswith(PLAYBACK_ENDPOINT_PREFIX):
+        logger.warning(f"Playback default not changed: '{target_id}' is not a render endpoint ID.")
+        return False
+    target_id = target_id.strip()
+
+    from src.devices import is_virtual_endpoint
+
+    render = native_list_active_endpoints(is_input=False)
+    target = next((e for e in render if e["id"] == target_id), None)
+    if target is None:
+        logger.warning(f"Playback default not changed: target {target_id} is not an active render endpoint.")
+        return False
+    if is_virtual_endpoint(target["name"], target["bus"]):
+        logger.warning(f"Playback default not changed: target '{target['name']}' is a virtual device.")
+        return False
+
+    current_id, _ = native_get_current_default_playback()
+    current = next((e for e in render if current_id and e["id"] == current_id), None)
+    if current is None or not is_virtual_endpoint(current["name"], current["bus"]):
+        logger.warning("Playback default not changed: the current default playback is not a virtual cable.")
+        return False
+
+    ok = native_set_default_endpoint(target_id)
+    if ok:
+        logger.info(f"Default playback moved from '{current['name']}' to '{target['name']}' ({target_id}).")
+    else:
+        logger.warning(f"Default playback change to '{target['name']}' failed.")
+    return ok
 
 
 def get_audio_restore_exe() -> str:

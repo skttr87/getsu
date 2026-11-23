@@ -98,6 +98,10 @@ class SmartMicRouter:
         code, out = self._run_helper("--set-default-capture", guid)
         return (code == 0)
 
+    def set_default_capture(self, guid: str) -> bool:
+        """Public capture path for the cable guard: sets the default recording endpoint (the only mic setter used by it)."""
+        return self._set_capture_endpoint(guid)
+
     def get_current_default_mic(self) -> Tuple[Optional[str], str]:
         """
         Retrieves the active Windows default recording device.

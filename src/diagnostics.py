@@ -345,7 +345,12 @@ def save_report(dest_dir: str) -> str:
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     path = os.path.join(dest_dir, f"getsu-diagnostics-{stamp}.txt")
 
-    sections: List[str] = [f"Getsu diagnostics report, created {datetime.datetime.now().isoformat(timespec='seconds')}"]
+    try:
+        from src.config import APP_VERSION as version  # local import: config imports this module's logger
+    except Exception:
+        version = "unknown"
+    sections: List[str] = [f"Getsu {version} diagnostics report, created "
+                           f"{datetime.datetime.now().isoformat(timespec='seconds')}"]
     sections.append("== Device dump ==\n" + device_dump())
 
     try:

@@ -66,7 +66,7 @@ MIC_TEXT_W = CONTENT_W - 92        # name and sub line width in the card (tile, 
 MIC_LIST_TEXT_W = CONTENT_W - 88   # name and sub line width in the microphone list (icon, tick, gaps)
 SHEET_HEAD_H = 56    # logical px: panel title row with Done
 HELP_STEP_H = 64     # one help step: title, description and (step 3) the chip line
-HELP_BODY_H = 280    # help steps (3 x 64 + 3 x 12) and the Got it button
+HELP_BODY_H = 312    # help steps (3 x 64 + 3 x 12), Got it (48), 4 + 8 px gaps and the version line (about 18 px)
 SETTINGS_ROW_H = 80  # logical px: one settings row; a two-line detail with 14 px above and below
 SET_LABEL_W = 234    # label column of a settings row (the detail wraps inside it); 16 + 234 + 146 + 16 = 412
 SET_CTRL_W = 146     # control column of a settings row: slider, boost segments, switch

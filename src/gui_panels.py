@@ -3,6 +3,7 @@
 import dearpygui.dearpygui as dpg
 from src import ui_hit
 
+from src.config import APP_VERSION
 from src.gui_theme import (
     ACTION_H,
     COL_ACCENT,
@@ -11,6 +12,7 @@ from src.gui_theme import (
     COL_LINK_PRESSED,
     COL_TEXT,
     COL_TEXT_2,
+    COL_TEXT_3,
     COL_WARNING,
     CONTENT_W,
     FEATURE_LEARN_ROOM,
@@ -250,6 +252,14 @@ class PanelsMixin:
                     self._panel_targets.setdefault("help", {})["help_got_it"] = self._close_panels
                     dpg.bind_item_theme(dpg.last_item(), self.theme_start_btn)
                     dpg.bind_item_font(dpg.last_item(), self.font_btn)
+                    # Version line: the only place in the window that shows it (the tray hover text has it too).
+                    version_text = f"Getsu {APP_VERSION}"
+                    dpg.add_spacer(height=self.s(8))
+                    with dpg.group(horizontal=True):
+                        dpg.add_spacer(width=max(0, (width - self._text_w(version_text, self.font_footer)) // 2))
+                        dpg.add_text(version_text, tag="help_version", color=COL_TEXT_3)
+                        if self.font_footer:
+                            dpg.bind_item_font("help_version", self.font_footer)
 
     def _bind_list(self, tag: str):
         if self.theme_list and dpg.does_item_exist(tag):

@@ -80,9 +80,32 @@ class CheckForUpdatesTests(unittest.TestCase):
                 patch.object(autostart, "is_supported", return_value=False):
             gui_tray.TrayMixin._start_tray_icon(fake)
         texts = [getattr(entry, "text", None) for entry in menu.call_args[0]]
-        self.assertLess(texts.index("Start with Windows"), texts.index("Check for updates"))
-        self.assertLess(texts.index("Check for updates"), texts.index("Save diagnostics"))
+        from src.config import APP_VERSION
+        updates = f"Check for updates ({APP_VERSION})"
+        self.assertIn(updates, texts)
+        self.assertLess(texts.index("Start with Windows"), texts.index(updates))
+        self.assertLess(texts.index(updates), texts.index("Save diagnostics"))
         self.assertLess(texts.index("Save diagnostics"), texts.index("Exit"))
+
+    def test_tray_hover_text_has_the_version_and_state(self):
+        from src.config import APP_VERSION
+        self.assertEqual(gui_tray.tray_title(True), f"Getsu {APP_VERSION}: Noise cancellation on")
+        self.assertEqual(gui_tray.tray_title(False), f"Getsu {APP_VERSION}: Noise cancellation off")
+        self.assertLess(len(gui_tray.tray_title(False)), 128)  # Windows limit for a tray tooltip
+
+    def test_diagnostics_report_starts_with_the_version(self):
+        import tempfile
+        from src.config import APP_VERSION
+        with tempfile.TemporaryDirectory() as d, \
+                patch.object(diagnostics, "device_dump", return_value="(devices)"), \
+                patch.object(diagnostics, "usb_power_lines", return_value=[]):
+            try:
+                path = diagnostics.save_report(d)
+            except Exception as e:  # other sections may need real devices; the header is written first
+                self.skipTest(f"report needs devices here: {e}")
+            with open(path, encoding="utf-8") as f:
+                first = f.readline()
+        self.assertTrue(first.startswith(f"Getsu {APP_VERSION} diagnostics report"), first)
 
     def test_getsu_source_makes_no_network_connection(self):
         """The README promise: no module in src opens a network connection (no urllib, http, socket, requests)."""

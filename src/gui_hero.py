@@ -10,7 +10,10 @@ from src import ui_icons as icons
 from src.audio_errors import explain_start_error
 from src.gui_theme import (
     COL_ACCENT,
+    COL_ACCENT_HOVER,
+    COL_ACCENT_PRESSED,
     COL_CARD,
+    COL_CARD_HOVER,
     COL_FILL_2,
     COL_TEXT,
     COL_TEXT_2,
@@ -28,6 +31,27 @@ METER_BARS = 14
 METER_STEP = 7
 METER_BAR_W = 4
 METER_W = (METER_BARS - 1) * METER_STEP + METER_BAR_W  # 95
+
+# Power button hover, as in the approved mockup (.power:hover) and Apple controls: on hover the fill lightens one step
+# (no glow, no growth), eased over 0.2 s; while pressed it dims a little. No hover while starting or stopping.
+POWER_HOVER_S = 0.2
+POWER_GLYPH_OFF = (142, 142, 147)
+POWER_GLYPH_OFF_HOVER = COL_TEXT_2
+POWER_OFF_PRESSED = (36, 36, 38)
+
+
+def _mix(a, b, t: float):
+    """Colour between a (t = 0) and b (t = 1), channel by channel."""
+    return tuple(int(round(x + (y - x) * t)) for x, y in zip(a[:3], b[:3]))
+
+
+def power_colors(running: bool, hover: float, pressed: bool):
+    """(fill, glyph) of the power button for the state, hover amount 0..1 and the pressed flag."""
+    if running:
+        fill = COL_ACCENT_PRESSED if pressed else _mix(COL_ACCENT, COL_ACCENT_HOVER, hover)
+        return fill, COL_WHITE
+    fill = POWER_OFF_PRESSED if pressed else _mix(COL_CARD, COL_CARD_HOVER, hover)
+    return fill, _mix(POWER_GLYPH_OFF, POWER_GLYPH_OFF_HOVER, hover)
 
 
 class HeroMixin:
@@ -67,10 +91,10 @@ class HeroMixin:
         dpg.delete_item(dl, children_only=True)
         size = self.s(POWER_D)
         c = size / 2.0
-        if self.is_running:
-            fill, glyph = COL_ACCENT, COL_WHITE
-        else:
-            fill, glyph = COL_CARD, (142, 142, 147)
+        busy = self._busy is not None
+        hover = 0.0 if busy else getattr(self, "_power_hover", 0.0)
+        pressed = (not busy) and getattr(self, "_power_pressed", False)
+        fill, glyph = power_colors(self.is_running, hover, pressed)
         dpg.draw_circle((c, c), c, color=fill, fill=fill, parent=dl)
         if not self.is_running and self._busy is None:
             dpg.draw_circle((c, c), c - 0.5, color=(84, 84, 88, 255), thickness=1.0, parent=dl)
@@ -125,6 +149,37 @@ class HeroMixin:
         self._set_sub(sub_text, sub_color, dot_on=self.is_running)
         self._draw_power()
 
+    def _power_is_hovered(self, point) -> bool:
+        """Pointer over the round power button (inside the circle, not the square corners) and the button usable."""
+        if self._busy is not None or self._open_panel_name or self._card_visible():
+            return False
+        rect = self._leaf_rect("power_drawlist")
+        if rect is None:
+            return False
+        (x0, y0), (x1, y1) = rect
+        r = (x1 - x0) / 2.0
+        dx, dy = point[0] - (x0 + r), point[1] - (y0 + r)
+        return dx * dx + dy * dy <= r * r
+
+    def _update_power_hover(self, now: float):
+        """Per frame: eases the hover amount toward 0 or 1 over POWER_HOVER_S and redraws the button only when it changed."""
+        last = getattr(self, "_power_anim_t", None)
+        self._power_anim_t = now
+        # At most one frame of progress per call (20 fps), so the first frame or a frame after the window was hidden
+        # does not jump straight to the end of the ease.
+        dt = min(max(0.0, now - last), 0.05) if last is not None else 0.05
+        hovered = self._power_is_hovered(dpg.get_mouse_pos(local=False))
+        pressed = hovered and dpg.is_mouse_button_down(dpg.mvMouseButton_Left)
+        target = 1.0 if hovered else 0.0
+        current = getattr(self, "_power_hover", 0.0)
+        if current != target:
+            step = max(0.0, dt) / POWER_HOVER_S
+            current = min(target, current + step) if target > current else max(target, current - step)
+        if current != getattr(self, "_power_hover", 0.0) or pressed != getattr(self, "_power_pressed", False):
+            self._power_hover = current
+            self._power_pressed = pressed
+            self._draw_power()
+
     def _on_power_click(self):
         """Clicking the power button does what START / STOP did: toggle_stream keeps the 3 s lock."""
         self.toggle_stream()
@@ -159,6 +214,7 @@ class HeroMixin:
         self._tick_controls()
         self._poll_setup_card()
         now = time.monotonic()
+        self._update_power_hover(now)
         if now - self._last_meter_t < 0.05:
             return
         self._last_meter_t = now

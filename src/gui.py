@@ -196,6 +196,9 @@ class GetsuGUI(
         self._vt_active = False
         self._vt_progress = 0.0
         self._meter_phase = 0.0
+        self._power_hover = 0.0       # power button hover amount 0..1, eased (see HeroMixin._update_power_hover)
+        self._power_pressed = False
+        self._power_anim_t = None
         self._meter_level = 0.0
         self._meter_flat = True
         self._last_meter_t = 0.0

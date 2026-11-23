@@ -939,6 +939,140 @@ def set_default_playback_away_from_cable(target_id: str) -> bool:
     return ok
 
 
+# --- VB-CABLE format (owner decision 2026-11-24): the only code that sets a device format -------------------------
+# IPolicyConfig vtable (Windows 7 and later): 4 GetDeviceFormat, 6 SetDeviceFormat, 13 SetDefaultEndpoint (used above).
+_VT_GET_DEVICE_FORMAT = 4
+_VT_SET_DEVICE_FORMAT = 6
+WAVE_FORMAT_EXTENSIBLE = 0xFFFE
+_KS_GUID_TAIL = (0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71)
+KSDATAFORMAT_SUBTYPE_PCM = GUID(0x00000001, 0x0000, 0x0010, (wintypes.BYTE * 8)(*_KS_GUID_TAIL))
+KSDATAFORMAT_SUBTYPE_IEEE_FLOAT = GUID(0x00000003, 0x0000, 0x0010, (wintypes.BYTE * 8)(*_KS_GUID_TAIL))
+SPEAKER_FRONT_LEFT_RIGHT = 0x3
+
+
+class WAVEFORMATEX(ctypes.Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("wFormatTag", wintypes.WORD), ("nChannels", wintypes.WORD), ("nSamplesPerSec", wintypes.DWORD),
+        ("nAvgBytesPerSec", wintypes.DWORD), ("nBlockAlign", wintypes.WORD), ("wBitsPerSample", wintypes.WORD),
+        ("cbSize", wintypes.WORD),
+    ]
+
+
+class WAVEFORMATEXTENSIBLE(ctypes.Structure):
+    _pack_ = 1
+    _fields_ = [("Format", WAVEFORMATEX), ("wValidBitsPerSample", wintypes.WORD), ("dwChannelMask", wintypes.DWORD),
+                ("SubFormat", GUID)]
+
+
+def make_wave_format(rate: int, channels: int, bits: int, is_float: bool) -> WAVEFORMATEXTENSIBLE:
+    """WAVEFORMATEXTENSIBLE for a PCM (endpoint) or float (shared-mode mix) format."""
+    w = WAVEFORMATEXTENSIBLE()
+    f = w.Format
+    f.wFormatTag = WAVE_FORMAT_EXTENSIBLE
+    f.nChannels = channels
+    f.nSamplesPerSec = rate
+    f.wBitsPerSample = bits
+    f.nBlockAlign = channels * bits // 8
+    f.nAvgBytesPerSec = rate * f.nBlockAlign
+    f.cbSize = ctypes.sizeof(WAVEFORMATEXTENSIBLE) - ctypes.sizeof(WAVEFORMATEX)  # 22
+    w.wValidBitsPerSample = bits
+    w.dwChannelMask = SPEAKER_FRONT_LEFT_RIGHT if channels == 2 else 0
+    w.SubFormat = KSDATAFORMAT_SUBTYPE_IEEE_FLOAT if is_float else KSDATAFORMAT_SUBTYPE_PCM
+    return w
+
+
+def _policy_config_supported() -> bool:
+    try:
+        v = sys.getwindowsversion()
+        return v.major >= 10 and v.build >= 18362
+    except Exception:
+        return False
+
+
+def _with_policy_config(action):
+    """Runs action(pPolicy, vtable) on a fresh IPolicyConfig and releases it. Returns None when COM is unavailable."""
+    if sys.platform != 'win32' or not ole32 or not _policy_config_supported():
+        return None
+    pPolicy = None
+    try:
+        _safe_co_initialize()
+        pPolicy = ctypes.c_void_p()
+        hr = ole32.CoCreateInstance(ctypes.byref(CLSID_PolicyConfigClient), None, 1 | 2 | 4,
+                                    ctypes.byref(IID_IPolicyConfig), ctypes.byref(pPolicy))
+        if hr != 0 or not pPolicy:
+            return None
+        vtable = ctypes.cast(ctypes.cast(pPolicy, ctypes.POINTER(ctypes.c_void_p)).contents, ctypes.POINTER(ctypes.c_void_p))
+        return action(pPolicy, vtable)
+    finally:
+        _release_com_ptr(pPolicy)
+
+
+def native_get_endpoint_format(endpoint_id: str) -> Optional[Tuple[int, int, int]]:
+    """(sample rate, channels, bits) of an endpoint's shared-mode format as Windows stores it, or None. Read-only."""
+    if not endpoint_id or not ENDPOINT_GUID_PATTERN.match(endpoint_id.strip()):
+        return None
+
+    def action(pPolicy, vtable):
+        get_fmt = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, wintypes.LPCWSTR, ctypes.c_int,
+                                     ctypes.POINTER(ctypes.c_void_p))(vtable[_VT_GET_DEVICE_FORMAT])
+        p_fmt = ctypes.c_void_p()
+        if get_fmt(pPolicy, endpoint_id.strip(), 0, ctypes.byref(p_fmt)) != 0 or not p_fmt:
+            return None
+        try:
+            f = ctypes.cast(p_fmt, ctypes.POINTER(WAVEFORMATEX)).contents
+            return int(f.nSamplesPerSec), int(f.nChannels), int(f.wBitsPerSample)
+        finally:
+            ole32.CoTaskMemFree(p_fmt)
+
+    try:
+        return _with_policy_config(action)
+    except (Exception, OSError) as e:
+        logger.warning(f"Reading the format of {endpoint_id} failed: {e}")
+        return None
+
+
+def set_getsu_cable_format(endpoint_id: str, rate: int = 48000) -> bool:
+    """
+    The only function in src that sets a device format. It sets 2 channel, 16 bit, <rate> Hz on one endpoint of the
+    VB-CABLE that Getsu installs (CABLE Input or CABLE Output) and refuses any other device. Returns True when Windows
+    reports the new rate afterwards. Fails (for example while another app uses the cable) without side effects.
+    """
+    from src.devices import is_getsu_cable_endpoint
+
+    if not endpoint_id or not ENDPOINT_GUID_PATTERN.match(endpoint_id.strip()):
+        logger.warning(f"Cable format not changed: '{endpoint_id}' is not an endpoint ID.")
+        return False
+    endpoint_id = endpoint_id.strip()
+    active = native_list_active_endpoints(is_input=True) + native_list_active_endpoints(is_input=False)
+    target = next((e for e in active if e["id"] == endpoint_id), None)
+    if target is None or not is_getsu_cable_endpoint(target["name"]):
+        logger.warning(f"Cable format not changed: {endpoint_id} is not an active VB-CABLE endpoint of Getsu.")
+        return False
+
+    endpoint_fmt = make_wave_format(rate, 2, 16, is_float=False)
+    mix_fmt = make_wave_format(rate, 2, 32, is_float=True)
+
+    def action(pPolicy, vtable):
+        set_fmt = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, wintypes.LPCWSTR, ctypes.c_void_p,
+                                     ctypes.c_void_p)(vtable[_VT_SET_DEVICE_FORMAT])
+        return set_fmt(pPolicy, endpoint_id, ctypes.addressof(endpoint_fmt), ctypes.addressof(mix_fmt))
+
+    try:
+        hr = _with_policy_config(action)
+    except (Exception, OSError) as e:
+        logger.warning(f"Setting the format of '{target['name']}' failed: {e}")
+        return False
+    after = native_get_endpoint_format(endpoint_id)
+    ok = hr == 0 and after is not None and after[0] == rate
+    if ok:
+        logger.info(f"[CABLE FORMAT] '{target['name']}' set to 2 ch, 16 bit, {rate} Hz.")
+    else:
+        hr_text = "none" if hr is None else hex(hr & 0xffffffff)
+        logger.warning(f"[CABLE FORMAT] '{target['name']}' not changed (hr {hr_text}, now {after}).")
+    return ok
+
+
 def get_audio_restore_exe() -> str:
     """Locates the bundled native AudioRestore.exe helper."""
     if getattr(sys, 'frozen', False):

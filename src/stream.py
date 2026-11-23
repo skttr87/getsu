@@ -199,6 +199,16 @@ class AudioEngine:
             return
         if cable_in.get("index") != self.output_device:
             return
+        # Existing installs: set the cable to 48 kHz before the stream opens (the cable is not in use by Getsu yet).
+        # PortAudio keeps the old rate until it is re-initialised, so the check below may still report the old rate
+        # for this start; the log line from cable_format says whether the change worked.
+        try:
+            from src.cable_format import ensure_cable_48k
+            results = ensure_cable_48k()
+            if results and all(state in ("ok", "set") for state in results.values()):
+                return
+        except Exception as e:
+            log_info(f"[ENGINE] Cable format check failed: {e}")
         for dev in (cable_in, cable_out):
             try:
                 rate = int(round(float(sd.query_devices(dev["index"])["default_samplerate"])))

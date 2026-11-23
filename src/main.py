@@ -12,11 +12,17 @@ import argparse
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # Fast Single-Instance Micro-Checker (exits in <5ms if Getsu is already running)
-if not any(arg in sys.argv for arg in ("--check-devices", "--install-driver", "-h", "--help", "--cli", "--clean", "--batch")):
+if not any(arg in sys.argv for arg in ("--check-devices", "--install-driver", "--set-cable-format", "-h", "--help",
+                                       "--cli", "--clean", "--batch")):
     from src.single_instance import activate_existing_instance
     # A --minimized launch (Start with Windows) still exits when Getsu is running, but must not raise its window.
     if activate_existing_instance(restore="--minimized" not in sys.argv):
         sys.exit(0)
+
+# Run by the installer after it installs VB-CABLE: set the cable to 48 kHz and exit (no window, no tray).
+if "--set-cable-format" in sys.argv:
+    from src.cable_format import main_cli as cable_format_main
+    sys.exit(cable_format_main())
 
 # Direct delegate to Headless CLI Cleaner if invoked with --clean or --batch
 if any(arg in sys.argv for arg in ("--clean", "--batch")):
@@ -42,6 +48,7 @@ def parse_args():
     parser.add_argument("--check-devices", action="store_true", help="Print audio device diagnostics and exit")
     parser.add_argument("--install-driver", action="store_true", help="Install bundled VB-Audio Virtual Cable driver")
     parser.add_argument("--minimized", action="store_true", help="Start hidden in the system tray (used by Start with Windows)")
+    parser.add_argument("--set-cable-format", action="store_true", help="Set Getsu's VB-CABLE to 48 kHz and exit (used by the installer)")
     return parser.parse_args()
 
 

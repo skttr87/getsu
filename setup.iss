@@ -446,6 +446,9 @@ begin
         Exec(AudioRestoreExe, '--restore-capture "' + BackupCaptureFile + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
         Exec(AudioRestoreExe, '--ensure-physical-capture', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
       end;
+
+      // 4. Set the new cable to 2 ch, 16 bit, 48 kHz (Getsu's processing rate). Exits without a window.
+      Exec(ExpandConstant('{app}\{#MyAppExeName}'), '--set-cable-format', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     end
     else
     begin

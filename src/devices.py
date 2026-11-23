@@ -759,6 +759,12 @@ def install_vbcable_driver() -> bool:
                 subprocess.run([restore_exe, "--ensure-physical-capture"], creationflags=0x08000000, timeout=5)
             except Exception:
                 pass
+        # 3. The new cable at 48 kHz (owner decision 2026-11-24). A failure here does not fail the install.
+        try:
+            from src.cable_format import ensure_cable_48k
+            ensure_cable_48k(wait_s=10.0)
+        except Exception as e:
+            print(f"[INSTALL] Could not set the cable format: {e}")
         return True
     except Exception as e:
         print(f"[ERROR] Failed to launch installer: {e}")

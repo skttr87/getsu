@@ -183,6 +183,9 @@ class PanelsMixin:
                 dpg.add_text(label, tag=f"{tag}_label", color=COL_ACCENT)
                 if font:
                     dpg.bind_item_font(f"{tag}_label", font)
+        # The child window sits inside the sheet, so its own position is relative to the sheet, not the viewport.
+        # Measure the control by its text item instead, which reports a viewport rectangle (see _item_rect).
+        self._hit_parts[tag] = [f"{tag}_label"]
         self._panel_targets.setdefault(panel, {})[tag] = callback
         self._text_links[tag] = {"panel": panel, "label": f"{tag}_label", "state": None}
 

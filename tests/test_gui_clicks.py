@@ -242,6 +242,21 @@ class GuiClickPathTests(unittest.TestCase):
         self._click_rect(rect)
         self.assertIsNone(app._open_panel_name)
 
+    def test_done_hit_area_is_where_the_word_is_drawn(self):
+        """The click rectangle must come from the rendered text, not from the child window's sheet-relative position."""
+        app = self.app
+        for name in ("settings", "mics"):
+            self._open(name)
+            label = f"sheet_done_{name}_label"
+            drawn = (tuple(dpg.get_item_rect_min(label)), tuple(dpg.get_item_rect_max(label)))
+            rect = app._item_rect(f"sheet_done_{name}")
+            self.assertIsNotNone(rect, name)
+            cx, cy = _center(drawn)
+            self.assertTrue(rect[0][0] <= cx <= rect[1][0] and rect[0][1] <= cy <= rect[1][1], (name, rect, drawn))
+            sheet = app._item_rect(f"sheet_{name}")
+            self.assertGreaterEqual(rect[0][1], sheet[0][1], name)
+            app._close_panels()
+
     def test_done_hover_changes_only_the_text_colour(self):
         app = self.app
         self._open("settings")

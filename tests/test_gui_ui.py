@@ -97,7 +97,7 @@ class AppIconFileTests(unittest.TestCase):
             self.assertEqual(img.size, (256, 256))
 
     def test_runtime_does_not_regenerate_icon_from_png(self):
-        with patch("src.gui.Image") as image_module:
+        with patch("src.gui_tray.Image") as image_module:
             gui.ensure_app_icon_ico()
         image_module.open.assert_not_called()
         image_module.open.return_value.save.assert_not_called()

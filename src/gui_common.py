@@ -24,5 +24,4 @@ else:
     APP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 ICON_PNG_PATH = os.path.join(APP_DIR, "getsu-icon.png")
-
 ICON_ICO_PATH = os.path.join(APP_DIR, "getsu.ico")

@@ -94,7 +94,12 @@ class TestV131BluetoothJitterAdaptation(unittest.TestCase):
              'default_samplerate': 48000.0},
         ]
         hostapis = [{'name': 'Windows WASAPI', 'default_input_device': 0, 'default_output_device': 1}]
-        bus_patch = lambda dev, is_input=True: bus_for_input if is_input else DeviceBusType.USB
+
+        # Answers like Windows does: only a real endpoint NAME is known; a PortAudio index such as "0" is not.
+        def bus_patch(dev, is_input=True):
+            if not is_input:
+                return DeviceBusType.USB
+            return bus_for_input if dev == device_name else DeviceBusType.UNKNOWN
         with patch("src.router.native_get_device_bus_type", side_effect=bus_patch), \
                 patch("src.win_audio.native_get_device_bus_type", side_effect=bus_patch), \
                 patch("sounddevice.query_devices", side_effect=lambda i=None, *a, **k: devices if i is None else devices[i]), \

@@ -595,7 +595,9 @@ class AudioEngine:
             try:
                 from src.router import native_get_device_bus_type, DeviceBusType
                 in_dev_name = in_dev_info.get('name', '') if isinstance(in_dev_info, dict) else ''
-                in_bus = native_get_device_bus_type(str(self.input_device) if self.input_device is not None else in_dev_name, is_input=True)
+                # Look the endpoint up by its NAME: Windows has no endpoint called "20", so a PortAudio index never
+                # matches and Bluetooth was never detected here (the microphone card uses the name and was right).
+                in_bus = native_get_device_bus_type(in_dev_name or self.input_name or "", is_input=True)
                 is_bluetooth = (in_bus == DeviceBusType.BLUETOOTH_HFP)
             except Exception:
                 is_bluetooth = False

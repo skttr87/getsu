@@ -455,7 +455,7 @@ def _windows_default_input(inputs: List[Dict]) -> Optional[Dict]:
     return None
 
 
-def auto_select_input_device() -> Dict:
+def auto_select_input_device(candidates: Optional[List[Dict]] = None) -> Dict:
     """
     Select best input microphone (virtual devices are never selected):
     1. USB headset or wired headset (device enumeration order)
@@ -465,8 +465,10 @@ def auto_select_input_device() -> Dict:
     4. Bluetooth headset
     5. Built-in microphone
     6. Other input, then the first input
+
+    candidates, when given, is the list to rank (for example the headsets that just appeared); the same rules apply.
     """
-    inputs = get_input_devices()
+    inputs = list(candidates) if candidates is not None else get_input_devices()
     if not inputs:
         all_in = [d for d in get_all_devices() if d['inputs'] > 0]
         return all_in[0] if all_in else {'index': 0, 'name': 'Default Mic'}

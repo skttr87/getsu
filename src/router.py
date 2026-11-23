@@ -221,6 +221,31 @@ class SmartMicRouter:
             logger.info(f"Microphone restore executed. Success={success}")
             return bool(success)
 
+    def reassert_cable_default(self) -> Optional[str]:
+        """
+        While swapped, Windows may move the default capture to another endpoint (a newly plugged headset, for
+        example). swap_to_cable() returns at once when already swapped, so nothing else would put CABLE Output back.
+        This takes the endpoint Windows picked as the new physical microphone (original_mic_id) and sets CABLE Output
+        as the default again. Returns the new physical GUID, or None when nothing had to change.
+        """
+        with self._lock:
+            if not self.is_swapped or not self.config.get("auto_route", True):
+                return None
+            cable_guid = self.get_cable_capture_guid()
+            current_guid, current_name = self.get_current_default_mic()
+            if not cable_guid or not current_guid:
+                return None
+            if current_guid.lower() == cable_guid.lower() or "cable" in current_name.lower():
+                return None
+            logger.info(f"Default microphone moved to {current_name} while swapped; setting CABLE Output back.")
+            self.original_mic_id = current_guid
+            self.config["original_mic_id"] = current_guid
+            save_config(self.config)
+            if not self._set_capture_endpoint(cable_guid):
+                logger.warning("Could not set CABLE Output back as the default capture endpoint.")
+                return None
+            return current_guid
+
     def audit_crash_recovery(self) -> bool:
         """
         Audits config on startup to recover if Getsu crashed while swapped.

@@ -227,6 +227,9 @@ class GetsuGUI(
         self._cable_guard = CableGuard(self._cable_guard_gather, self._cable_guard_apply, self._cable_guard_notify)
 
         self._refresh_devices()
+        # Audio endpoints as Windows lists them now; a later device event is compared with this (see gui_devices).
+        self._endpoint_state = self._endpoint_snapshot()
+        self._pending_headset: Optional[str] = None  # raw name of a headset that did not open yet (retried on the next event)
 
         # Windows may have picked the cable as default at startup (after a headset was unplugged while Getsu was closed).
         self._cable_guard.request("startup", delay=1.0)

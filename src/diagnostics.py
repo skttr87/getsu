@@ -38,6 +38,36 @@ def app_data_dir() -> str:
     return os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "Getsu")
 
 
+# Known folder id of the Desktop (FOLDERID_Desktop).
+_FOLDERID_DESKTOP = "B4BFCC3A-DB2C-424C-B029-7FE99A87C641"
+
+
+def desktop_dir() -> str:
+    """
+    The user's Desktop folder as Windows reports it (follows a Desktop moved or redirected to OneDrive).
+    Falls back to %USERPROFILE%\\Desktop when the shell cannot tell.
+    """
+    fallback = os.path.join(os.path.expanduser("~"), "Desktop")
+    if os.name != "nt":
+        return fallback
+    try:
+        import ctypes
+        import uuid
+
+        class _Guid(ctypes.Structure):
+            _fields_ = [("Data1", ctypes.c_ulong), ("Data2", ctypes.c_ushort), ("Data3", ctypes.c_ushort),
+                        ("Data4", ctypes.c_ubyte * 8)]
+
+        guid = _Guid.from_buffer_copy(uuid.UUID(_FOLDERID_DESKTOP).bytes_le)
+        raw = ctypes.c_wchar_p()
+        hr = ctypes.windll.shell32.SHGetKnownFolderPath(ctypes.byref(guid), 0, None, ctypes.byref(raw))
+        if hr == 0 and raw.value:
+            return raw.value
+    except Exception:
+        pass
+    return fallback
+
+
 def log_path() -> str:
     return os.path.join(app_data_dir(), LOG_FILE_NAME)
 

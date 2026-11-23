@@ -1,15 +1,17 @@
 """Notification area (tray) icon, its menu, and the tray icon images."""
 
 import os
+import subprocess
 import threading
 
 import dearpygui.dearpygui as dpg
 from PIL import Image, ImageDraw
 import pystray
 from pystray import MenuItem as item, Menu
-from src import win_theme, autostart
+from src import win_theme, autostart, diagnostics
 
 from src.gui_common import ICON_ICO_PATH, ICON_PNG_PATH
+from src.gui_theme import COL_ERROR, COL_TEXT_2
 from src.gui_win32 import force_foreground_window
 
 
@@ -87,6 +89,24 @@ class TrayMixin:
         except OSError as e:
             print(f"[AUTOSTART] Could not change the Windows startup entry: {e}")
 
+    def save_diagnostics_report(self):
+        """
+        Tray action "Save diagnostics": writes the report to the Desktop, then selects the file in Explorer.
+        Runs on its own thread (the device reads take a moment); the status line is set through the UI queue.
+        """
+        try:
+            path = diagnostics.save_report(diagnostics.desktop_dir())
+        except Exception as e:
+            print(f"[DIAG] Could not save the diagnostics report: {e}")
+            self.set_status_pill(f"Could not save diagnostics: {e}", COL_ERROR)
+            return
+        print(f"[DIAG] Diagnostics saved: {path}")
+        try:
+            subprocess.Popen(f'explorer.exe /select,"{path}"')
+        except OSError as e:
+            print(f"[DIAG] Could not open Explorer: {e}")
+        self.set_status_pill("Diagnostics saved to your Desktop", COL_TEXT_2)
+
     def _start_tray_icon(self):
         """Starts system tray icon in background thread."""
         def on_open(icon, item):
@@ -94,6 +114,9 @@ class TrayMixin:
 
         def on_toggle(icon, item):
             self.toggle_stream()
+
+        def on_save_diagnostics(icon, item):
+            threading.Thread(target=self.save_diagnostics_report, daemon=True).start()
 
         def on_exit(icon, item):
             print("[APP] Exiting Getsu...")
@@ -110,6 +133,7 @@ class TrayMixin:
             item("Open Getsu", on_open, default=True),
             item("Toggle Start / Stop", on_toggle),
             autostart_item,
+            item("Save diagnostics", on_save_diagnostics),
             pystray.Menu.SEPARATOR,
             item("Exit", on_exit),
         )

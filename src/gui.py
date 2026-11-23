@@ -8,9 +8,9 @@ Features:
 - Auto-selects Windows default microphone on startup
 - Integrated VB-Cable detection with 1-click silent install
 """
+
 import os
 import sys
-import re
 import math
 import threading
 import time
@@ -18,16 +18,19 @@ import signal
 import ctypes
 from ctypes import wintypes
 from typing import List, Dict, Optional, Sequence
+import webbrowser
 
 import dearpygui.dearpygui as dpg
 import sounddevice as sd
 from PIL import Image, ImageDraw
 import pystray
 from pystray import MenuItem as item, Menu
-import webbrowser
-
 import numpy as np
+from src import ui_icons as icons, ui_hit, win_theme, autostart, ui_type
 
+from src.audio_errors import explain_start_error
+from src.config import load_config, save_config
+from src.device_labels import split_name, subtitle
 from src.devices import (
     get_input_devices,
     auto_select_input_device,
@@ -37,18 +40,9 @@ from src.devices import (
     install_vbcable_driver,
     is_laptop_microphone,
     find_matching_cable_input,
+    classify_device,
+    DeviceKind,
 )
-from src.config import load_config, save_config
-from src.stream import AudioEngine, create_engine_from_config
-from src.router import SmartMicRouter, clear_device_bus_type_cache
-from src.devices import classify_device, DeviceKind
-from src.device_labels import split_name, subtitle
-from src import ui_icons as icons
-from src import ui_hit
-from src import win_theme
-from src import autostart
-from src import ui_type
-from src.rnnoise import RNNoise, FRAME_SIZE, SAMPLE_RATE
 from src.dsp import (
     HighPassFilter,
     AdaptiveNoiseGate,
@@ -57,106 +51,115 @@ from src.dsp import (
     process_mono_frame,
     InputDownmixer,
 )
-from src.host_api_resolver import resolve_single, selection_hint
-from src.audio_errors import explain_start_error
 from src.frame_pacing import frame_sleep_s
+from src.gui_common import APP_DIR, ICON_ICO_PATH, ICON_PNG_PATH, clean_device_label
+from src.gui_theme import (
+    ACTION_H,
+    BOOST_DBS,
+    COL_ACCENT,
+    COL_ACCENT_HOVER,
+    COL_ACCENT_PRESSED,
+    COL_ACCENT_SOFT,
+    COL_ACCENT_SOFT_2,
+    COL_CARD,
+    COL_CARD_HOVER,
+    COL_ERROR,
+    COL_FILL,
+    COL_FILL_2,
+    COL_FILL_3,
+    COL_SEPARATOR,
+    COL_TEXT,
+    COL_TEXT_2,
+    COL_TEXT_3,
+    COL_WARNING,
+    COL_WHITE,
+    COL_WINDOW,
+    CONTENT_PAD,
+    CONTENT_W,
+    FEATURE_EARBUD_HINT,
+    FEATURE_LEARN_ROOM,
+    FEATURE_MODES,
+    HELP_BODY_H,
+    HELP_STEP_H,
+    HERO_H,
+    HERO_TOP,
+    MIC_LIST_TEXT_W,
+    MIC_ROW_H,
+    MIC_TEXT_W,
+    MODE_DESCRIPTIONS,
+    MODE_NAMES,
+    POWER_D,
+    SETTINGS_ROW_H,
+    SETUP_BODY_INSTALLING,
+    SETUP_BODY_OFFER,
+    SET_CTRL_W,
+    SET_LABEL_W,
+    SHEET_HEAD_H,
+    TITLE_BORDER_COLOR,
+    TITLE_CAPTION_COLOR,
+    TITLE_TEXT_COLOR,
+    TYPE_BODY,
+    TYPE_BUTTON,
+    TYPE_FOOTER,
+    TYPE_ROW,
+    TYPE_SMALL,
+    TYPE_STATE,
+    TYPE_SUB,
+    TYPE_TITLE,
+    VAD_MAX,
+    VAD_MIN,
+    WINDOW_W,
+)
+from src.host_api_resolver import resolve_single, selection_hint
+from src.rnnoise import RNNoise, FRAME_SIZE, SAMPLE_RATE
+from src.router import SmartMicRouter, clear_device_bus_type_cache
+from src.stream import AudioEngine, create_engine_from_config
 
 
 # Win32 Constants for System Tray Minimize/Close hook
 user32 = ctypes.windll.user32
+
 WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_longlong, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+
 GWLP_WNDPROC = -4
+
 GWL_STYLE = -16
+
 WM_CLOSE = 0x0010
+
 WM_SYSCOMMAND = 0x0112
+
 SC_MINIMIZE = 0xF020
+
 SC_MAXIMIZE = 0xF030
+
 SW_HIDE = 0
+
 SW_RESTORE = 9
+
 WS_MAXIMIZEBOX = 0x00010000
+
 WS_THICKFRAME = 0x00040000
+
 SWP_FRAMECHANGED = 0x0020
+
 SWP_NOMOVE = 0x0002
+
 SWP_NOSIZE = 0x0001
+
 SWP_NOZORDER = 0x0004
 
 user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
+
 user32.SetWindowLongPtrW.restype = ctypes.c_void_p
+
 user32.CallWindowProcW.argtypes = [ctypes.c_void_p, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+
 user32.CallWindowProcW.restype = ctypes.c_longlong
+
 user32.IsWindowVisible.argtypes = [wintypes.HWND]
+
 user32.IsIconic.argtypes = [wintypes.HWND]
-
-
-# Palette from the approved mockup (opt/mockup/a-focus.html, CSS variables). Dark theme only.
-# One accent colour (Apple system blue) marks every on, selected or primary state.
-# Red is reserved for errors and orange for warnings. No green, no glow.
-COL_WINDOW = (28, 28, 30)           # --win
-COL_CARD = (44, 44, 46)             # --card
-COL_CARD_HOVER = (58, 58, 60)       # --card-hi
-COL_SEPARATOR = (84, 84, 88, 140)   # --sep (55 % opacity)
-COL_TEXT = (245, 245, 247)          # --text
-COL_TEXT_2 = (161, 161, 166)        # --text2
-COL_TEXT_3 = (110, 110, 115)        # --text3
-COL_FILL = (118, 118, 128, 61)      # --fill (24 %)
-COL_FILL_2 = (118, 118, 128, 92)    # --fill2 (36 %)
-COL_FILL_3 = (118, 118, 128, 112)   # --fill3 (44 %)
-COL_ACCENT = (10, 132, 255)         # --accent
-COL_ACCENT_HOVER = (47, 150, 255)   # --accent-hi
-COL_ACCENT_PRESSED = (8, 104, 210)
-COL_ACCENT_SOFT = (10, 132, 255, 46)     # --accent-soft (18 %)
-COL_ACCENT_SOFT_2 = (10, 132, 255, 71)   # --accent-soft2 (28 %)
-COL_WARNING = (255, 159, 10)        # --orange
-COL_ERROR = (255, 69, 58)           # --red
-COL_WHITE = (255, 255, 255)
-
-# Windows 11 DWM title bar. COLORREF is 0x00BBGGRR: caption #1C1C1E, text #A1A1A6, border #2C2C2E.
-TITLE_CAPTION_COLOR = 0x001E1C1C
-TITLE_TEXT_COLOR = 0x00A6A1A1
-TITLE_BORDER_COLOR = 0x002E2C2C
-
-# Type scale in CSS px, the design size of the mockup. build_ui converts each step with ui_type.font_px(),
-# which applies the bundled font's line-height factor and the monitor DPI scale (DearPyGui sizes fonts by
-# line height, see ui_type). Steam-like proportions at 125 %: capitals of row labels about 13 px tall.
-TYPE_STATE = 20     # state title ("Noise cancellation on"), SemiBold
-TYPE_TITLE = 18     # panel titles and the first-run card title, SemiBold
-TYPE_ROW = 15       # microphone name in the card and in the list, SemiBold
-TYPE_BODY = 15      # body text and settings labels
-TYPE_BUTTON = 15    # buttons, SemiBold
-TYPE_SUB = 13       # secondary and sub text, segmented labels (SemiBold)
-TYPE_FOOTER = 13    # footer line
-TYPE_SMALL = 12     # small labels (help step numbers)
-
-# Window geometry (logical pixels, scaled with self.s()): 420 px wide, 24 px side gutters.
-WINDOW_W = 460       # widened from 420: hero notices up to 382 px wide and the microphone name column need it
-CONTENT_PAD = 24
-CONTENT_W = WINDOW_W - 2 * CONTENT_PAD  # 412 px between the gutters
-POWER_D = 96         # power button diameter (was 104: the text carries more weight next to it)
-HERO_TOP = 24        # space above the power button
-HERO_H = 217         # logical px: hero block and first-run card share this slot. The hero content (power button,
-                     # state, sub line, meter) measures 217 px with the text line boxes, so the meter is not clipped
-ACTION_H = 48        # action buttons (Hear myself, Show settings, Install cable, Not now, Got it)
-MIC_ROW_H = 68       # microphone row in the card and rows of the microphone list (name + sub line, 16 px padding)
-MIC_TEXT_W = CONTENT_W - 92        # name and sub line width in the card (tile, gaps, chevron, right padding)
-MIC_LIST_TEXT_W = CONTENT_W - 88   # name and sub line width in the microphone list (icon, tick, gaps)
-SHEET_HEAD_H = 56    # logical px: panel title row with Done
-HELP_STEP_H = 64     # one help step: title, description and (step 3) the chip line
-HELP_BODY_H = 280    # help steps (3 x 64 + 3 x 12) and the Got it button
-SETTINGS_ROW_H = 80  # logical px: one settings row; a two-line detail with 14 px above and below
-SET_LABEL_W = 234    # label column of a settings row (the detail wraps inside it); 16 + 234 + 146 + 16 = 412
-SET_CTRL_W = 146     # control column of a settings row: slider, boost segments, switch
-VAD_MIN, VAD_MAX = 0.40, 0.90  # Sensitivity range (vad_threshold)
-BOOST_DBS = (0, 5, 10, 15)     # mic boost segments, left to right
-
-# First-run card copy (mockup "First run" and "Installing cable" screens).
-SETUP_BODY_OFFER = ("Getsu needs a free virtual audio cable to send your clean voice to Discord, Zoom and games. "
-                    "It takes about a minute.")
-SETUP_BODY_INSTALLING = "Windows may ask for permission. Click Yes. This window updates by itself."
-
-# Features whose backend lands in a later task. Their controls are built but hidden.
-FEATURE_MODES = False          # Game / Meeting / Session / Music segments (backend: M2.4)
-FEATURE_EARBUD_HINT = False    # "Earbud mic drops audio to call quality." (earbud work: M5.x)
-FEATURE_LEARN_ROOM = False     # "Learn my room" row in Settings (backend: M2.3)
 
 # Icon shape for each device kind: bt = earbuds, headset, builtin = laptop, mic = microphone.
 # The kind comes from devices.classify_device(); usb_mic uses the microphone, wired headsets the headset.
@@ -168,14 +171,6 @@ _GLYPH_FOR_KIND = {
     DeviceKind.USB_MIC: "mic",
     DeviceKind.LINE_IN: "mic",
     DeviceKind.OTHER: "mic",
-}
-
-MODE_NAMES = ("Game", "Meeting", "Session", "Music")
-MODE_DESCRIPTIONS = {
-    "Game": "Lowest delay, strong click removal",
-    "Meeting": "Steady voice level for long calls",
-    "Session": "Gentle, never cuts quiet speech",
-    "Music": "No noise filter, natural sound",
 }
 
 
@@ -302,27 +297,6 @@ def apply_dwm_title_bar(hwnd: int):
         print(f"[WARN] Failed to apply DWM title bar styling: {e}")
 
 
-def clean_device_label(name: str) -> str:
-    """Format raw audio device name into a clean, human-friendly label."""
-    cleaned = name
-    for tag in ["(Windows WASAPI)", "(Windows DirectSound)", "(MME)", "(Windows WDM-KS)"]:
-        cleaned = cleaned.replace(tag, "")
-    # Clean up prefixes like '2- ' or '1- '
-    cleaned = re.sub(r'\(\s*\d+-\s*', '(', cleaned)
-    cleaned = cleaned.strip()
-    if len(cleaned) > 52:
-        cleaned = cleaned[:49] + "..."
-    return cleaned
-
-
-if getattr(sys, 'frozen', False):
-    APP_DIR = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
-else:
-    APP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-ICON_PNG_PATH = os.path.join(APP_DIR, "getsu-icon.png")
-ICON_ICO_PATH = os.path.join(APP_DIR, "getsu.ico")
-
-
 # Tray glyph on the 16 px grid of opt/mockup/logo/getsu-tray.svg: (x, y, width, height) of each bar.
 TRAY_BARS = ((1, 6, 2, 4), (4, 4, 2, 8), (7, 2, 2, 12), (10, 3, 2, 10), (13, 5, 2, 6))
 
@@ -362,7 +336,20 @@ def create_tray_icon_image(is_active: bool = False) -> Image.Image:
     return canvas.resize((64, 64), Image.Resampling.LANCZOS)
 
 
+def launch_gui(minimized: bool = False):
+    app = GetsuGUI(minimized=minimized)
+    app.build_ui()
+
+
+if __name__ == "__main__":
+    from src.single_instance import activate_existing_instance
+    if activate_existing_instance():
+        sys.exit(0)
+    launch_gui()
+
+
 class GetsuGUI:
+
     def __init__(self, minimized: bool = False):
         # Explicit AppUserModelID ensures Windows Taskbar pins the custom icon instead of python.exe
         try:
@@ -713,7 +700,6 @@ class GetsuGUI:
             self._update_selection_hint(self._get_selected_input_label())
             self._refresh_mic_widgets()
 
-
     def _on_device_change_event(self):
         """Debounced listener for Windows WM_DEVICECHANGE hotplug signals."""
         clear_device_bus_type_cache()
@@ -903,7 +889,6 @@ class GetsuGUI:
         else:
             dpg.hide_item("input_selection_hint")
 
-
     def _get_idle_status(self) -> Optional[str]:
         """Notice shown while stopped. None means no notice: the hero shows its own sentence."""
         if not self.is_vbcable_installed:
@@ -929,7 +914,6 @@ class GetsuGUI:
         explained = explain_start_error(e)
         print(f"[AUDIO] Stream error [{explained.kind}] code={explained.code}: {explained.technical}")
         return f"{explained.title}. {explained.advice}"
-
 
     def on_auto_route_toggled(self, sender, app_data):
         """Handles user toggling default microphone switch setting (Option B: locked while active)."""
@@ -1393,6 +1377,7 @@ class GetsuGUI:
     def show_setup_card_for_install(self):
         """Brings the first-run card back (used by the power button while the cable is missing)."""
         self.show_setup_card()
+
     def _update_cable_banner(self):
         """Refreshes the voice test enable state and the idle notice (the status card was removed in phase B)."""
         self._set_voice_test_button_state(not self.is_running)
@@ -2409,6 +2394,7 @@ class GetsuGUI:
             dpg.configure_item("footer_gap", width=max(0, self.s(CONTENT_W) - left - right))
         except Exception as e:
             print(f"[WARN] Footer layout failed: {e}")
+
     # --- panels -----------------------------------------------------------
 
     def _build_panel_shell(self, name: str):
@@ -3002,16 +2988,3 @@ class GetsuGUI:
             dpg.configure_item("main_window", no_scrollbar=desired <= cap)
         except Exception as e:
             print(f"[WARN] Window fit failed: {e}")
-
-
-
-def launch_gui(minimized: bool = False):
-    app = GetsuGUI(minimized=minimized)
-    app.build_ui()
-
-
-if __name__ == "__main__":
-    from src.single_instance import activate_existing_instance
-    if activate_existing_instance():
-        sys.exit(0)
-    launch_gui()

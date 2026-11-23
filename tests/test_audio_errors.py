@@ -1,3 +1,4 @@
+import _isolation  # noqa: F401  (first test module: isolates the log file, PortAudio and COM before any src import logs)
 import unittest
 
 from src.audio_errors import explain_start_error

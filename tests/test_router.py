@@ -165,6 +165,17 @@ class TestAtomicConfig(unittest.TestCase):
 
 
 class TestAudioEngineV120(unittest.TestCase):
+    def setUp(self):
+        # The engine reads its input device in __init__; a mock device keeps PortAudio out of the test.
+        patches = [
+            patch("sounddevice.query_devices", return_value={"name": "MockDev", "max_input_channels": 2,
+                                                             "max_output_channels": 2, "hostapi": 0}),
+            patch("sounddevice.query_hostapis", return_value=[{"name": "Windows DirectSound"}]),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
     def test_set_vad_threshold(self):
         engine = AudioEngine(
             input_device=0,

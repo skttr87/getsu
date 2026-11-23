@@ -58,12 +58,18 @@ class TestV131BusDetection(unittest.TestCase):
 
 
 class TestV131PlaybackResolution(unittest.TestCase):
-    def test_native_get_current_default_playback_returns_tuple_or_none(self):
-        res = native_get_current_default_playback()
-        if res is not None:
-            guid, name = res
-            self.assertIsInstance(guid, str)
-            self.assertIsInstance(name, str)
+    def test_native_get_current_default_playback_without_com_returns_unknown(self):
+        with patch("src.win_audio.ole32", None):
+            res = native_get_current_default_playback()
+        self.assertEqual(res, (None, "Unknown"))
+
+    def test_native_get_current_default_playback_returns_guid_and_name(self):
+        fake_com = MagicMock()
+        with patch("src.win_audio.ole32", fake_com):
+            res = native_get_current_default_playback()
+        self.assertIsInstance(res, tuple)
+        self.assertEqual(len(res), 2)
+        self.assertIsInstance(res[1], str)
 
     def test_get_physical_output_device_with_native_default(self):
         mock_devices = [
@@ -79,45 +85,34 @@ class TestV131PlaybackResolution(unittest.TestCase):
 
 
 class TestV131BluetoothJitterAdaptation(unittest.TestCase):
+    def _start_with_bus(self, bus_for_input, device_name):
+        """Starts the engine on a mock input of the given bus type and returns the latency given to sd.Stream."""
+        devices = [
+            {'name': device_name, 'max_input_channels': 1, 'max_output_channels': 0, 'hostapi': 0,
+             'default_samplerate': 48000.0},
+            {'name': 'Speakers (Mock)', 'max_input_channels': 0, 'max_output_channels': 2, 'hostapi': 0,
+             'default_samplerate': 48000.0},
+        ]
+        hostapis = [{'name': 'Windows WASAPI', 'default_input_device': 0, 'default_output_device': 1}]
+        bus_patch = lambda dev, is_input=True: bus_for_input if is_input else DeviceBusType.USB
+        with patch("src.router.native_get_device_bus_type", side_effect=bus_patch), \
+                patch("src.win_audio.native_get_device_bus_type", side_effect=bus_patch), \
+                patch("sounddevice.query_devices", side_effect=lambda i=None, *a, **k: devices if i is None else devices[i]), \
+                patch("sounddevice.query_hostapis", return_value=hostapis), \
+                patch("sounddevice.Stream") as mock_stream:
+            engine = AudioEngine(input_device=0, output_device=1, denoise_enabled=False, high_pass_enabled=False)
+            engine.start()
+            engine.prepare_for_stop()
+        self.assertTrue(mock_stream.called, "the engine did not open a stream")
+        return mock_stream.call_args[1].get('latency')
+
     def test_latency_adaptation_for_bluetooth_hfp(self):
-        engine = AudioEngine(
-            input_device=0,
-            output_device=1,
-            denoise_enabled=False,
-            high_pass_enabled=False,
-        )
-        # Mock bluetooth HFP input
-        with patch("src.router.native_get_device_bus_type", side_effect=lambda dev, is_input: DeviceBusType.BLUETOOTH_HFP if is_input else DeviceBusType.USB), patch("src.win_audio.native_get_device_bus_type", side_effect=lambda dev, is_input: DeviceBusType.BLUETOOTH_HFP if is_input else DeviceBusType.USB):
-            with patch("sounddevice.query_devices", return_value={'name': 'AirPods Hands-Free AG Audio', 'max_input_channels': 1, 'max_output_channels': 2}):
-                with patch("sounddevice.query_hostapis", return_value=[{'name': 'Windows DirectSound'}]):
-                    with patch("sounddevice.RawStream") as mock_stream:
-                        try:
-                            engine.start()
-                        except Exception:
-                            pass
-                        # Verify RawStream was initialized with latency=0.035
-                        if mock_stream.called:
-                            kwargs = mock_stream.call_args[1]
-                            self.assertEqual(kwargs.get('latency'), 0.035)
+        latency = self._start_with_bus(DeviceBusType.BLUETOOTH_HFP, 'AirPods Hands-Free AG Audio')
+        self.assertEqual(latency, 0.035)
 
     def test_latency_low_for_usb_or_internal(self):
-        engine = AudioEngine(
-            input_device=0,
-            output_device=1,
-            denoise_enabled=False,
-            high_pass_enabled=False,
-        )
-        with patch("src.router.native_get_device_bus_type", return_value=DeviceBusType.USB), patch("src.win_audio.native_get_device_bus_type", return_value=DeviceBusType.USB):
-            with patch("sounddevice.query_devices", return_value={'name': 'Yeti USB Mic', 'max_input_channels': 1, 'max_output_channels': 2}):
-                with patch("sounddevice.query_hostapis", return_value=[{'name': 'Windows DirectSound'}]):
-                    with patch("sounddevice.RawStream") as mock_stream:
-                        try:
-                            engine.start()
-                        except Exception:
-                            pass
-                        if mock_stream.called:
-                            kwargs = mock_stream.call_args[1]
-                            self.assertEqual(kwargs.get('latency'), 'low')
+        latency = self._start_with_bus(DeviceBusType.USB, 'Yeti USB Mic')
+        self.assertEqual(latency, 'low')
 
 
 if __name__ == "__main__":

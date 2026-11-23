@@ -257,6 +257,85 @@ class GuiClickPathTests(unittest.TestCase):
             self.assertGreaterEqual(rect[0][1], sheet[0][1], name)
             app._close_panels()
 
+    # --- every clickable control ---------------------------------------------------------------
+
+    @staticmethod
+    def _drawn_rects(tag):
+        """Viewport rectangles of the visible items drawn inside tag (text, drawlists, buttons; windows have none)."""
+        out = []
+        stack = [tag]
+        while stack:
+            item = stack.pop()
+            for children in (dpg.get_item_children(item) or {}).values():
+                stack.extend(children)
+            if item == tag:
+                continue
+            try:
+                state = dpg.get_item_state(item)
+                if not state.get("visible", False) or "rect_min" not in state:
+                    continue
+                rmin, rmax = tuple(state["rect_min"]), tuple(state["rect_max"])
+            except Exception:
+                continue
+            if rmax[0] > rmin[0] and rmax[1] > rmin[1]:
+                out.append((item, (rmin, rmax)))
+        return out
+
+    def _assert_targets_match_drawing(self, targets, where):
+        checked = 0
+        for tag in targets:
+            rect = self.app._item_rect(tag)
+            self.assertIsNotNone(rect, f"{where}: {tag} has no click rectangle")
+            for item, drawn in self._drawn_rects(tag):
+                if dpg.get_item_type(item).endswith("mvSpacer"):
+                    continue
+                cx, cy = _center(drawn)
+                inside = rect[0][0] - 1 <= cx <= rect[1][0] + 1 and rect[0][1] - 1 <= cy <= rect[1][1] + 1
+                self.assertTrue(inside, f"{where}: {tag} click area {rect} misses drawn item "
+                                        f"{dpg.get_item_alias(item) or item} at {drawn}")
+                checked += 1
+        return checked
+
+    def test_every_click_area_covers_what_is_drawn(self):
+        """Main-window controls and every panel's controls: the click area covers the control as rendered."""
+        app = self.app
+        checked = self._assert_targets_match_drawing(list(app._click_targets), "main")
+        for name in PANEL_NAMES:
+            self._open(name)
+            targets = list(app._panel_targets.get(name, {}))
+            self.assertTrue(targets, name)
+            checked += self._assert_targets_match_drawing(targets, name)
+            sheet = app._item_rect(f"sheet_{name}")
+            for tag in targets:
+                rect = app._item_rect(tag)
+                self.assertGreaterEqual(rect[0][1], sheet[0][1] - 1, f"{name}: {tag} above its sheet")
+            app._close_panels()
+            self._frames()
+        self.assertGreater(checked, 0)
+
+    def test_every_click_target_runs_its_action(self):
+        """A click in the middle of each control's area reaches that control and nothing else."""
+        app = self.app
+        for name in PANEL_NAMES:
+            self._open(name)
+            targets = app._panel_targets.get(name, {})
+            for tag in list(targets):
+                self._open(name) if app._open_panel_name != name else None
+                calls = []
+                with patch.dict(targets, {t: (lambda t=t: calls.append(t)) for t in targets}):
+                    self.mouse.pos = _center(app._item_rect(tag))
+                    app._on_mouse_click()
+                self.assertEqual(calls, [tag], f"{name}: click on {tag}")
+            app._close_panels()
+            self._frames()
+        targets = app._click_targets
+        for tag in list(targets):
+            calls = []
+            with patch.dict(targets, {t: (lambda t=t: calls.append(t)) for t in targets}):
+                self.mouse.pos = _center(app._item_rect(tag))
+                app._on_mouse_click()
+            self.assertEqual(calls, [tag], f"main: click on {tag}")
+
     def test_done_hover_changes_only_the_text_colour(self):
         app = self.app
         self._open("settings")

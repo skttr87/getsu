@@ -249,8 +249,10 @@ class PanelsMixin:
                 with dpg.child_window(tag="help_body", width=width, height=self.s(HELP_BODY_H), border=False):
                     self._help_steps(width - self.s(34))
                     dpg.add_spacer(height=self.s(4))
-                    dpg.add_button(label="Got it", width=width, height=self.s(ACTION_H),
-                                   callback=lambda: self._close_panels())
+                    # Clicks come from _on_mouse_click like every other panel control; the full-window panel takes
+                    # the native click, so the button callback alone is not reliable.
+                    dpg.add_button(tag="help_got_it", label="Got it", width=width, height=self.s(ACTION_H))
+                    self._panel_targets.setdefault("help", {})["help_got_it"] = self._close_panels
                     dpg.bind_item_theme(dpg.last_item(), self.theme_start_btn)
                     dpg.bind_item_font(dpg.last_item(), self.font_btn)
 

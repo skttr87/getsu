@@ -37,6 +37,16 @@ user32.IsWindowVisible.argtypes = [wintypes.HWND]
 user32.IsIconic.argtypes = [wintypes.HWND]
 
 
+def _is_theme_change(lparam) -> bool:
+    """True for a WM_SETTINGCHANGE whose lParam names "ImmersiveColorSet" (light / dark theme switch). Never raises."""
+    if not lparam:
+        return False
+    try:
+        return ctypes.wstring_at(lparam, 32).split("\0", 1)[0] == "ImmersiveColorSet"
+    except Exception:
+        return False
+
+
 def init_dpi_awareness() -> tuple[int, float]:
     """
     Enables Windows Per-Monitor V2 DPI awareness and queries active monitor DPI.
@@ -187,6 +197,12 @@ class Win32Mixin:
             elif msg == WM_DEVICECHANGE:
                 self._on_device_change_event()
                 return 1
+            elif msg == 0x001A and _is_theme_change(lparam):  # WM_SETTINGCHANGE "ImmersiveColorSet"
+                # Light / dark taskbar switched: redraw the tray glyph in the matching colour.
+                try:
+                    self._update_tray_icon()
+                except Exception as e:
+                    print(f"[WARN] Tray icon theme update failed: {e}")
             elif msg == 0x0082:  # WM_NCDESTROY
                 self._teardown_engine_and_timers()
                 # Cleanly unhook subclass procedure before window destruction

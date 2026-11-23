@@ -27,12 +27,24 @@ def ensure_app_icon_ico():
             print(f"[WARN] App icon file missing: {path} (regenerate with tools/make_icons.py)")
 
 
-def create_tray_icon_image(is_active: bool = False) -> Image.Image:
+# Tray colours for a dark and a light taskbar: glyph, ring around the status dot (taskbar background, so the dot
+# looks cut out of the bars), dot when on (Apple system blue, dark / light variant), dot when off (system grey).
+TRAY_DARK = {"glyph": (255, 255, 255, 255), "ring": (32, 32, 32, 255),
+             "on": (10, 132, 255, 255), "off": (142, 142, 147, 255)}
+TRAY_LIGHT = {"glyph": (28, 28, 30, 255), "ring": (243, 243, 243, 255),
+              "on": (0, 122, 255, 255), "off": (110, 110, 115, 255)}
+
+
+def create_tray_icon_image(is_active: bool = False, light_taskbar=None) -> Image.Image:
     """
-    Builds the 64 px notification area icon: the white five-bar glyph plus a status dot.
-    The dot is Apple blue when noise cancellation is on and grey when it is stopped.
+    Builds the 64 px notification area icon: the five-bar glyph plus a status dot.
+    The glyph is white on a dark taskbar and near-black on a light one (light_taskbar None = read the Windows
+    setting). The dot is Apple blue when noise cancellation is on and grey when it is stopped.
     Drawn at 16 px per grid unit and reduced to 64 px, so the edges stay smooth.
     """
+    if light_taskbar is None:
+        light_taskbar = win_theme.taskbar_uses_light_theme()
+    colors = TRAY_LIGHT if light_taskbar else TRAY_DARK
     unit = 16
     canvas = Image.new("RGBA", (16 * unit, 16 * unit), (0, 0, 0, 0))
     draw = ImageDraw.Draw(canvas)
@@ -40,11 +52,11 @@ def create_tray_icon_image(is_active: bool = False) -> Image.Image:
         draw.rounded_rectangle(
             (x * unit, y * unit, (x + w) * unit - 1, (y + h) * unit - 1),
             radius=unit,
-            fill=(255, 255, 255, 255),
+            fill=colors["glyph"],
         )
-    # Status dot in the bottom-right corner, separated from the bars by a dark ring.
-    dot_color = (10, 132, 255, 255) if is_active else (142, 142, 147, 255)
-    draw.ellipse((9 * unit, 9 * unit, 16 * unit - 1, 16 * unit - 1), fill=(32, 32, 32, 255))
+    # Status dot in the bottom-right corner, separated from the bars by a ring in the taskbar colour.
+    dot_color = colors["on"] if is_active else colors["off"]
+    draw.ellipse((9 * unit, 9 * unit, 16 * unit - 1, 16 * unit - 1), fill=colors["ring"])
     draw.ellipse(
         (int(10.5 * unit), int(10.5 * unit), int(14.5 * unit) - 1, int(14.5 * unit) - 1),
         fill=dot_color,

@@ -69,15 +69,21 @@ class TrayIconTests(unittest.TestCase):
     def test_tray_icon_is_64_px(self):
         self.assertEqual(gui.create_tray_icon_image(True).size, (64, 64))
 
+    # Dark-taskbar colours, pinned so the result does not depend on the theme of the PC running the tests.
     def test_status_dot_is_blue_when_on(self):
-        self.assertEqual(gui.create_tray_icon_image(True).getpixel((50, 50))[:3], (10, 132, 255))
+        self.assertEqual(gui.create_tray_icon_image(True, light_taskbar=False).getpixel((50, 50))[:3], (10, 132, 255))
 
     def test_status_dot_is_grey_when_off(self):
-        self.assertEqual(gui.create_tray_icon_image(False).getpixel((50, 50))[:3], (142, 142, 147))
+        self.assertEqual(gui.create_tray_icon_image(False, light_taskbar=False).getpixel((50, 50))[:3], (142, 142, 147))
 
     def test_glyph_bars_are_white(self):
         # Centre bar of the five-bar glyph (grid x 7..9, y 2..14).
-        self.assertEqual(gui.create_tray_icon_image(True).getpixel((32, 32))[:3], (255, 255, 255))
+        self.assertEqual(gui.create_tray_icon_image(True, light_taskbar=False).getpixel((32, 32))[:3], (255, 255, 255))
+
+    def test_light_taskbar_colours(self):
+        img = gui.create_tray_icon_image(True, light_taskbar=True)
+        self.assertEqual(img.getpixel((32, 32))[:3], (28, 28, 30))
+        self.assertEqual(img.getpixel((50, 50))[:3], (0, 122, 255))
 
 
 class AppIconFileTests(unittest.TestCase):

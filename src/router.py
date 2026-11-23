@@ -9,34 +9,22 @@ Maintains bundled native AudioRestore.exe as a secondary fallback.
 """
 import os
 import sys
-import logging
 import subprocess
 import threading
 from typing import Optional, Tuple, Dict, Any
-import ctypes
-from ctypes import wintypes
-import re
 
 try:
     from src.config import save_config
 except ImportError:
     from config import save_config
 
-try:
-    from src.diagnostics import get_file_handler
-except ImportError:
-    from diagnostics import get_file_handler
-
-# CoreAudio helpers and the routing logger live in win_audio; re-exported so imports keep working.
+# CoreAudio helpers and the routing logger live in win_audio; the names other modules import from here
+# (device kinds, bus cache helpers, PROPVARIANT and the endpoint readers) are re-exported so those imports keep working.
 from src.win_audio import (
-    logger, ole32, _safe_co_initialize, GUID, PROPERTYKEY, PROPVARIANT, PKEY_Device_FriendlyName,
-    PKEY_Device_EnumeratorName, PKEY_AudioEndpoint_FormFactor, VT_UI4, VT_LPWSTR,
-    EndpointFormFactor, DeviceBusType, CLSID_MMDeviceEnumerator, IID_IMMDeviceEnumerator,
-    CLSID_PolicyConfigClient, IID_IPolicyConfig, _release_com_ptr, native_get_current_default_mic,
+    logger, PROPVARIANT, EndpointFormFactor, DeviceBusType, native_get_current_default_mic,
     native_get_current_default_playback, _is_endpoint_id, native_get_device_bus_type,
-    _bus_type_cache, _form_factor_cache, clear_device_bus_type_cache,
-    native_get_device_bus_type_cached, _form_factor_from_variant, _endpoint_name_matches,
-    native_get_device_form_factor, native_get_device_form_factor_cached,
+    _bus_type_cache, clear_device_bus_type_cache, native_get_device_bus_type_cached,
+    _form_factor_from_variant, native_get_device_form_factor_cached,
     native_get_cable_capture_guid, native_get_physical_capture_guid, ENDPOINT_GUID_PATTERN,
     native_set_default_endpoint, get_audio_restore_exe
 )

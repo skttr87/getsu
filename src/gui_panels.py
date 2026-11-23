@@ -227,11 +227,12 @@ class PanelsMixin:
                     self._settings_row_boost(width)
                     self._divider(width)
                     self._settings_row_switch("auto_route", "Use as default microphone",
-                                              "Discord, Zoom and games pick it up automatically",
+                                              "Apps and games automatically use Getsu",
                                               bool(self.config.get("auto_route", True)),
                                               self._on_auto_route_switch)
                     self._divider(width)
-                    self._settings_row_switch("music_mode", "Music & Singing mode", None,
+                    self._settings_row_switch("music_mode", "Music & Singing mode",
+                                              "No AI Filter",
                                               bool(self.config.get("music_mode", False)),
                                               self._on_music_mode_switch)
                     self._divider(width, show=FEATURE_LEARN_ROOM)

@@ -141,6 +141,7 @@ class HeroMixin:
         if not self._ui_built or not dpg.does_item_exist("meter_bar_0"):
             return
         self._update_button_hover()
+        self._update_text_links()
         self._tick_controls()
         self._poll_setup_card()
         now = time.monotonic()

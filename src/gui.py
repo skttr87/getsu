@@ -184,6 +184,7 @@ class GetsuGUI(
         self._btn_content: Dict[str, tuple] = {}  # icon button tag -> (width, icon, gap, font) for centring labels
         self._btn_heights: Dict[str, int] = {}
         self._btn_hovered: Dict[str, bool] = {}
+        self._text_links: Dict[str, dict] = {}   # text button tag -> {panel, label, state}, see _text_link
         self._setup_dismissed = False            # "Not now" hides the first-run card for this session
         self._install_state: Optional[str] = None  # None, "installing" or "failed" (the card's own states)
         self._install_error = ""

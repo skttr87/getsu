@@ -14,6 +14,7 @@ import _isolation  # noqa: F401  (keeps config writes off the tracked config.jso
 import dearpygui.dearpygui as dpg
 
 from src import gui as g
+from src import gui_theme as theme
 
 PANEL_NAMES = ("mics", "settings", "help")
 
@@ -232,6 +233,35 @@ class GuiClickPathTests(unittest.TestCase):
         rect = app._item_rect("sheet_settings")
         self._click(_center(rect))
         self.assertEqual(app._open_panel_name, "settings")
+
+    def test_done_text_button_closes_the_panel(self):
+        app = self.app
+        self._open("settings")
+        rect = app._item_rect("sheet_done_settings")
+        self.assertIsNotNone(rect)
+        self._click_rect(rect)
+        self.assertIsNone(app._open_panel_name)
+
+    def test_done_hover_changes_only_the_text_colour(self):
+        app = self.app
+        self._open("settings")
+        rect = app._item_rect("sheet_done_settings")
+        label = "sheet_done_settings_label"
+        self.mouse.pos = _center(rect)
+        app._update_text_links()
+        self.assertEqual(self._text_color(label), theme.COL_LINK_HOVER)
+        self.mouse.down = True
+        app._update_text_links()
+        self.assertEqual(self._text_color(label), theme.COL_LINK_PRESSED)
+        self.mouse.down = False
+        self.mouse.pos = (-1000.0, -1000.0)
+        app._update_text_links()
+        self.assertEqual(self._text_color(label), theme.COL_ACCENT)
+
+    @staticmethod
+    def _text_color(tag):
+        # DearPyGui reports colours as floats in 0..1.
+        return tuple(int(round(c * 255)) for c in dpg.get_item_configuration(tag)["color"][:3])
 
     # --- layout ---------------------------------------------------------------------------------
 

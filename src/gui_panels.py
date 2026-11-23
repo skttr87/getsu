@@ -7,6 +7,8 @@ from src.gui_theme import (
     ACTION_H,
     COL_ACCENT,
     COL_ACCENT_SOFT,
+    COL_LINK_HOVER,
+    COL_LINK_PRESSED,
     COL_TEXT,
     COL_TEXT_2,
     COL_WARNING,
@@ -152,7 +154,7 @@ class PanelsMixin:
                     dpg.bind_item_theme(f"sheet_{name}", self.theme_sheet)
                 self._panel_body(name)
 
-    def _sheet_head(self, title: str, done_callback, done_tag: str = "", title_font=None):
+    def _sheet_head(self, title: str, done_callback, done_tag: str = "", title_font=None, panel: str = ""):
         width = self.s(CONTENT_W)
         title_font = title_font or self.font_title
         dpg.add_spacer(height=self.s(16))
@@ -160,18 +162,52 @@ class PanelsMixin:
             dpg.add_spacer(width=self.s(24))
             dpg.add_text(title, color=COL_TEXT)
             dpg.bind_item_font(dpg.last_item(), title_font)
-            dpg.add_spacer(width=max(0, width - self._text_w(title, title_font) - self.s(44)))
             if done_callback is not None:
-                dpg.add_button(label="Done", callback=done_callback, width=self.s(44), height=self.s(26),
-                               tag=done_tag or dpg.generate_uuid())
-                dpg.bind_item_theme(dpg.last_item(), self.theme_link_btn)
-                dpg.bind_item_font(dpg.last_item(), self.font_btn)
+                done_w = self._text_w("Done", self.font_btn) + self.s(8)
+                dpg.add_spacer(width=max(0, width - self._text_w(title, title_font) - done_w))
+                self._text_link(done_tag or dpg.generate_uuid(), "Done", self.font_btn, done_w, self.s(26),
+                                panel, done_callback)
         dpg.add_spacer(height=self.s(12))
+
+    def _text_link(self, tag: str, label: str, font, width: int, height: int, panel: str, callback):
+        """
+        Text button with no fill or border in any state (Apple style). Hover lightens the text and press dims it
+        (see _update_text_links). The child window is the click target, so the whole word is clickable.
+        """
+        with dpg.child_window(tag=tag, width=width, height=height, border=False, no_scrollbar=True,
+                              no_scroll_with_mouse=True):
+            self._bind_flat(tag)
+            dpg.add_spacer(height=max(0, (height - self._text_h(label, font)) // 2))
+            with dpg.group(horizontal=True):
+                dpg.add_spacer(width=self.s(4))
+                dpg.add_text(label, tag=f"{tag}_label", color=COL_ACCENT)
+                if font:
+                    dpg.bind_item_font(f"{tag}_label", font)
+        self._panel_targets.setdefault(panel, {})[tag] = callback
+        self._text_links[tag] = {"panel": panel, "label": f"{tag}_label", "state": None}
+
+    def _update_text_links(self):
+        """Per frame: text colour of the text buttons from the pointer (rest, hover or pressed). Only while their panel is open."""
+        if not self._ui_built or not self._text_links:
+            return
+        point = dpg.get_mouse_pos(local=False)
+        pressed = dpg.is_mouse_button_down(dpg.mvMouseButton_Left)
+        for tag, meta in self._text_links.items():
+            rect = self._item_rect(tag)
+            inside = (self._open_panel_name == meta["panel"] and rect is not None
+                      and ui_hit.point_in_rect(point, rect))
+            state = "rest" if not inside else ("pressed" if pressed else "hover")
+            if state == meta["state"]:
+                continue
+            meta["state"] = state
+            color = {"rest": COL_ACCENT, "hover": COL_LINK_HOVER, "pressed": COL_LINK_PRESSED}[state]
+            if dpg.does_item_exist(meta["label"]):
+                dpg.configure_item(meta["label"], color=color)
 
     def _panel_body(self, name: str):
         width = self.s(CONTENT_W)
         if name == "mics":
-            self._sheet_head("Microphone", lambda: self._close_panels(), done_tag="sheet_done_mics")
+            self._sheet_head("Microphone", lambda: self._close_panels(), done_tag="sheet_done_mics", panel="mics")
             with dpg.group(horizontal=True):
                 dpg.add_spacer(width=self.s(24))
                 with dpg.child_window(tag="mic_list", width=width, height=self.s(100), border=False):
@@ -183,7 +219,7 @@ class PanelsMixin:
                 dpg.bind_item_font("input_selection_hint", self.font_notice)
         elif name == "settings":
             self._sheet_head("Settings", lambda: self._close_panels(), done_tag="sheet_done_settings",
-                             title_font=self.font_set_title)
+                             title_font=self.font_set_title, panel="settings")
             with dpg.group(horizontal=True):
                 dpg.add_spacer(width=self.s(24))
                 with dpg.child_window(tag="settings_card", width=width, height=self.s(4 * SETTINGS_ROW_H + 3),

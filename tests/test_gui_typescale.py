@@ -67,6 +67,26 @@ class TypeScaleLayoutTests(unittest.TestCase):
         app._poll_setup_card()
         self._frames(2)
 
+    def test_text_lines_are_centred_where_the_layout_puts_them(self):
+        """
+        Text items take _text_h (glyph lines plus TEXT_LEAD above and below), so a label centred with a spacer sits in
+        the middle of its box. Guards against DearPyGui's FramePadding.y drifting from TEXT_LEAD (labels landed 3 px low).
+        """
+        app = self.app
+        for tag in ("btn_voice_test", "btn_settings"):
+            (bx0, by0), (bx1, by1) = app._item_rect(tag)
+            (lx0, ly0), (lx1, ly1) = app._leaf_rect(f"{tag}_label")
+            self.assertAlmostEqual((ly0 + ly1) / 2.0, (by0 + by1) / 2.0, delta=1.0, msg=tag)
+            # The item rectangle covers the glyph lines only; the leading sits outside it.
+            self.assertEqual(ly1 - ly0, app._glyph_h(dpg.get_value(f"{tag}_label"), app.font_btn), tag)
+
+    def test_microphone_row_text_block_is_centred_in_the_row(self):
+        app = self.app
+        (rx0, ry0), (rx1, ry1) = app._leaf_rect("mic_tile")
+        top = app._leaf_rect("mic_row_title")[0][1]
+        bottom = app._leaf_rect("mic_row_sub")[1][1]
+        self.assertAlmostEqual((top + bottom) / 2.0, (ry0 + ry1) / 2.0, delta=1.0)
+
     def test_power_button_is_96_logical_px(self):
         app = self.app
         w, h = _size(app._leaf_rect("power_drawlist"))

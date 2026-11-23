@@ -254,12 +254,12 @@ class SettingsMixin:
             with dpg.child_window(width=self.s(SET_LABEL_W), height=row_h, border=False, no_scrollbar=True):
                 self._bind_flat(dpg.last_item())
                 # Label plus a two-line detail, centred in the row.
+                detail = "Higher ignores more background voices"
                 dpg.add_spacer(height=self._block_top(row_h, self._text_h("Ag", self.font_set_label),
-                                                      2 * self._text_h("Ag", self.font_set_detail)))
+                                                      self._text_h(detail, self.font_set_detail, self.s(SET_LABEL_W))))
                 dpg.add_text("Sensitivity", color=COL_TEXT)
                 dpg.bind_item_font(dpg.last_item(), self.font_set_label)
-                dpg.add_text("Higher ignores more background voices", color=COL_TEXT_2,
-                             wrap=self.s(SET_LABEL_W))
+                dpg.add_text(detail, color=COL_TEXT_2, wrap=self.s(SET_LABEL_W))
                 dpg.bind_item_font(dpg.last_item(), self.font_set_detail)
             with dpg.group():
                 dpg.add_spacer(height=self._block_top(row_h, self.s(30)))
@@ -302,7 +302,7 @@ class SettingsMixin:
                 self._bind_flat(dpg.last_item())
                 lines = [self._text_h("Ag", self.font_set_label)]
                 if detail:
-                    lines.append(2 * self._text_h("Ag", self.font_set_detail))  # details wrap to two lines
+                    lines.append(self._text_h(detail, self.font_set_detail, self.s(SET_LABEL_W)))  # as wrapped
                 dpg.add_spacer(height=self._block_top(row_h, *lines))
                 dpg.add_text(label, color=COL_TEXT)
                 dpg.bind_item_font(dpg.last_item(), self.font_set_label)

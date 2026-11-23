@@ -78,6 +78,7 @@ from src.gui_theme import (
     TITLE_BORDER_COLOR,
     TITLE_CAPTION_COLOR,
     TITLE_TEXT_COLOR,
+    TEXT_LEAD,
     TYPE_BODY,
     TYPE_BUTTON,
     TYPE_FOOTER,
@@ -601,6 +602,10 @@ class GetsuGUI(
                 dpg.add_theme_style(dpg.mvStyleVar_PopupRounding, self.s(10))
                 dpg.add_theme_style(dpg.mvStyleVar_WindowRounding, 0)
                 dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, 0, 0)
+                # DearPyGui places a text item FramePadding.y below the layout cursor and reserves the same below it
+                # (ImGui default 3 px). Used here as the line leading (TEXT_LEAD); _text_h includes it, so layouts
+                # that centre text by _text_h stay centred and stacked lines get the design's spacing.
+                dpg.add_theme_style(dpg.mvStyleVar_FramePadding, self.s(4), self.s(TEXT_LEAD))
                 dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, self.s(CONTENT_PAD), 0)
                 dpg.add_theme_style(dpg.mvStyleVar_WindowBorderSize, 0)
                 dpg.add_theme_style(dpg.mvStyleVar_ChildBorderSize, 0)

@@ -5,12 +5,14 @@ from src import ui_icons as icons, ui_hit
 
 from src.gui_theme import (
     COL_ACCENT,
+    COL_CARD,
     COL_FILL_2,
     COL_SEPARATOR,
     COL_TEXT,
     COL_TEXT_3,
     COL_WHITE,
     MIC_ROW_H,
+    TEXT_LEAD,
 )
 
 
@@ -145,10 +147,17 @@ class WidgetsMixin:
     # The icon is a drawlist and the label a text item inside the button's own child window, so the icon is
     # clipped and hidden together with the button. Nothing is drawn on the viewport layer.
 
-    def _text_h(self, text: str, font=None) -> int:
-        """Height of a text run in physical pixels (falls back to an estimate)."""
+    def _text_h(self, text: str, font=None, wrap: int = -1) -> int:
+        """
+        Height a text item takes in the layout, in physical pixels: its lines (wrapped at wrap px if given) plus the
+        leading above and below (TEXT_LEAD, applied by DearPyGui as FramePadding.y). Use _glyph_h for drawlist text.
+        """
+        return self._glyph_h(text, font, wrap) + 2 * self.s(TEXT_LEAD)
+
+    def _glyph_h(self, text: str, font=None, wrap: int = -1) -> int:
+        """Height of the text lines themselves in physical pixels, without leading (falls back to an estimate)."""
         try:
-            return int(dpg.get_text_size(text or " ", font=font or 0)[1])
+            return int(dpg.get_text_size(text or " ", wrap_width=wrap, font=font or 0)[1])
         except Exception:
             return self.s(16)
 
@@ -299,10 +308,18 @@ class WidgetsMixin:
             dpg.draw_line((0, 0), (width - self.s(32), 0), color=COL_SEPARATOR, thickness=1.0, parent=dpg.last_item())
 
     def _chip(self, text: str):
-        """Code-styled chip (the mockup's <code>): a small card-coloured child window with the text inside."""
-        with dpg.child_window(width=self._text_w(text, self.font_notice) + self.s(12), height=self.s(18),
-                              border=False, no_scrollbar=True):
-            if self.theme_chip:
-                dpg.bind_item_theme(dpg.last_item(), self.theme_chip)
-            dpg.add_text(text, color=COL_TEXT)
-            dpg.bind_item_font(dpg.last_item(), self.font_notice)
+        """
+        Code-styled chip (the mockup's <code>): card-coloured rounded box with the text centred, drawn in one drawlist.
+        The box is one text line high, so the chip text shares the baseline of the text around it (Inter's capitals
+        sit in the middle of its line box). A borderless child window ignores its padding, so it is not used here.
+        """
+        font = self.font_notice
+        pad = self.s(6)
+        text_w, text_h = self._text_w(text, font), self._glyph_h(text, font)
+        lead = self.s(TEXT_LEAD)  # the drawlist replaces a text item, so it takes the same leading as the text around it
+        width = text_w + 2 * pad
+        with dpg.drawlist(width=width, height=text_h + 2 * lead):
+            dpg.draw_rectangle((0, lead), (width, lead + text_h), color=COL_CARD, fill=COL_CARD, rounding=self.s(5))
+            label = dpg.draw_text((pad, lead), text, color=COL_TEXT, size=text_h)
+            if font:
+                dpg.bind_item_font(label, font)

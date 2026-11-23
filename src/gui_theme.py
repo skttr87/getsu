@@ -54,10 +54,12 @@ TYPE_SET_SEG = 12     # mic boost segment labels, SemiBold
 WINDOW_W = 460       # widened from 420: hero notices up to 382 px wide and the microphone name column need it
 CONTENT_PAD = 24
 CONTENT_W = WINDOW_W - 2 * CONTENT_PAD  # 412 px between the gutters
-POWER_D = 96         # power button diameter (was 104: the text carries more weight next to it)
+TEXT_LEAD = 1.5     # logical px of space above and below every text line (ImGui FramePadding.y). Inter's line box
+                     # is 1.21 em; the mockup sets line-height 1.4, which adds about 1.5 px per side at 12-17 px.
+POWER_D = 96        # power button diameter (was 104: the text carries more weight next to it)
 HERO_TOP = 24        # space above the power button
-HERO_H = 217         # logical px: hero block and first-run card share this slot. The hero content (power button,
-                     # state, sub line, meter) measures 217 px with the text line boxes, so the meter is not clipped
+HERO_H = 214         # logical px: hero block and first-run card share this slot. The hero content (power button,
+                     # state, sub line, meter) measures 214 px with the text leading (TEXT_LEAD), so the meter is not clipped
 ACTION_H = 48        # action buttons (Hear myself, Show settings, Install cable, Not now, Got it)
 MIC_ROW_H = 68       # microphone row in the card and rows of the microphone list (name + sub line, 16 px padding)
 MIC_TEXT_W = CONTENT_W - 92        # name and sub line width in the card (tile, gaps, chevron, right padding)

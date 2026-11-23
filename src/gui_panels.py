@@ -269,11 +269,18 @@ class PanelsMixin:
         )
         for number, (title, desc, chips) in enumerate(steps, start=1):
             with dpg.group(horizontal=True):
-                dpg.add_drawlist(width=self.s(22), height=self.s(22), tag=f"step_num_{number}")
-                dpg.draw_circle((self.s(11), self.s(11)), self.s(11), color=COL_ACCENT_SOFT, fill=COL_ACCENT_SOFT,
+                # Number badge: the digit is centred in the circle by its measured size (Inter's figures sit in the
+                # middle of the line box, so centring the line box centres the digit).
+                badge = self.s(22)
+                digit = str(number)
+                digit_w, digit_h = self._text_w(digit, self.font_seg), self._glyph_h(digit, self.font_seg)
+                dpg.add_drawlist(width=badge, height=badge, tag=f"step_num_{number}")
+                dpg.draw_circle((badge / 2, badge / 2), badge / 2, color=COL_ACCENT_SOFT, fill=COL_ACCENT_SOFT,
                                 parent=f"step_num_{number}")
-                dpg.draw_text((self.s(7), self.s(4)), str(number), color=COL_ACCENT, size=self.s(12),
-                              parent=f"step_num_{number}")
+                dpg.draw_text(((badge - digit_w) / 2, (badge - digit_h) / 2), digit, color=COL_ACCENT, size=digit_h,
+                              parent=f"step_num_{number}", tag=f"step_num_{number}_digit")
+                if self.font_seg:
+                    dpg.bind_item_font(f"step_num_{number}_digit", self.font_seg)
                 dpg.add_spacer(width=self.s(12))
                 with dpg.child_window(width=text_w, height=self.s(HELP_STEP_H), border=False, no_scrollbar=True):
                     self._bind_flat(dpg.last_item())

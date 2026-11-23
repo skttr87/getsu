@@ -1,4 +1,5 @@
 import ast
+import glob
 import math
 import os
 import struct
@@ -53,7 +54,7 @@ class TitleBarTests(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == "win32", "DWM is Windows only")
     def test_apply_sends_mockup_colours_to_dwm(self):
-        with patch("src.gui.ctypes.windll") as windll:
+        with patch("src.gui_win32.ctypes.windll") as windll:
             gui.apply_dwm_title_bar(1234)
         sent = {}
         for call in windll.dwmapi.DwmSetWindowAttribute.call_args_list:
@@ -102,7 +103,9 @@ class AppIconFileTests(unittest.TestCase):
         image_module.open.return_value.save.assert_not_called()
 
 
-GUI_SOURCE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src", "gui.py")
+# gui.py and every gui_*.py module it is split into (M6 modular UI).
+GUI_SOURCES = sorted(glob.glob(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                            "src", "gui*.py")))
 
 # Emoji, pictographs, arrows, geometric shapes, misc symbols, and the bullet character.
 FORBIDDEN_CODEPOINT_RANGES = (
@@ -114,15 +117,18 @@ FORBIDDEN_CODEPOINT_RANGES = (
 
 class NoPictographTests(unittest.TestCase):
     def test_gui_string_literals_have_no_pictographic_symbols(self):
-        with open(GUI_SOURCE, encoding="utf-8") as fh:
-            tree = ast.parse(fh.read())
+        self.assertTrue(GUI_SOURCES, "no gui source files found")
         hits = []
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                for ch in node.value:
-                    cp = ord(ch)
-                    if any(lo <= cp <= hi for lo, hi in FORBIDDEN_CODEPOINT_RANGES):
-                        hits.append(f"line {node.lineno}: U+{cp:04X} in {node.value[:40]!r}")
+        for path in GUI_SOURCES:
+            with open(path, encoding="utf-8") as fh:
+                tree = ast.parse(fh.read())
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                    for ch in node.value:
+                        cp = ord(ch)
+                        if any(lo <= cp <= hi for lo, hi in FORBIDDEN_CODEPOINT_RANGES):
+                            hits.append(f"{os.path.basename(path)} line {node.lineno}: "
+                                        f"U+{cp:04X} in {node.value[:40]!r}")
         self.assertEqual(hits, [])
 
 

@@ -36,9 +36,9 @@ class FakeEndpointStore(unittest.TestCase):
         self.form_factors = {}
         clear_device_bus_type_cache()
         self._patches = [
-            patch("src.router.native_get_device_bus_type",
+            patch("src.win_audio.native_get_device_bus_type",
                   side_effect=lambda name, is_input=True: self.buses.get((name, is_input), DeviceBusType.UNKNOWN)),
-            patch("src.router.native_get_device_form_factor",
+            patch("src.win_audio.native_get_device_form_factor",
                   side_effect=lambda name, is_input=True: self.form_factors.get((name, is_input))),
             patch("src.devices._start_enumeration_pass"),
         ]

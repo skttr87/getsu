@@ -39,19 +39,19 @@ class TestV131BusDetection(unittest.TestCase):
 
     def test_is_laptop_microphone_with_bus_type(self):
         # When bus type is INTERNAL_HD -> True regardless of name
-        with patch("src.router.native_get_device_bus_type", return_value=DeviceBusType.INTERNAL_HD):
+        with patch("src.win_audio.native_get_device_bus_type", return_value=DeviceBusType.INTERNAL_HD):
             self.assertTrue(is_laptop_microphone("Studio Condenser Mic", device_id=0))
 
         # When bus type is USB -> False even if name has 'internal'
-        with patch("src.router.native_get_device_bus_type", return_value=DeviceBusType.USB):
+        with patch("src.win_audio.native_get_device_bus_type", return_value=DeviceBusType.USB):
             self.assertFalse(is_laptop_microphone("USB Internal Array", device_id=1))
 
         # When bus type is BLUETOOTH_HFP -> False
-        with patch("src.router.native_get_device_bus_type", return_value=DeviceBusType.BLUETOOTH_HFP):
+        with patch("src.win_audio.native_get_device_bus_type", return_value=DeviceBusType.BLUETOOTH_HFP):
             self.assertFalse(is_laptop_microphone("Bluetooth Headset", device_id=2))
 
         # Bus UNKNOWN: no name keyword fallback any more (M4.5), so the endpoint is not a built-in mic
-        with patch("src.router.native_get_device_bus_type", return_value=DeviceBusType.UNKNOWN):
+        with patch("src.win_audio.native_get_device_bus_type", return_value=DeviceBusType.UNKNOWN):
             self.assertFalse(is_laptop_microphone("Realtek High Definition Audio", device_id=3))
             self.assertFalse(is_laptop_microphone("Microphone Array", device_id=4))
             self.assertFalse(is_laptop_microphone("Fifine K669 Microphone", device_id=5))
@@ -87,7 +87,7 @@ class TestV131BluetoothJitterAdaptation(unittest.TestCase):
             high_pass_enabled=False,
         )
         # Mock bluetooth HFP input
-        with patch("src.router.native_get_device_bus_type", side_effect=lambda dev, is_input: DeviceBusType.BLUETOOTH_HFP if is_input else DeviceBusType.USB):
+        with patch("src.router.native_get_device_bus_type", side_effect=lambda dev, is_input: DeviceBusType.BLUETOOTH_HFP if is_input else DeviceBusType.USB), patch("src.win_audio.native_get_device_bus_type", side_effect=lambda dev, is_input: DeviceBusType.BLUETOOTH_HFP if is_input else DeviceBusType.USB):
             with patch("sounddevice.query_devices", return_value={'name': 'AirPods Hands-Free AG Audio', 'max_input_channels': 1, 'max_output_channels': 2}):
                 with patch("sounddevice.query_hostapis", return_value=[{'name': 'Windows DirectSound'}]):
                     with patch("sounddevice.RawStream") as mock_stream:
@@ -107,7 +107,7 @@ class TestV131BluetoothJitterAdaptation(unittest.TestCase):
             denoise_enabled=False,
             high_pass_enabled=False,
         )
-        with patch("src.router.native_get_device_bus_type", return_value=DeviceBusType.USB):
+        with patch("src.router.native_get_device_bus_type", return_value=DeviceBusType.USB), patch("src.win_audio.native_get_device_bus_type", return_value=DeviceBusType.USB):
             with patch("sounddevice.query_devices", return_value={'name': 'Yeti USB Mic', 'max_input_channels': 1, 'max_output_channels': 2}):
                 with patch("sounddevice.query_hostapis", return_value=[{'name': 'Windows DirectSound'}]):
                     with patch("sounddevice.RawStream") as mock_stream:

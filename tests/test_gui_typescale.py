@@ -87,6 +87,23 @@ class TypeScaleLayoutTests(unittest.TestCase):
         bottom = app._leaf_rect("mic_row_sub")[1][1]
         self.assertAlmostEqual((top + bottom) / 2.0, (ry0 + ry1) / 2.0, delta=1.0)
 
+    def test_help_panel_fits_without_scrolling_and_shows_the_version(self):
+        """The help body (steps, Got it, version line) fits its box: no scrollbar, nothing clipped."""
+        from src.config import APP_VERSION
+        app = self.app
+        app._open_panel("help")
+        self._frames(4)
+        try:
+            self.assertEqual(dpg.get_y_scroll_max("help_body"), 0.0)
+            self.assertEqual(dpg.get_value("help_version"), f"Getsu {APP_VERSION}")
+            # help_body is a nested child window, which DearPyGui reports in parent coordinates; the sheet is not.
+            sheet = app._item_rect("sheet_help")
+            version = app._leaf_rect("help_version")
+            self.assertLessEqual(version[1][1], sheet[1][1])
+        finally:
+            app._close_panels()
+            self._frames(2)
+
     def test_power_button_is_96_logical_px(self):
         app = self.app
         w, h = _size(app._leaf_rect("power_drawlist"))

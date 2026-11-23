@@ -10,12 +10,18 @@ import pystray
 from pystray import MenuItem as item, Menu
 from src import win_theme, autostart, diagnostics
 
+from src.config import APP_VERSION
 from src.gui_common import ICON_ICO_PATH, ICON_PNG_PATH
 from src.gui_theme import COL_ERROR, COL_TEXT_2
 from src.gui_win32 import force_foreground_window
 
 # Opened in the browser by the tray action "Check for updates"; Getsu does not connect to it itself.
 RELEASES_URL = "https://github.com/skttr87/getsu/releases/latest"
+
+
+def tray_title(running: bool) -> str:
+    """Tray icon hover text with the installed version, e.g. "Getsu 1.4.0: Noise cancellation on"."""
+    return f"Getsu {APP_VERSION}: Noise cancellation {'on' if running else 'off'}"
 
 
 # Tray glyph on the 16 px grid of opt/mockup/logo/getsu-tray.svg: (x, y, width, height) of each bar.
@@ -80,7 +86,7 @@ class TrayMixin:
     def _update_tray_icon(self):
         if self._tray_icon:
             self._tray_icon.icon = create_tray_icon_image(self.is_running)
-            self._tray_icon.title = f"Getsu: {'Active' if self.is_running else 'Stopped'}"
+            self._tray_icon.title = tray_title(self.is_running)
 
     def _toggle_autostart(self, icon=None, menu_item=None):
         """Tray action for "Start with Windows": flips the Run entry. Never raises."""
@@ -150,7 +156,7 @@ class TrayMixin:
             item("Open Getsu", on_open, default=True),
             item("Toggle Start / Stop", on_toggle),
             autostart_item,
-            item("Check for updates", on_check_updates),
+            item(f"Check for updates ({APP_VERSION})", on_check_updates),
             item("Save diagnostics", on_save_diagnostics),
             pystray.Menu.SEPARATOR,
             item("Exit", on_exit),
@@ -158,5 +164,5 @@ class TrayMixin:
 
         # Dark right-click menu: must be requested before pystray creates the menu (best effort, see win_theme).
         win_theme.enable_dark_menus()
-        self._tray_icon = pystray.Icon("getsu", create_tray_icon_image(self.is_running), "Getsu Noise Cancellation", menu)
+        self._tray_icon = pystray.Icon("getsu", create_tray_icon_image(self.is_running), tray_title(self.is_running), menu)
         threading.Thread(target=self._tray_icon.run, daemon=True).start()

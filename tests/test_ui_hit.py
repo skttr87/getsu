@@ -123,6 +123,49 @@ class SegmentIndexTests(unittest.TestCase):
         self.assertIsNone(ui_hit.segment_index((10, 15), None, 4, 2))
         self.assertIsNone(ui_hit.segment_index((10, 15), self.RECT, 0, 2))
 
+class SegmentLayoutTests(unittest.TestCase):
+    """Mic boost track: four equal segments, a pill inset 2 px inside each, labels centred in each segment."""
+
+    W, H, N, INSET = 182.5, 38.0, 4, 2.0  # track of 146 logical px at 125 %, 30 logical px high
+
+    def setUp(self):
+        self.layout = ui_hit.segment_layout(self.W, self.H, self.N, self.INSET)
+
+    def test_segments_are_equal_and_cover_the_track(self):
+        widths = [seg[1][0] - seg[0][0] for seg, _ in self.layout]
+        for w in widths:
+            self.assertAlmostEqual(w, widths[0], places=9)
+        self.assertAlmostEqual(self.layout[0][0][0][0], 0.0)
+        self.assertAlmostEqual(self.layout[-1][0][1][0], self.W)
+        for (a, _), (b, _) in zip(self.layout, self.layout[1:]):
+            self.assertAlmostEqual(a[1][0], b[0][0], places=9)  # next segment starts where this one ends
+
+    def test_label_centres_are_within_1_px_of_segment_centres(self):
+        for i, (segment, _) in enumerate(self.layout):
+            for text_w, text_h in ((11.0, 20.0), (21.0, 20.0), (28.0, 20.0)):
+                x, y = ui_hit.label_origin(segment, text_w, text_h)
+                seg_cx = (segment[0][0] + segment[1][0]) / 2.0
+                seg_cy = (segment[0][1] + segment[1][1]) / 2.0
+                self.assertLessEqual(abs(x + text_w / 2.0 - seg_cx), 1.0, f"segment {i} x")
+                self.assertLessEqual(abs(y + text_h / 2.0 - seg_cy), 1.0, f"segment {i} y")
+
+    def test_pill_sits_inside_its_segment_with_a_two_px_inset(self):
+        for segment, pill in self.layout:
+            self.assertAlmostEqual(pill[0][0] - segment[0][0], 2.0)
+            self.assertAlmostEqual(segment[1][0] - pill[1][0], 2.0)
+            self.assertAlmostEqual(pill[0][1] - segment[0][1], 2.0)
+            self.assertAlmostEqual(segment[1][1] - pill[1][1], 2.0)
+
+    def test_click_hit_test_uses_the_same_equal_segments(self):
+        track = ((0.0, 0.0), (self.W, self.H))
+        for i, (segment, _) in enumerate(self.layout):
+            centre = ((segment[0][0] + segment[1][0]) / 2.0, self.H / 2.0)
+            self.assertEqual(ui_hit.segment_index(centre, track, self.N, 0), i)
+
+    def test_empty_layout_for_no_segments(self):
+        self.assertEqual(ui_hit.segment_layout(100, 30, 0, 2), [])
+
+
 if __name__ == "__main__":
     unittest.main()
 

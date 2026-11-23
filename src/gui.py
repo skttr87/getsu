@@ -209,6 +209,7 @@ class GetsuGUI(
         self._drag: Optional[str] = None      # "vad" while the Sensitivity knob follows the mouse
         self._slider_hovered = False
         self._seg_hover: Optional[int] = None  # index of the hovered boost segment
+        self._boost_labels_pending = False     # boost labels are centred once the settings panel is rendered
 
         self._hwnd: Optional[int] = None
         self._old_wndproc = None

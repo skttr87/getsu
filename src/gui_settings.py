@@ -20,6 +20,8 @@ from src.gui_theme import (
     COL_WARNING,
     COL_WHITE,
     SETTINGS_ROW_H,
+    SET_BOOST_H,
+    SET_BOOST_INSET,
     SET_CTRL_W,
     SET_LABEL_W,
     VAD_MAX,
@@ -80,12 +82,12 @@ class SettingsMixin:
         if not self._ui_built or not dpg.does_item_exist("seg_boost_bg"):
             return
         s = self.s
-        w, h, inset, gap = SET_CTRL_W, 30, 2, 2
-        seg_w = (w - 2 * inset - gap * (len(BOOST_DBS) - 1)) / float(len(BOOST_DBS))
+        track_w, track_h = s(SET_CTRL_W), s(SET_BOOST_H)
+        layout = ui_hit.segment_layout(track_w, track_h, len(BOOST_DBS), s(SET_BOOST_INSET))
         dpg.delete_item("seg_boost_bg", children_only=True)
-        dpg.draw_rectangle((0, 0), (s(w), s(h)), color=COL_FILL, fill=COL_FILL, rounding=s(9), parent="seg_boost_bg")
+        dpg.draw_rectangle((0, 0), (track_w, track_h), color=COL_FILL, fill=COL_FILL, rounding=s(9),
+                           parent="seg_boost_bg")
         for i, db in enumerate(BOOST_DBS):
-            x0 = inset + i * (seg_w + gap)
             selected = db == self.mic_boost_db
             if selected:
                 fill = COL_ACCENT
@@ -93,8 +95,8 @@ class SettingsMixin:
                 fill = COL_FILL_2
             else:
                 continue
-            dpg.draw_rectangle((s(x0), s(inset)), (s(x0 + seg_w), s(h - inset)), color=fill, fill=fill,
-                               rounding=s(7), parent="seg_boost_bg")
+            (px0, py0), (px1, py1) = layout[i][1]
+            dpg.draw_rectangle((px0, py0), (px1, py1), color=fill, fill=fill, rounding=s(7), parent="seg_boost_bg")
         for db in BOOST_DBS:
             if dpg.does_item_exist(f"seg_lbl_{db}"):
                 dpg.configure_item(f"seg_lbl_{db}", color=COL_WHITE if db == self.mic_boost_db else COL_TEXT)
@@ -120,11 +122,51 @@ class SettingsMixin:
         self._set_vad(self._vad_from_x(dpg.get_mouse_pos(local=False)[0], rect))
 
     def _boost_press(self):
-        """Click on the boost track: select the segment under the pointer."""
+        """Click on the boost track: select the segment under the pointer (the full segment slot, not only the pill)."""
         rect = self._item_rect("seg_boost")
-        idx = ui_hit.segment_index(dpg.get_mouse_pos(local=False), rect, len(BOOST_DBS), self.s(2))
+        idx = ui_hit.segment_index(dpg.get_mouse_pos(local=False), rect, len(BOOST_DBS), 0)
         if idx is not None:
             self.set_mic_boost(BOOST_DBS[idx])
+
+    def _place_boost_labels(self) -> bool:
+        """
+        Centres the four segment labels in their equal segments. The track is measured after rendering: the content
+        of the boost child window starts a few pixels below the drawlist rectangle, so each label is moved by the
+        difference between its rendered origin and the wanted origin. Returns False until the track and the labels
+        have a rendered rectangle.
+        """
+        track = self._leaf_rect("seg_boost_bg")
+        if track is None:
+            return False
+        (tx0, ty0), (tx1, ty1) = track
+        layout = ui_hit.segment_layout(tx1 - tx0, ty1 - ty0, len(BOOST_DBS), self.s(SET_BOOST_INSET))
+        font = self.font_set_seg or self.font_btn
+        placed = True
+        for i, db in enumerate(BOOST_DBS):
+            tag = f"seg_lbl_{db}"
+            rendered = self._leaf_rect(tag)
+            if rendered is None or not dpg.does_item_exist(tag):
+                placed = False
+                continue
+            text_w, text_h = self._text_size(self._boost_label(db), font)
+            ox, oy = ui_hit.label_origin(layout[i][0], text_w, text_h)
+            dx = (tx0 + ox) - rendered[0][0]
+            dy = (ty0 + oy) - rendered[0][1]
+            cur_x, cur_y = dpg.get_item_pos(tag)
+            dpg.configure_item(tag, pos=[int(round(cur_x + dx)), int(round(cur_y + dy))])
+        return placed
+
+    @staticmethod
+    def _boost_label(db: int) -> str:
+        return "0" if db == 0 else f"+{db}"
+
+    def _text_size(self, text: str, font=None):
+        """Width and height of a text run in physical pixels, as floats (for centring)."""
+        try:
+            w, h = dpg.get_text_size(text, font=font or 0)
+            return float(w), float(h)
+        except Exception:
+            return float(self.s(7) * len(text)), float(self.s(16))
 
     def _tick_controls(self):
         """Per frame: follows the mouse while the Sensitivity knob is dragged, and updates hover highlights."""
@@ -142,7 +184,10 @@ class SettingsMixin:
         if hovered != self._slider_hovered:
             self._slider_hovered = hovered
             self._draw_slider()
-        seg_hover = (ui_hit.segment_index(point, self._item_rect("seg_boost"), len(BOOST_DBS), self.s(2))
+        if self._boost_labels_pending and settings_open:
+            # Measured once the panel is on screen; stays pending until the track and labels have rectangles.
+            self._boost_labels_pending = not self._place_boost_labels()
+        seg_hover = (ui_hit.segment_index(point, self._item_rect("seg_boost"), len(BOOST_DBS), 0)
                      if settings_open else None)
         if seg_hover != self._seg_hover:
             self._seg_hover = seg_hover
@@ -239,18 +284,14 @@ class SettingsMixin:
                     dpg.add_drawlist(width=self.s(SET_CTRL_W), height=self.s(30), tag="seg_boost_bg")
                     # Labels are text items placed over the track (drawlist text cannot use the SemiBold font).
                     label_font = self.font_set_seg or self.font_btn
-                    seg_w = (SET_CTRL_W - 4 - 2 * 3) / 4.0
-                    for i, db in enumerate(BOOST_DBS):
-                        label = "0" if db == 0 else f"+{db}"
-                        text_w = self._text_w(label, label_font)
-                        text_h = self._text_h(label, label_font)
-                        cx = 2 + i * (seg_w + 2) + seg_w / 2.0
-                        dpg.add_text(label, tag=f"seg_lbl_{db}", color=COL_TEXT,
-                                     pos=[self.s(cx) - text_w // 2, (self.s(30) - text_h) // 2])
+                    for db in BOOST_DBS:
+                        # Positioned by _place_boost_labels once the panel has been rendered.
+                        dpg.add_text(self._boost_label(db), tag=f"seg_lbl_{db}", color=COL_TEXT, pos=[0, 0])
                         if label_font:
                             dpg.bind_item_font(f"seg_lbl_{db}", label_font)
         self._panel_targets.setdefault("settings", {})["seg_boost"] = self._boost_press
         self._hit_parts["seg_boost"] = ["seg_boost_bg"]
+        self._boost_labels_pending = True
         self._draw_boost()
 
     def _settings_row_switch(self, name: str, label: str, detail, on: bool, callback):

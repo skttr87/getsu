@@ -153,6 +153,24 @@ class TypeScaleLayoutTests(unittest.TestCase):
             app._close_panels()
             self._frames(2)
 
+    def test_boost_labels_are_centred_in_their_equal_segments(self):
+        app = self.app
+        app._open_panel("settings")
+        self._frames(3)
+        app._tick_controls()  # places the labels once the panel is rendered
+        self._frames(2)
+        self.assertFalse(app._boost_labels_pending)
+        (x0, _), (x1, _) = app._leaf_rect("seg_boost_bg")
+        (_, y0), (_, y1) = app._leaf_rect("seg_boost_bg")
+        seg_w = (x1 - x0) / len(g.BOOST_DBS)
+        for i, db in enumerate(g.BOOST_DBS):
+            rect = app._leaf_rect(f"seg_lbl_{db}")
+            self.assertIsNotNone(rect, db)
+            cx = (rect[0][0] + rect[1][0]) / 2.0
+            cy = (rect[0][1] + rect[1][1]) / 2.0
+            self.assertLessEqual(abs(cx - (x0 + (i + 0.5) * seg_w)), 1.0, f"label {db} x")
+            self.assertLessEqual(abs(cy - (y0 + y1) / 2.0), 1.0, f"label {db} y")
+
     def test_settings_panel_text_is_one_css_px_smaller_than_the_shared_scale(self):
         app = self.app
         self.assertEqual(g.TYPE_SET_TITLE, g.TYPE_TITLE - 1)

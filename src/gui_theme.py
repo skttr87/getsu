@@ -70,6 +70,8 @@ SET_LABEL_W = 234    # label column of a settings row (the detail wraps inside i
 SET_CTRL_W = 146     # control column of a settings row: slider, boost segments, switch
 VAD_MIN, VAD_MAX = 0.40, 0.90  # Sensitivity range (vad_threshold)
 BOOST_DBS = (0, 5, 10, 15)     # mic boost segments, left to right
+SET_BOOST_H = 30               # mic boost track height (logical px)
+SET_BOOST_INSET = 2            # selected pill inset from its segment, on all sides (logical px)
 
 # First-run card copy (mockup "First run" and "Installing cable" screens).
 SETUP_BODY_OFFER = ("Getsu needs a free virtual audio cable to send your clean voice to Discord, Zoom and games. "

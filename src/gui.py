@@ -122,6 +122,7 @@ from src.gui_win32 import (
 )
 from src.router import SmartMicRouter
 from src.stream import AudioEngine, create_engine_from_config
+from src.cable_guard import CableGuard
 
 
 class GetsuGUI(
@@ -218,8 +219,12 @@ class GetsuGUI(
         self._tray_icon: Optional[pystray.Icon] = None
         self._device_change_timer: Optional[threading.Timer] = None
         self._device_change_lock = threading.Lock()
+        self._cable_guard = CableGuard(self._cable_guard_gather, self._cable_guard_apply, self._cable_guard_notify)
 
         self._refresh_devices()
+
+        # Windows may have picked the cable as default at startup (after a headset was unplugged while Getsu was closed).
+        self._cable_guard.request("startup", delay=1.0)
 
         # Start stream health watchdog
         threading.Thread(target=self._watchdog_loop, daemon=True).start()
@@ -240,6 +245,7 @@ class GetsuGUI(
         self._persist_was_running(
             (self.is_running and self._busy != "stopping") or self._resume_pending)
         self._app_running = False
+        self._cable_guard.cancel()
         self._cancel_voice_test = True
         for timer in (self._device_change_timer, self._vad_save_timer):
             if timer and timer.is_alive():
@@ -401,6 +407,8 @@ class GetsuGUI(
                     self.is_running = False
                     self._persist_was_running(False)
                     self._update_tray_icon()
+                    # The microphone is restored now; check that Windows did not leave the cable as default.
+                    self._cable_guard.request("stop", delay=0.0)
                 except Exception as e:
                     print(f"[ERROR] Failed to stop stream cleanly: {e}")
                 finally:

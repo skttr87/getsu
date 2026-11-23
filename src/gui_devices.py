@@ -41,6 +41,12 @@ from src.gui_theme import (
 from src.host_api_resolver import selection_hint
 from src.router import clear_device_bus_type_cache
 from src.stream import create_engine_from_config
+from src.cable_guard import (
+    DEVICE_CHANGE,
+    DEVICE_CHANGE_DELAY_S,
+    apply_decision,
+    gather_state,
+)
 
 
 # Icon shape for each device kind: bt = earbuds, headset, builtin = laptop, mic = microphone.
@@ -156,9 +162,30 @@ class DevicesMixin:
             self._update_selection_hint(self._get_selected_input_label())
             self._refresh_mic_widgets()
 
+    def _cable_guard_gather(self):
+        """Current Windows defaults and Getsu state for the cable guard (read-only, see src/cable_guard.py)."""
+        raw_name = self.device_raw.get(self.selected_input_name) if self.selected_input_name else None
+        return gather_state(
+            self.config,
+            raw_name,
+            nc_running=self.is_running,
+            voice_test_running=self._is_testing_voice,
+            swap_in_progress=(self._busy is not None or self._is_rescanning or self._resume_pending),
+        )
+
+    def _cable_guard_apply(self, decision) -> bool:
+        return apply_decision(self.router, decision)
+
+    def _cable_guard_notify(self, text: str, warn: bool):
+        if not self._ui_built or not self._app_running:
+            return
+        self.set_status_pill(text, COL_WARNING if warn else COL_TEXT_2)
+
     def _on_device_change_event(self):
         """Debounced listener for Windows WM_DEVICECHANGE hotplug signals."""
         clear_device_bus_type_cache()
+        # Windows picks its own replacement default asynchronously; the guard runs a little later.
+        self._cable_guard.request(DEVICE_CHANGE, delay=DEVICE_CHANGE_DELAY_S)
         with self._device_change_lock:
             if self._device_change_timer and self._device_change_timer.is_alive():
                 self._device_change_timer.cancel()

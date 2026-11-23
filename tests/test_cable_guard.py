@@ -371,5 +371,56 @@ class TestApplyDecision(unittest.TestCase):
         router.set_default_capture.assert_not_called()
 
 
+class TestGuiWiring(unittest.TestCase):
+    def test_device_change_event_requests_a_delayed_guard_run(self):
+        from src.gui_devices import DevicesMixin
+        fake = MagicMock()
+        DevicesMixin._on_device_change_event(fake)
+        fake._cable_guard.request.assert_called_once_with("device_change", delay=2.0)
+
+    def test_gather_passes_the_full_name_of_the_selected_microphone(self):
+        from src.gui_devices import DevicesMixin
+        fake = MagicMock()
+        fake.selected_input_name = "Microphone (Realtek(R) Audio) #2"
+        fake.device_raw = {"Microphone (Realtek(R) Audio) #2": "Microphone (Realtek(R) Audio)"}
+        fake.is_running = False
+        fake._is_testing_voice = False
+        fake._busy = None
+        fake._is_rescanning = False
+        fake._resume_pending = True
+        with patch("src.gui_devices.gather_state", return_value="state") as gather:
+            self.assertEqual(DevicesMixin._cable_guard_gather(fake), "state")
+        args, kwargs = gather.call_args
+        self.assertEqual(args[1], "Microphone (Realtek(R) Audio)")
+        self.assertFalse(kwargs["nc_running"])
+        self.assertTrue(kwargs["swap_in_progress"])  # a pending resume counts as a swap in progress
+
+    def test_notify_is_silent_before_the_window_exists(self):
+        from src.gui_devices import DevicesMixin
+        fake = MagicMock()
+        fake._ui_built = False
+        fake._app_running = True
+        DevicesMixin._cable_guard_notify(fake, "Microphone set back to X", False)
+        fake.set_status_pill.assert_not_called()
+
+    def test_notify_shows_the_status_line(self):
+        from src.gui_devices import DevicesMixin
+        fake = MagicMock()
+        fake._ui_built = True
+        fake._app_running = True
+        DevicesMixin._cable_guard_notify(fake, PLAYBACK_NO_TARGET_STATUS, True)
+        fake.set_status_pill.assert_called_once()
+        self.assertEqual(fake.set_status_pill.call_args.args[0], PLAYBACK_NO_TARGET_STATUS)
+
+    def test_teardown_cancels_the_guard(self):
+        from src.gui import GetsuGUI
+        fake = MagicMock()
+        fake._device_change_timer = None
+        fake._vad_save_timer = None
+        GetsuGUI._teardown_engine_and_timers(fake)
+        fake._cable_guard.cancel.assert_called_once()
+        self.assertFalse(fake._app_running)
+
+
 if __name__ == "__main__":
     unittest.main()

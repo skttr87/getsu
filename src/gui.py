@@ -119,19 +119,11 @@ from src.router import SmartMicRouter
 from src.stream import AudioEngine, create_engine_from_config
 
 
-def launch_gui(minimized: bool = False):
-    app = GetsuGUI(minimized=minimized)
-    app.build_ui()
-
-
-if __name__ == "__main__":
-    from src.single_instance import activate_existing_instance
-    if activate_existing_instance():
-        sys.exit(0)
-    launch_gui()
-
-
-class GetsuGUI(Win32Mixin, TrayMixin, WidgetsMixin, DevicesMixin, HeroMixin, SetupMixin, VoiceTestMixin, PanelsMixin, SettingsMixin):
+class GetsuGUI(
+    Win32Mixin, TrayMixin, WidgetsMixin, DevicesMixin,
+    HeroMixin, SetupMixin, VoiceTestMixin, PanelsMixin,
+    SettingsMixin,
+):
 
     def __init__(self, minimized: bool = False):
         # Explicit AppUserModelID ensures Windows Taskbar pins the custom icon instead of python.exe
@@ -850,3 +842,15 @@ class GetsuGUI(Win32Mixin, TrayMixin, WidgetsMixin, DevicesMixin, HeroMixin, Set
             dpg.configure_item("main_window", no_scrollbar=desired <= cap)
         except Exception as e:
             print(f"[WARN] Window fit failed: {e}")
+
+
+def launch_gui(minimized: bool = False):
+    app = GetsuGUI(minimized=minimized)
+    app.build_ui()
+
+
+if __name__ == "__main__":
+    from src.single_instance import activate_existing_instance
+    if activate_existing_instance():
+        sys.exit(0)
+    launch_gui()

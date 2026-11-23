@@ -232,7 +232,7 @@ class PanelsMixin:
                                               self._on_auto_route_switch)
                     self._divider(width)
                     self._settings_row_switch("music_mode", "Music & Singing mode",
-                                              "No AI Filter",
+                                              "No AI filter",
                                               bool(self.config.get("music_mode", False)),
                                               self._on_music_mode_switch)
                     self._divider(width, show=FEATURE_LEARN_ROOM)

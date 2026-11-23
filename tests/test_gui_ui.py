@@ -141,17 +141,18 @@ class NoPictographTests(unittest.TestCase):
 class FeatureFlagTests(unittest.TestCase):
     """Controls whose backend is not built yet stay hidden in phase B."""
 
-    def test_modes_hidden_by_default(self):
-        self.assertIs(gui.FEATURE_MODES, False)
-
     def test_earbud_hint_hidden_by_default(self):
         self.assertIs(gui.FEATURE_EARBUD_HINT, False)
 
     def test_learn_my_room_hidden_by_default(self):
         self.assertIs(gui.FEATURE_LEARN_ROOM, False)
 
-    def test_mode_names_match_the_mockup(self):
-        self.assertEqual(gui.MODE_NAMES, ("Game", "Meeting", "Session", "Music"))
+    def test_modes_are_gone(self):
+        # Owner cancelled the Modes row (2026-11-23): no flag, names or descriptions are left in the UI code.
+        from src import gui_theme
+        self.assertFalse(hasattr(gui_theme, "FEATURE_MODES"))
+        self.assertFalse(hasattr(gui_theme, "MODE_NAMES"))
+        self.assertFalse(hasattr(gui_theme, "MODE_DESCRIPTIONS"))
 
 
 class PaletteTests(unittest.TestCase):

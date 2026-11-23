@@ -9,7 +9,7 @@ import sounddevice as sd
 from src import ui_icons as icons
 
 from src.config import save_config
-from src.device_labels import split_name, subtitle
+from src.device_labels import display_titles, split_name, strip_ordinal, subtitle
 from src.devices import (
     get_input_devices,
     auto_select_input_device,
@@ -20,6 +20,7 @@ from src.devices import (
     DeviceKind,
 )
 from src.gui_common import clean_device_label
+from src.ui_queue import ui_only
 from src.gui_theme import (
     COL_ACCENT,
     COL_ERROR,
@@ -31,12 +32,9 @@ from src.gui_theme import (
     COL_WHITE,
     CONTENT_W,
     FEATURE_EARBUD_HINT,
-    FEATURE_MODES,
     MIC_LIST_TEXT_W,
     MIC_ROW_H,
     MIC_TEXT_W,
-    MODE_DESCRIPTIONS,
-    MODE_NAMES,
 )
 from src.host_api_resolver import selection_hint
 from src.router import clear_device_bus_type_cache
@@ -114,7 +112,8 @@ class DevicesMixin:
                     with self._device_change_lock:
                         if not self._device_change_timer or not self._device_change_timer.is_alive():
                             print("[WATCHDOG] Audio stream stalled or disconnected. Triggering rescan...")
-                            self._device_change_timer = threading.Timer(0.3, self._handle_hardware_rescan)
+                            self._device_change_timer = threading.Timer(0.3, self._handle_hardware_rescan,
+                                                                        kwargs={"force": True})
                             self._device_change_timer.daemon = True
                             self._device_change_timer.start()
 
@@ -216,129 +215,215 @@ class DevicesMixin:
             self._device_change_timer.daemon = True
             self._device_change_timer.start()
 
-    def _handle_hardware_rescan(self):
-        """Processes hardware changes, updates dropdown UI, and auto-switches to newly plugged mic if stopped."""
+    def _endpoint_snapshot(self) -> Optional[Dict[str, Dict[str, str]]]:
+        """
+        Active audio endpoints as Windows reports them (PortAudio cannot be re-read while a stream runs):
+        {"capture": {endpoint id: name}, "render": {endpoint id: name}}. None when Windows gives no answer.
+        """
+        try:
+            capture = {e["id"]: e["name"] for e in win_audio.native_list_active_endpoints(is_input=True) if e.get("id")}
+            render = {e["id"]: e["name"] for e in win_audio.native_list_active_endpoints(is_input=False) if e.get("id")}
+        except Exception as e:
+            print(f"[HARDWARE] Endpoint listing failed: {e}")
+            return None
+        if not capture and not render:
+            return None
+        return {"capture": capture, "render": render}
+
+    def _title_for_raw(self, raw: str) -> str:
+        """The title the microphone list shows for a raw device name (used in the status line)."""
+        titles = display_titles(list(self.device_raw.values()))
+        return titles.get(raw) or strip_ordinal(split_name(raw)["title"])
+
+    def _label_for_index(self, index) -> Optional[str]:
+        return next((label for label, idx in self.device_map.items() if idx == index), None)
+
+    def _select_label(self, label: str):
+        """Makes a detected microphone the selected one and stores it."""
+        self.selected_input_idx = self.device_map[label]
+        self.selected_input_name = label
+        self.config["input_device_name"] = label
+        self.config["input_device_id"] = self.selected_input_idx
+        save_config(self.config)
+
+    def _handle_hardware_rescan(self, force: bool = False):
+        """
+        Timer callback after a device event. It acts only when the set of audio endpoints changed; other device
+        events (mouse, USB stick, charger) change nothing. force is set by the watchdog when the stream is dead.
+        """
         print("[HARDWARE] Audio device change detected. Rescanning...")
         clear_device_bus_type_cache()
         with self._device_change_lock:
             self._is_rescanning = True
             try:
-                was_running = self.is_running
-                if was_running and self.engine:
-                    print("[HARDWARE] Pausing active stream for clean PortAudio reinitialization...")
-                    self.engine.stop()
-                    self.engine = None
-                    self.is_running = False
-
-                # Safe PortAudio reinitialization: no active streams exist right now
-                try:
-                    sd._terminate()
-                    sd._initialize()
-                except Exception as e:
-                    print(f"[HARDWARE] PortAudio reinit error: {e}")
-
-                old_devices = dict(self.device_map)
-                self._refresh_devices(reinit_portaudio=False)
-                new_devices = dict(self.device_map)
-
-                added = set(new_devices.keys()) - set(old_devices.keys())
-                removed = set(old_devices.keys()) - set(new_devices.keys())
-
-                if added:
-                    print(f"[HARDWARE] New microphone detected: {', '.join(added)}")
-                    # If stream was stopped before the rescan, auto-select newly plugged microphone
-                    if not was_running:
-                        for label in added:
-                            self.selected_input_idx = new_devices[label]
-                            self.selected_input_name = label
-                            self.config["input_device_name"] = label
-                            self.config["input_device_id"] = self.selected_input_idx
-                            save_config(self.config)
-                            print(f"[HARDWARE] Auto-selected new microphone: {label}")
-                            break
-                    else:
-                        # Edge Case 1.6: User plugs new USB headset while active mid-call.
-                        # Update original_mic_id to the new headset, keeping CABLE Output default so call isn't interrupted.
-                        if self.router and self.router.is_swapped:
-                            guid, name = self.router.get_current_default_mic()
-                            if guid and "cable" not in name.lower():
-                                self.router.original_mic_id = guid
-                                self.config["original_mic_id"] = guid
-                                save_config(self.config)
-                                print(f"[HARDWARE] Updated original_mic_id to new headset: {name}")
-
-                if removed:
-                    print(f"[HARDWARE] Microphone removed: {', '.join(removed)}")
-                    # Name-based check: if active microphone was removed or is not in new devices
-                    if self.selected_input_name in removed or self.selected_input_name not in new_devices:
-                        self.selected_input_idx = self._get_windows_default_input()
-                        self.selected_input_name = self._get_selected_input_label()
-                        self.config["input_device_name"] = self.selected_input_name
-                        self.config["input_device_id"] = self.selected_input_idx
-                        save_config(self.config)
-                        print(f"[HARDWARE] Active microphone disconnected. Fallback to: {self.selected_input_name} (index {self.selected_input_idx})")
-
-                # If active device is in new devices, keep its index updated in case of index shifts
-                if self.selected_input_name in new_devices:
-                    self.selected_input_idx = new_devices[self.selected_input_name]
-
-                # Validate output endpoint
-                self.is_vbcable_installed, cable_in, _ = check_vbcable_status()
-                if self.is_vbcable_installed and cable_in:
-                    self.selected_output_idx = cable_in['index']
-                    self.selected_output_name = cable_in['name']
-                else:
-                    target_out, _ = auto_select_output_device()
-                    self.selected_output_idx = target_out['index']
-                    self.selected_output_name = target_out.get('name', 'Default Output')
-
-                # Update the microphone row and the microphone panel
-                self._refresh_mic_widgets()
-
-                self._update_cable_banner()
-
-                # Seamlessly restart stream if it was running before
-                if was_running and self._app_running:
-                    acquired = self._state_lock.acquire(timeout=4.0)
-                    if acquired:
-                        try:
-                            # Re-verify that user didn't stop the stream while rescan was running
-                            if not self._app_running:
-                                return
-                            print(f"[HARDWARE] Resuming stream on [{self.selected_input_idx}] {self.selected_input_name} -> [{self.selected_output_idx}] {self.selected_output_name}")
-                            self.engine = create_engine_from_config(
-                                self.config,
-                                self.selected_input_idx,
-                                self.selected_output_idx,
-                                router=self.router,
-                            )
-                            self.engine.start()
-                            self.is_running = True
-                            self._render_hero()
-                            self.set_status_pill("AI Filter Active. Clean Voice Routed", COL_ACCENT)
-                            self._update_tray_icon()
-                            self._set_voice_test_button_state(False)
-                        except Exception as e:
-                            print(f"[HARDWARE] Failed to restart stream after rescan: {e}")
-                            self.is_running = False
-                            if self.engine:
-                                try:
-                                    self.engine.prepare_for_stop()
-                                except Exception:
-                                    pass
-                                self.engine = None
-                            self._render_hero()
-                            self._set_voice_test_button_state(True)
-                            self.set_status_pill(f"{self._format_audio_error(e)}", COL_ERROR)
-                        finally:
-                            self._release_state_lock()
-                    else:
-                        print("[HARDWARE] Could not acquire state lock to resume stream; aborting auto-restart.")
-
+                self._rescan_audio_endpoints(force)
             except Exception as e:
                 print(f"[HARDWARE] Error during hardware rescan: {e}")
             finally:
                 self._is_rescanning = False
+
+    def _rescan_audio_endpoints(self, force: bool):
+        now = self._endpoint_snapshot()
+        before = self._endpoint_state
+        if not force:
+            if now is None:
+                if self.is_running:
+                    return  # Windows did not answer: a running stream is left alone
+            elif before is None:
+                self._endpoint_state = now  # first event: record the endpoints, nothing to compare with yet
+                return
+            elif set(now["capture"]) == set(before["capture"]) and not self._pending_headset:
+                # Only playback endpoints changed (or nothing audio at all): the microphone path does not depend on them.
+                self._endpoint_state = now
+                if now != before and not self.is_running:
+                    self._refresh_devices(reinit_portaudio=True)
+                return
+        self._endpoint_state = now if now is not None else before
+        self._apply_endpoint_change()
+
+    def _apply_endpoint_change(self):
+        """
+        Re-reads the microphones after a change of the capture endpoints and decides the selection:
+        a newly plugged USB or wired headset is selected (and switched to while running); when the selected
+        microphone is gone the existing ranking picks the next one. While running the stream is restarted once.
+        """
+        was_running = self.is_running
+        previous_label = self.selected_input_name
+        previous_raw = set(self.device_raw.values())
+        if was_running and self.engine:
+            print("[HARDWARE] Microphone list changed while running. Pausing the stream for a clean PortAudio reinitialization...")
+            self.engine.stop()  # not prepare_for_stop(): the router stays swapped, the stream is restarted below
+            self.engine = None
+            self.is_running = False
+
+        try:
+            sd._terminate()
+            sd._initialize()
+        except Exception as e:
+            print(f"[HARDWARE] PortAudio reinit error: {e}")
+
+        self._refresh_devices(reinit_portaudio=False)
+
+        added = [d for d in self.input_devices if d['name'] not in previous_raw]
+        candidates = [d for d in added if classify_device(d['name'], is_input=True)
+                      in (DeviceKind.USB_HEADSET, DeviceKind.WIRED_HEADSET)]
+        if self._pending_headset:
+            candidates += [d for d in self.input_devices
+                           if d['name'] == self._pending_headset and d not in candidates]
+        candidates = [d for d in candidates if self._label_for_index(d['index']) is not None]
+
+        best = auto_select_input_device(candidates=candidates) if candidates else None
+        if best is not None:
+            target = self._label_for_index(best['index'])
+        elif previous_label in self.device_map:
+            target = previous_label
+        else:
+            fallback = auto_select_input_device()
+            target = self._label_for_index(fallback['index']) if fallback else None
+
+        if target is None:
+            print("[HARDWARE] No microphone left to select.")
+            if was_running:
+                self._stop_after_failure(None, "No microphone detected. Please connect a mic.")
+            else:
+                self._refresh_mic_widgets()
+                self._update_cable_banner()
+            return
+
+        if not was_running:
+            self._select_label(target)
+            if best is not None:
+                self._pending_headset = None
+                self.set_status_pill(f"{self._title_for_raw(self.device_raw[target])} selected", COL_ACCENT)
+            self._refresh_mic_widgets()
+            self._update_cable_banner()
+            return
+
+        if not self._state_lock.acquire(timeout=4.0):
+            print("[HARDWARE] Could not acquire state lock to resume stream; aborting auto-restart.")
+            self._stop_after_failure(None, "Microphone changed. Restart noise cancellation.")
+            return
+        try:
+            self._restart_on(target, previous_label, switching=best is not None)
+        finally:
+            self._release_state_lock()
+        self._refresh_mic_widgets()
+        self._update_cable_banner()
+
+    def _start_engine_on(self, label: str):
+        """Opens the engine on a detected microphone. Raises if the device does not open; the state is then unchanged."""
+        idx = self.device_map[label]
+        engine = create_engine_from_config(self.config, idx, self.selected_output_idx, router=self.router)
+        try:
+            engine.start()
+        except Exception:
+            try:
+                engine.stop()
+            except Exception:
+                pass
+            raise
+        self.engine = engine
+        self._select_label(label)
+        self.is_running = True
+
+    def _restart_on(self, target: str, previous_label: Optional[str], switching: bool):
+        """Restarts noise cancellation on the target microphone; on failure falls back to the previous one."""
+        try:
+            self._start_engine_on(target)
+        except Exception as e:
+            print(f"[HARDWARE] Failed to start on {target}: {e}")
+            if switching and previous_label in self.device_map and previous_label != target:
+                try:
+                    self._start_engine_on(previous_label)
+                except Exception as e2:
+                    self._stop_after_failure(e2)
+                    return
+                self._pending_headset = self.device_raw.get(target)  # tried again on the next audio device event
+                self.set_status_pill(
+                    f"Could not use {self._title_for_raw(self.device_raw[target])} yet. "
+                    f"Still using {self._title_for_raw(self.device_raw[previous_label])}.", COL_WARNING)
+                self._finish_running_restart()
+                return
+            self._stop_after_failure(e)
+            return
+
+        self._pending_headset = None
+        if switching or target != previous_label:
+            self.set_status_pill(f"Switched to {self._title_for_raw(self.device_raw[target])}", COL_ACCENT)
+        else:
+            self.set_status_pill("AI Filter Active. Clean Voice Routed", COL_ACCENT)
+        self._finish_running_restart()
+
+    def _finish_running_restart(self):
+        self._render_hero()
+        self._update_tray_icon()
+        self._set_voice_test_button_state(False)
+        # The new engine swapped nothing (the router was already swapped): put CABLE Output back as the default
+        # if Windows moved the default capture to the new microphone.
+        try:
+            if self.router:
+                self.router.reassert_cable_default()
+        except Exception as e:
+            print(f"[HARDWARE] Could not re-assert CABLE Output: {e}")
+
+    def _stop_after_failure(self, error, text: Optional[str] = None):
+        """Noise cancellation could not continue: stops it, gives the microphone back and says why."""
+        self.is_running = False
+        if self.engine:
+            try:
+                self.engine.stop()
+            except Exception:
+                pass
+            self.engine = None
+        try:
+            if self.router and self.router.is_swapped:
+                self.router.restore_original()
+        except Exception as e:
+            print(f"[HARDWARE] Could not restore the microphone: {e}")
+        self._render_hero()
+        self._update_tray_icon()
+        self._set_voice_test_button_state(True)
+        self.set_status_pill(text or self._format_audio_error(error), COL_ERROR)
 
     def _get_selected_input_label(self) -> str:
         for label, idx in self.device_map.items():
@@ -381,6 +466,7 @@ class DevicesMixin:
         finally:
             self._release_state_lock()
 
+    @ui_only
     def _update_selection_hint(self, selected_label: Optional[str] = None):
         """Updates the dynamic advisory hint beneath the microphone dropdown."""
         if not self._ui_built or not dpg.does_item_exist("input_selection_hint"):
@@ -400,6 +486,7 @@ class DevicesMixin:
         """One entry per detected microphone: label (for selection), title, subtitle, kind, full name."""
         raw_of = {label: self.device_raw.get(label, label) for label in self.device_map}
         kinds = {raw: classify_device(raw, is_input=True) for raw in raw_of.values()}
+        titles = display_titles(raw_of.values())
         entries = []
         for label, idx in self.device_map.items():
             raw = raw_of[label]
@@ -408,13 +495,14 @@ class DevicesMixin:
                 "label": label,
                 "index": idx,
                 "raw": raw,
-                "title": split_name(raw)["title"],
+                "title": titles[raw],
                 "subtitle": subtitle(raw, kind, kinds),
                 "kind": kind,
                 "glyph": _GLYPH_FOR_KIND.get(kind, "mic"),
             })
         return entries
 
+    @ui_only
     def _refresh_mic_widgets(self):
         """Updates the microphone row of the card, the hidden earbud hint, and the list if it is open."""
         if not self._ui_built or not dpg.does_item_exist("mic_row_title"):
@@ -501,10 +589,9 @@ class DevicesMixin:
             dpg.add_text("No microphone detected.", color=COL_TEXT_2, parent="mic_list")
 
     def _build_mic_card(self, width: int):
-        modes_h = self.s(85) if FEATURE_MODES else 0
         hint_h = self.s(28) if FEATURE_EARBUD_HINT else 0
         row_h = self.s(MIC_ROW_H)
-        card_h = row_h + hint_h + modes_h
+        card_h = row_h + hint_h
         with dpg.child_window(tag="mic_card", width=width, height=card_h, border=False, no_scrollbar=True):
             self._bind_card("mic_card")
             with dpg.child_window(tag="mic_row", width=width, height=row_h, border=False,
@@ -531,33 +618,9 @@ class DevicesMixin:
                 dpg.add_spacer(width=self.s(16))
                 dpg.add_text("Earbud mic drops audio to call quality.", color=COL_TEXT_2, tag="hint_text")
                 dpg.bind_item_font("hint_text", self.font_notice)
-                dpg.add_button(label="Use built-in mic", tag="btn_use_builtin", callback=self._use_builtin_mic)
-                dpg.bind_item_theme("btn_use_builtin", self.theme_link_btn)
-            with dpg.group(tag="mode_block", show=FEATURE_MODES):
-                with dpg.group(horizontal=True):
-                    dpg.add_spacer(width=self.s(16))
-                    dpg.add_drawlist(width=width - self.s(32), height=1, tag="mode_divider")
-                    dpg.draw_line((0, 0), (width - self.s(32), 0), color=COL_SEPARATOR, thickness=1.0, parent="mode_divider")
-                dpg.add_spacer(height=self.s(12))
-                with dpg.group(horizontal=True):
-                    dpg.add_spacer(width=self.s(16))
-                    dpg.add_text("Mode", color=COL_TEXT)
-                    dpg.bind_item_font(dpg.last_item(), self.font_btn)
-                    dpg.add_spacer(width=0, tag="mode_desc_pad")
-                    dpg.add_text(MODE_DESCRIPTIONS[self._mode], color=COL_TEXT_2, tag="mode_desc")
-                    dpg.bind_item_font("mode_desc", self.font_notice)
-                dpg.add_spacer(height=self.s(8))
-                seg_w = (width - self.s(32) - self.s(6)) // 4
-                with dpg.group(horizontal=True):
-                    dpg.add_spacer(width=self.s(16))
-                    for i, mode in enumerate(MODE_NAMES):
-                        dpg.add_button(label=mode, tag=f"mode_{i}", width=seg_w, height=self.s(30),
-                                       callback=lambda s, a, m=mode: self._set_mode(m))
-                        dpg.bind_item_font(f"mode_{i}", self.font_btn)
-                        if i < 3:
-                            dpg.add_spacer(width=self.s(2))
-                dpg.add_spacer(height=self.s(16))
-                self._set_mode(self._mode)
+                self._text_link("btn_use_builtin", "Use built-in mic", self.font_body,
+                                self._text_w("Use built-in mic", self.font_body) + self.s(8),
+                                self._text_h("Use built-in mic", self.font_body), "", self._use_builtin_mic)
 
     def _bind_card(self, tag: str):
         if self.theme_card:

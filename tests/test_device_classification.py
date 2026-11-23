@@ -298,6 +298,9 @@ class TestAutoSelectInput(FakeEndpointStore):
     def test_only_bluetooth_is_default_and_built_in_present_picks_bluetooth(self):
         self.endpoint("Headset (HUAWEI FreeBuds SE 4 ANC)", DeviceBusType.BLUETOOTH_HFP, EndpointFormFactor.HEADSET)
         self.endpoint("Microphone (Realtek(R) Audio)", DeviceBusType.INTERNAL_HD, EndpointFormFactor.MICROPHONE)
+        # The pick must come from the bus data, not from the default alone: without the Bluetooth bus the
+        # headset would not be a Bluetooth headset.
+        self.assertEqual(classify_device("Headset (HUAWEI FreeBuds SE 4 ANC)", True), DeviceKind.BLUETOOTH_HEADSET)
         self.set_default(0)
         inputs = [
             {'index': 0, 'name': "Headset (HUAWEI FreeBuds SE 4 ANC)"},

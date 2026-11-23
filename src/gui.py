@@ -58,7 +58,6 @@ from src.gui_theme import (
     CONTENT_W,
     FEATURE_EARBUD_HINT,
     FEATURE_LEARN_ROOM,
-    FEATURE_MODES,
     HELP_BODY_H,
     HELP_STEP_H,
     HERO_H,
@@ -66,8 +65,6 @@ from src.gui_theme import (
     MIC_LIST_TEXT_W,
     MIC_ROW_H,
     MIC_TEXT_W,
-    MODE_DESCRIPTIONS,
-    MODE_NAMES,
     POWER_D,
     SETTINGS_ROW_H,
     SETUP_BODY_INSTALLING,
@@ -123,6 +120,7 @@ from src.gui_win32 import (
 from src.router import SmartMicRouter
 from src.stream import AudioEngine, create_engine_from_config
 from src.cable_guard import CableGuard
+from src.ui_queue import UiQueue, ui_only
 
 
 class GetsuGUI(
@@ -203,7 +201,6 @@ class GetsuGUI(
         self._meter_flat = True
         self._last_meter_t = 0.0
         self._work_h = 0
-        self._mode = "Game"
         self.theme_flat = None
         self.theme_card = None
         self.theme_list = None
@@ -222,15 +219,60 @@ class GetsuGUI(
         self._tray_icon: Optional[pystray.Icon] = None
         self._device_change_timer: Optional[threading.Timer] = None
         self._device_change_lock = threading.Lock()
+        # Worker threads hand DearPyGui calls to the UI thread through this queue (see src/ui_queue.py).
+        self._ui_queue = UiQueue()
+        self._ui_thread: Optional[threading.Thread] = None   # the thread that runs the render loop (set by build_ui)
+        self._worker_threads: List[threading.Thread] = []
+        self._worker_lock = threading.Lock()
         self._cable_guard = CableGuard(self._cable_guard_gather, self._cable_guard_apply, self._cable_guard_notify)
 
         self._refresh_devices()
+        # Audio endpoints as Windows lists them now; a later device event is compared with this (see gui_devices).
+        self._endpoint_state = self._endpoint_snapshot()
+        self._pending_headset: Optional[str] = None  # raw name of a headset that did not open yet (retried on the next event)
 
         # Windows may have picked the cable as default at startup (after a headset was unplugged while Getsu was closed).
         self._cable_guard.request("startup", delay=1.0)
 
         # Start stream health watchdog
-        threading.Thread(target=self._watchdog_loop, daemon=True).start()
+        self._start_thread(self._watchdog_loop)
+
+    # --- UI thread and worker threads ---------------------------------------
+
+    def _on_ui_thread(self) -> bool:
+        """True on the render-loop thread. Before build_ui there is no loop yet, so every thread counts as the UI."""
+        return self._ui_thread is None or threading.current_thread() is self._ui_thread
+
+    def _start_thread(self, target, *args) -> threading.Thread:
+        """Starts a daemon worker and keeps it, so teardown can wait for it (see _stop_worker_threads)."""
+        thread = threading.Thread(target=target, args=args, daemon=True)
+        with self._worker_lock:
+            self._worker_threads = [t for t in self._worker_threads if t.is_alive()]
+            self._worker_threads.append(thread)
+        thread.start()
+        return thread
+
+    def _stop_worker_threads(self, timeout: float = 5.0):
+        """
+        Waits for the workers to end after _app_running is False, before DearPyGui is destroyed. A worker that is
+        still busy after the timeout (for example the driver install, which waits for a Windows prompt) is left
+        behind: the queue is closed first, so it can no longer reach DearPyGui.
+        """
+        with self._worker_lock:
+            threads = list(self._worker_threads)
+        me = threading.current_thread()
+        for thread in threads:
+            if thread is not me and thread.is_alive():
+                thread.join(timeout)
+
+    def _drain_ui_queue(self):
+        """Runs the calls that workers queued (at most MAX_CALLS_PER_FRAME per frame)."""
+        self._ui_queue.drain()
+
+    @ui_only
+    def _stop_render_loop(self):
+        """Ends the render loop. Called from the tray thread on Exit, so the call goes through the queue."""
+        dpg.stop_dearpygui()
 
     def s(self, val: float) -> int:
         """Scale pixel value according to active monitor DPI."""
@@ -391,7 +433,7 @@ class GetsuGUI(
 
                     self._release_state_lock()
 
-            threading.Thread(target=_start_worker, daemon=True).start()
+            self._start_thread(_start_worker)
 
         else:
             # STOP FLOW
@@ -426,7 +468,7 @@ class GetsuGUI(
                     self.set_status_pill(self._get_idle_status(), self._get_idle_color())
                     self._release_state_lock()
 
-            threading.Thread(target=_stop_worker, daemon=True).start()
+            self._start_thread(_stop_worker)
 
     def _run_ui_loop(self):
         """
@@ -437,6 +479,7 @@ class GetsuGUI(
         while dpg.is_dearpygui_running():
             started = time.perf_counter()
             dpg.render_dearpygui_frame()
+            self._drain_ui_queue()  # DearPyGui calls that worker threads queued since the last frame
             self._tick_ui()
             time.sleep(frame_sleep_s(self._is_window_visible(), time.perf_counter() - started))
 
@@ -491,10 +534,11 @@ class GetsuGUI(
                 dpg.add_text("Sponsored by", color=COL_TEXT_3, tag="footer_sponsor_text")
                 dpg.bind_item_font("footer_sponsor_text", self.font_footer)
                 dpg.add_spacer(width=self.s(4))
-                dpg.add_button(label="Kopi Reman", callback=lambda: webbrowser.open("https://www.instagram.com/kopireman/"),
-                               tag="sponsor_link_btn")
-                dpg.bind_item_theme("sponsor_link_btn", self.theme_link_btn)
-                dpg.bind_item_font("sponsor_link_btn", self.font_footer)
+                # Text link like Done: no fill in any state, the text lightens on hover (see _text_link).
+                self._text_link("sponsor_link_btn", "Kopi Reman", self.font_footer,
+                                self._text_w("Kopi Reman", self.font_footer) + self.s(8),
+                                self._text_h("Kopi Reman", self.font_footer), "",
+                                lambda: webbrowser.open("https://www.instagram.com/kopireman/"))
 
     def _place_footer(self):
         """Right-aligns the sponsor group: the gap is the content width minus the two groups as rendered."""
@@ -510,6 +554,7 @@ class GetsuGUI(
         Builds the windows and runs the UI loop. headless=True builds and lays out the windows, then returns
         without the tray, the window hook, the signal handlers or the loop (used by the click-path tests).
         """
+        self._ui_thread = threading.current_thread()  # the render loop and every DearPyGui call run on this thread
         dpg.create_context()
         self._ui_built = True
         self._last_meter_t = 0.0
@@ -665,14 +710,6 @@ class GetsuGUI(
                 dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, self.s(10))
         self.theme_stop_btn = self.theme_start_btn
 
-        # Link button (sponsor, Done): accent text, no background.
-        with dpg.theme() as self.theme_link_btn:
-            with dpg.theme_component(dpg.mvButton):
-                dpg.add_theme_color(dpg.mvThemeCol_Button, (0, 0, 0, 0))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, COL_ACCENT_SOFT)
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, COL_ACCENT_SOFT_2)
-                dpg.add_theme_color(dpg.mvThemeCol_Text, COL_ACCENT)
-
         # Selected segment: filled accent with white text.
         with dpg.theme() as self.theme_boost_active:
             with dpg.theme_component(dpg.mvButton):
@@ -823,9 +860,9 @@ class GetsuGUI(
 
         # Start tray icon & window hook
         self._start_tray_icon()
-        threading.Thread(target=self._setup_window_hook, daemon=True).start()
+        self._start_thread(self._setup_window_hook)
         if self._resume_pending:
-            threading.Thread(target=self._resume_filter_worker, daemon=True).start()
+            self._start_thread(self._resume_filter_worker)
 
         # Handle terminal signals cleanly (Ctrl+C / SIGINT / SIGTERM)
         def _sig_handler(sig, frame):
@@ -841,13 +878,16 @@ class GetsuGUI(
         # Run UI event loop
         self._run_ui_loop()
 
-        # Teardown background workers and restore audio before destroying DPG context
+        # Teardown background workers and restore audio before destroying DPG context. The workers end first, so
+        # none of them can touch DearPyGui after dpg.destroy_context(); the queue is closed last.
         self._teardown_engine_and_timers()
+        self._stop_worker_threads()
         if self._tray_icon:
             try:
                 self._tray_icon.stop()
             except Exception:
                 pass
+        self._ui_queue.close()
 
         dpg.destroy_context()
 

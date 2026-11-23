@@ -6,6 +6,7 @@ import time
 import dearpygui.dearpygui as dpg
 
 from src.devices import install_vbcable_driver
+from src.ui_queue import ui_only
 from src.gui_theme import (
     ACTION_H,
     COL_ACCENT,
@@ -57,12 +58,13 @@ class SetupMixin:
                                        "Windows permission prompt.")
                 self._install_state = "failed"
 
-        threading.Thread(target=worker, daemon=True).start()
+        self._start_thread(worker)
 
     def show_setup_card_for_install(self):
         """Brings the first-run card back (used by the power button while the cable is missing)."""
         self.show_setup_card()
 
+    @ui_only
     def _update_cable_banner(self):
         """Refreshes the voice test enable state and the idle notice (the status card was removed in phase B)."""
         self._set_voice_test_button_state(not self.is_running)
@@ -127,6 +129,7 @@ class SetupMixin:
             return True
         return not self.is_vbcable_installed and not self._setup_dismissed
 
+    @ui_only
     def _poll_setup_card(self):
         """Every frame: applies the card state when it changed, and moves the install progress at most 20 times a second."""
         if not self._ui_built or not dpg.does_item_exist("setup_box"):
@@ -142,6 +145,7 @@ class SetupMixin:
                 self._setup_anim_t = now
                 self._draw_setup_progress(now)
 
+    @ui_only
     def _apply_setup_card(self, visible: bool):
         """Sets the card texts and buttons for the current state, and swaps it with the hero."""
         state = self._install_state

@@ -12,22 +12,17 @@ v1.2.6 gate changes:
 - Speech-guarded startup ambient profiler (median of non-speech frames).
 - Guarded dual-rate noise-floor tracking with a per-frame rise cap (0.5 dB) and lower clamp (-75 dBFS).
 """
-import bisect
-import math
 import threading
-from collections import deque
 from typing import Tuple, Optional, Any
 import numpy as np
 
-from src.dsp_filters import (
-    BLOCK_FRAME_LEN, _ANTI_DENORMAL, _biquad_response, HighPassFilter, TILT_FIR_TAPS,
-    _design_tilt_fir
-)
-from src.dsp_gate import (_T_480, _S_CURVE_F64, _S_CURVE_TABLE_480, AdaptiveNoiseGate)
+# Names the tests and the live engine import through this module are re-exported here (see tests/test_dsp.py,
+# tests/test_m12_hotpath.py, tests/test_m2_sound.py); the rest are imported from their own modules.
+from src.dsp_filters import HighPassFilter, _design_tilt_fir
+from src.dsp_gate import (_S_CURVE_TABLE_480, AdaptiveNoiseGate)
 from src.dsp_dynamics import (
-    calculate_levels, PRECLIP_KNEE_DEFAULT, soft_preclip, soft_limit, TS_RADIUS, TS_WINDOW_MAX,
-    TS_SKIP_SPEECH_PROB, _build_bell_table, _TS_BELL, _TS_OFFSETS, TransientSuppressor,
-    SpeechLeveler
+    calculate_levels, PRECLIP_KNEE_DEFAULT, soft_preclip, soft_limit, TS_RADIUS,
+    TS_SKIP_SPEECH_PROB, _TS_BELL, TransientSuppressor, SpeechLeveler
 )
 from src.dsp_input import (InputDownmixer, DryBlend)
 

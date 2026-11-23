@@ -19,6 +19,8 @@ from src.dsp import (
 from src.gui_theme import COL_ACCENT, COL_ERROR, COL_WARNING
 from src.host_api_resolver import resolve_single
 from src.rnnoise import RNNoise, FRAME_SIZE, SAMPLE_RATE
+from src.stream import refresh_input_index
+from src.ui_queue import ui_only
 
 
 class VoiceTestMixin:
@@ -27,11 +29,13 @@ class VoiceTestMixin:
     def start_voice_test(self, sender=None, app_data=None):
         """Starts the 11-second in-memory voice preview test (microphone to speakers; the cable is not needed)."""
         if self.is_running:
-            self.set_status_pill("Stop noise cancellation first to run voice test.", COL_WARNING)
+            self.set_status_pill("Voice test could not start: Stop noise cancellation first.", COL_WARNING)
             return
         if self._is_testing_voice:
+            self.set_status_pill("Voice test could not start: A voice test is already running.", COL_WARNING)
             return
         if not self._state_lock.acquire(blocking=False):
+            self.set_status_pill("Voice test could not start: Noise cancellation is starting or stopping.", COL_WARNING)
             return
 
         self._is_testing_voice = True
@@ -41,7 +45,7 @@ class VoiceTestMixin:
         self._set_button_enabled("btn_voice_test", False)
         self._set_button_label("btn_voice_test", "Testing...")
 
-        threading.Thread(target=self._run_voice_test_worker, daemon=True).start()
+        self._start_thread(self._run_voice_test_worker)
 
     def _run_voice_test_worker(self):
         """
@@ -53,21 +57,26 @@ class VoiceTestMixin:
         Phase 3: Immediate RAM purge (buffer deleted, zero disk files).
         """
         rn = None
+        recording = False  # True once the microphone is open: later errors are not "could not start"
         try:
             if self.selected_input_idx is None or self.selected_input_idx < 0:
-                self.set_status_pill("No microphone selected for voice test.", COL_ERROR)
+                self.set_status_pill("Voice test could not start: No microphone selected.", COL_ERROR)
                 return
+
+            # The index of the microphone can change when Windows renumbers the devices (issue #3): look up its
+            # current index by name before the microphone is opened.
+            input_idx = refresh_input_index(self.selected_input_idx, self.selected_input_name)
 
             # Resolve safe non-WDM-KS input endpoint for voice preview
             try:
                 raw_devs = sd.query_devices()
                 raw_apis = sd.query_hostapis()
-                safe_input_idx, notes = resolve_single(raw_devs, raw_apis, self.selected_input_idx, is_input=True)
+                safe_input_idx, notes = resolve_single(raw_devs, raw_apis, input_idx, is_input=True)
                 for note in notes:
                     print(f"[VOICE TEST] {note}")
             except Exception as e:
                 print(f"[VOICE TEST] Input resolution fallback: {e}")
-                safe_input_idx = self.selected_input_idx
+                safe_input_idx = input_idx
 
             in_info = sd.query_devices(safe_input_idx)
             in_channels = min(2, max(1, in_info['max_input_channels']))
@@ -132,6 +141,7 @@ class VoiceTestMixin:
                 dtype='float32',
                 extra_settings=in_extra_settings,
             ) as stream:
+                recording = True
                 for chunk_idx in range(total_chunks):
                     if not self._app_running or self._cancel_voice_test:
                         break
@@ -223,7 +233,8 @@ class VoiceTestMixin:
 
         except Exception as e:
             print(f"[VOICE TEST] Error during voice preview: {e}")
-            self.set_status_pill(f"{self._format_audio_error(e)}", COL_ERROR)
+            reason = self._format_audio_error(e)
+            self.set_status_pill(reason if recording else f"Voice test could not start: {reason}", COL_ERROR)
         finally:
             if rn is not None:
                 try:
@@ -236,6 +247,7 @@ class VoiceTestMixin:
             self._vt_progress = 0.0
             self._release_state_lock()
 
+    @ui_only
     def _set_voice_test_button_state(self, enabled: bool):
         """Enables or disables Hear myself. Disabled while the cable is missing or during a voice test."""
         if not self._ui_built or not dpg.does_item_exist("btn_voice_test"):

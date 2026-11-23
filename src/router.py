@@ -9,34 +9,22 @@ Maintains bundled native AudioRestore.exe as a secondary fallback.
 """
 import os
 import sys
-import logging
 import subprocess
 import threading
 from typing import Optional, Tuple, Dict, Any
-import ctypes
-from ctypes import wintypes
-import re
 
 try:
     from src.config import save_config
 except ImportError:
     from config import save_config
 
-try:
-    from src.diagnostics import get_file_handler
-except ImportError:
-    from diagnostics import get_file_handler
-
-# CoreAudio helpers and the routing logger live in win_audio; re-exported so imports keep working.
+# CoreAudio helpers and the routing logger live in win_audio; the names other modules import from here
+# (device kinds, bus cache helpers, PROPVARIANT and the endpoint readers) are re-exported so those imports keep working.
 from src.win_audio import (
-    logger, ole32, _safe_co_initialize, GUID, PROPERTYKEY, PROPVARIANT, PKEY_Device_FriendlyName,
-    PKEY_Device_EnumeratorName, PKEY_AudioEndpoint_FormFactor, VT_UI4, VT_LPWSTR,
-    EndpointFormFactor, DeviceBusType, CLSID_MMDeviceEnumerator, IID_IMMDeviceEnumerator,
-    CLSID_PolicyConfigClient, IID_IPolicyConfig, _release_com_ptr, native_get_current_default_mic,
+    logger, PROPVARIANT, EndpointFormFactor, DeviceBusType, native_get_current_default_mic,
     native_get_current_default_playback, _is_endpoint_id, native_get_device_bus_type,
-    _bus_type_cache, _form_factor_cache, clear_device_bus_type_cache,
-    native_get_device_bus_type_cached, _form_factor_from_variant, _endpoint_name_matches,
-    native_get_device_form_factor, native_get_device_form_factor_cached,
+    _bus_type_cache, clear_device_bus_type_cache, native_get_device_bus_type_cached,
+    _form_factor_from_variant, native_get_device_form_factor_cached,
     native_get_cable_capture_guid, native_get_physical_capture_guid, ENDPOINT_GUID_PATTERN,
     native_set_default_endpoint, get_audio_restore_exe
 )
@@ -232,6 +220,31 @@ class SmartMicRouter:
 
             logger.info(f"Microphone restore executed. Success={success}")
             return bool(success)
+
+    def reassert_cable_default(self) -> Optional[str]:
+        """
+        While swapped, Windows may move the default capture to another endpoint (a newly plugged headset, for
+        example). swap_to_cable() returns at once when already swapped, so nothing else would put CABLE Output back.
+        This takes the endpoint Windows picked as the new physical microphone (original_mic_id) and sets CABLE Output
+        as the default again. Returns the new physical GUID, or None when nothing had to change.
+        """
+        with self._lock:
+            if not self.is_swapped or not self.config.get("auto_route", True):
+                return None
+            cable_guid = self.get_cable_capture_guid()
+            current_guid, current_name = self.get_current_default_mic()
+            if not cable_guid or not current_guid:
+                return None
+            if current_guid.lower() == cable_guid.lower() or "cable" in current_name.lower():
+                return None
+            logger.info(f"Default microphone moved to {current_name} while swapped; setting CABLE Output back.")
+            self.original_mic_id = current_guid
+            self.config["original_mic_id"] = current_guid
+            save_config(self.config)
+            if not self._set_capture_endpoint(cable_guid):
+                logger.warning("Could not set CABLE Output back as the default capture endpoint.")
+                return None
+            return current_guid
 
     def audit_crash_recovery(self) -> bool:
         """

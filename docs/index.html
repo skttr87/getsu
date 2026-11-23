@@ -248,16 +248,50 @@
 
     /* Hero */
     .hero {
-      text-align: center;
       padding-top: 72px;
       padding-bottom: 72px;
     }
-    .hero-logo {
-      width: 72px;
-      height: 72px;
-      display: block;
-      margin: 0 auto 20px;
+    /* Desktop: explanation and download on the left, screenshot on the right. Stacked and centred below 880 px. */
+    .hero-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 48px;
+      align-items: center;
     }
+    .hero-text { text-align: left; }
+    .hero-lead {
+      font-size: 17px;
+      color: var(--text-2);
+      margin-bottom: 24px;
+    }
+    .hero-logo {
+      width: 64px;
+      height: 64px;
+      display: block;
+      margin: 0 0 20px;
+    }
+    .section-tight { padding-block: 48px; }
+    .name-note {
+      text-align: center;
+      font-size: 19px;
+      color: var(--text-2);
+      margin: 0;
+    }
+    .name-note strong { color: var(--text); }
+    .story-card {
+      max-width: 760px;
+      margin: 0 auto;
+      background: var(--card);
+      border-radius: var(--radius-card);
+      padding: 32px;
+    }
+    .story-card blockquote p {
+      font-size: 19px;
+      line-height: 1.6;
+      color: var(--text);
+      margin: 0 0 16px;
+    }
+    .story-card figcaption { font-size: 15px; color: var(--text-2); }
     .hero h1 {
       font-size: 48px;
       font-weight: 600;
@@ -281,9 +315,9 @@
     }
     .cta-row {
       display: flex;
-      flex-direction: column;
+      flex-wrap: wrap;
       align-items: center;
-      gap: 16px;
+      gap: 16px 24px;
     }
     .btn-download {
       display: inline-flex;
@@ -307,8 +341,9 @@
     }
     /* The image already carries its own window frame and shadow, so no extra box around it. */
     .screenshot {
-      margin: 48px auto 0;
+      margin: 0 auto;
       max-width: 520px;
+      width: 100%;
     }
     .screenshot img {
       display: block;
@@ -590,6 +625,10 @@
 
     /* Responsive */
     @media (max-width: 880px) {
+      .hero-grid { grid-template-columns: 1fr; gap: 40px; }
+      .hero-text { text-align: center; }
+      .hero-logo { margin: 0 auto 20px; }
+      .cta-row { flex-direction: column; }
       .grid-3, .perf-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .steps { grid-template-columns: 1fr; }
     }
@@ -637,24 +676,49 @@
 
     <!-- Hero -->
     <section class="hero">
-      <div class="wrap">
-        <img class="hero-logo" src="assets/getsu-logo.svg" alt="Getsu logo" width="72" height="72">
-        <h1>Getsu</h1>
-        <p class="tagline">Clean voice for every app. Free, offline, light on your CPU.</p>
-        <div class="tagline-badge" id="release-badge">v1.4.0 • Windows 10 & 11 • Free & Open Source</div>
+      <div class="wrap hero-grid">
+        <div class="hero-text">
+          <img class="hero-logo" src="assets/getsu-logo.svg" alt="Getsu logo" width="64" height="64">
+          <h1>Getsu</h1>
+          <p class="tagline">Clean voice for every app. Free, offline, light on your CPU.</p>
+          <p class="hero-lead">Real-time noise cancellation for Windows. Getsu removes keyboard clicks, fan hum, room noise and background voices from your microphone, for Discord, Steam, Zoom, OBS and your games at once.</p>
+          <div class="tagline-badge" id="release-badge">v1.4.0 • Windows 10 & 11 • Free & Open Source</div>
 
-        <div class="cta-row">
-          <a href="https://github.com/skttr87/getsu/releases/download/v1.4.0/Getsu-v1.4.0-Setup.exe" class="btn-download" id="download-link">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
-            <span id="download-text">Download Getsu v1.4.0 (Setup.exe)</span>
-          </a>
-          <a href="https://github.com/skttr87/getsu" target="_blank" rel="noopener" class="link-github">View on GitHub</a>
+          <div class="cta-row">
+            <a href="https://github.com/skttr87/getsu/releases/download/v1.4.0/Getsu-v1.4.0-Setup.exe" class="btn-download" id="download-link">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+              <span id="download-text">Download Getsu v1.4.0 (Setup.exe)</span>
+            </a>
+            <a href="https://github.com/skttr87/getsu" target="_blank" rel="noopener" class="link-github">View on GitHub</a>
+          </div>
+          <p class="meta-note">Free, offline, no account or login required</p>
         </div>
-        <p class="meta-note">Free, offline, no account or login required</p>
 
         <div class="screenshot">
-          <img src="assets/getsu-ui.png" alt="Getsu main window: power button, microphone choice and noise filter" width="460">
+          <img src="assets/getsu-ui.png" alt="Getsu main window: power button, microphone choice and noise filter" width="520">
         </div>
+      </div>
+    </section>
+
+    <!-- Name -->
+    <section id="name" class="section-tight">
+      <div class="wrap">
+        <p class="name-note"><strong>Getsu</strong> comes from two Acehnese words: <strong>gèt</strong> (<em>"good"</em>) and <strong>su</strong> (<em>"sound"</em>).</p>
+      </div>
+    </section>
+
+    <!-- Story -->
+    <section id="story" class="section-tight">
+      <div class="wrap">
+        <div class="section-head">
+          <h2>Why I built Getsu</h2>
+        </div>
+        <figure class="story-card">
+          <blockquote>
+            <p>I built Getsu because I play Dota 2 with friends who are too broke for RTX graphics cards, studio mics, or Krisp subscriptions. Our calls were full of fan roar, mechanical keyboard clatter, and the occasional family drama in the background. I wanted a simple tool that runs locally on any normal CPU, costs nothing, has zero tracking, and gets out of the way.</p>
+          </blockquote>
+          <figcaption>Ihsan, creator of Getsu. "I built this because RTX Voice wouldn't run on my laptop."</figcaption>
+        </figure>
       </div>
     </section>
 
@@ -1073,7 +1137,6 @@
   <footer>
     <div class="wrap">
       <p>Made by Ihsan. Open source under the <a href="https://github.com/skttr87/getsu/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>.</p>
-      <p>Getsu comes from two Acehnese words: gèt ("good") and su ("sound").</p>
     </div>
   </footer>
 

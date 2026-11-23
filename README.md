@@ -19,6 +19,12 @@
 > [!NOTE]
 > **Getsu** comes from two Acehnese words: **gèt** (*"good"*) and **su** (*"sound"*).
 
+## Why I built Getsu
+
+> I built Getsu because I play Dota 2 with friends who are too broke for RTX graphics cards, studio mics, or Krisp subscriptions. Our calls were full of fan roar, mechanical keyboard clatter, and the occasional family drama in the background. I wanted a simple tool that runs locally on any normal CPU, costs nothing, has zero tracking, and gets out of the way.
+>
+> Ihsan, creator of Getsu. "I built this because RTX Voice wouldn't run on my laptop."
+
 ## What Getsu does
 
 Getsu sits between your microphone and your apps. It removes keyboard and mouse clicks, fan roar, air conditioning, desk bumps and voices in the next room, so the people you talk to hear mostly you.

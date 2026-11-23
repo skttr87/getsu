@@ -403,7 +403,11 @@ class DevicesMixin:
         if not dpg.does_item_exist("mic_list"):
             return
         dpg.delete_item("mic_list", children_only=True)
-        self._panel_targets["mics"] = {}
+        # Drop only the old rows: the panel's other controls (the Done text button) stay registered.
+        targets = self._panel_targets.setdefault("mics", {})
+        for old in [t for t in targets if t.startswith("mic_row_")]:
+            del targets[old]
+            self._hit_parts.pop(old, None)
         entries = self._mic_entries()
         current = self._get_selected_input_label()
         row_w = self.s(CONTENT_W)

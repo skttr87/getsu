@@ -316,6 +316,10 @@ class GuiClickPathTests(unittest.TestCase):
     def test_every_click_target_runs_its_action(self):
         """A click in the middle of each control's area reaches that control and nothing else."""
         app = self.app
+        app._rebuild_mic_list()  # the real app rebuilds the rows on every device refresh after the panels exist
+        expected = {"mics": "sheet_done_mics", "settings": "sheet_done_settings", "help": "help_got_it"}
+        for name, close_tag in expected.items():
+            self.assertIn(close_tag, app._panel_targets.get(name, {}), f"{name}: {close_tag} is not clickable")
         for name in PANEL_NAMES:
             self._open(name)
             targets = app._panel_targets.get(name, {})
@@ -335,6 +339,19 @@ class GuiClickPathTests(unittest.TestCase):
                 self.mouse.pos = _center(app._item_rect(tag))
                 app._on_mouse_click()
             self.assertEqual(calls, [tag], f"main: click on {tag}")
+
+    def test_mic_list_rebuild_keeps_done_clickable(self):
+        """Device refreshes rebuild the microphone rows; Done must survive that and still close the panel."""
+        app = self.app
+        app._rebuild_mic_list()
+        app._rebuild_mic_list()
+        self._open("mics")
+        targets = app._panel_targets["mics"]
+        self.assertIn("sheet_done_mics", targets)
+        self.assertEqual(sorted(t for t in targets if t.startswith("mic_row_")),
+                         [f"mic_row_{i}" for i in range(len(app._mic_entries()))])
+        self._click_rect(app._item_rect("sheet_done_mics"))
+        self.assertIsNone(app._open_panel_name)
 
     def test_done_hover_changes_only_the_text_colour(self):
         app = self.app

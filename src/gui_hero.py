@@ -8,6 +8,7 @@ import dearpygui.dearpygui as dpg
 from src import ui_icons as icons
 
 from src.audio_errors import explain_start_error
+from src.ui_queue import ui_only
 from src.gui_theme import (
     COL_ACCENT,
     COL_ACCENT_HOVER,
@@ -69,6 +70,7 @@ class HeroMixin:
             return COL_WARNING
         return COL_TEXT_2
 
+    @ui_only
     def set_status_pill(self, text: Optional[str], color: Optional[Sequence[int]] = None):
         """
         Shows a notice on the hero sub line (replaces the old status pill). text None clears the notice.
@@ -127,6 +129,7 @@ class HeroMixin:
             dpg.set_value("hero_sub_tip_text", text)
             dpg.configure_item("hero_sub_tip", show=fitted != text)
 
+    @ui_only
     def _render_hero(self):
         """Derives the hero (power button, state text, sub line, dot) from the engine state and the notice."""
         if not self._ui_built or not dpg.does_item_exist("hero_state_text"):

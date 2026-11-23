@@ -2,6 +2,7 @@
 
 import dearpygui.dearpygui as dpg
 from src import ui_icons as icons, ui_hit
+from src.ui_queue import ui_only
 
 from src.gui_theme import (
     COL_ACCENT,
@@ -207,11 +208,13 @@ class WidgetsMixin:
         if self._btn_enabled.get(tag, True):
             callback()
 
+    @ui_only
     def _set_button_enabled(self, tag: str, enabled: bool):
         """Enables or disables an icon button (drawn greyed when disabled, no click)."""
         self._btn_enabled[tag] = bool(enabled)
         self._refresh_button(tag)
 
+    @ui_only
     def _set_button_label(self, tag: str, text: str):
         """Changes an icon button's label and centres the icon and label again (the progress labels are longer)."""
         if dpg.does_item_exist(f"{tag}_label"):
@@ -222,6 +225,7 @@ class WidgetsMixin:
             content_w = icon + gap + self._text_w(text, font)
             dpg.configure_item(f"{tag}_pad", width=max(0, (width - content_w) // 2))
 
+    @ui_only
     def _set_button_tip(self, tag: str, text: str):
         if dpg.does_item_exist(f"{tag}_tip"):
             dpg.set_value(f"{tag}_tip", text)

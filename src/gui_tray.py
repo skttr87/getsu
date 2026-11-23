@@ -116,13 +116,13 @@ class TrayMixin:
             self.toggle_stream()
 
         def on_save_diagnostics(icon, item):
-            threading.Thread(target=self.save_diagnostics_report, daemon=True).start()
+            self._start_thread(self.save_diagnostics_report)
 
         def on_exit(icon, item):
             print("[APP] Exiting Getsu...")
             self._teardown_engine_and_timers()
             icon.stop()
-            dpg.stop_dearpygui()
+            self._stop_render_loop()  # runs on the UI thread (queued from here)
 
         autostart_item = item(
             "Start with Windows", self._toggle_autostart,

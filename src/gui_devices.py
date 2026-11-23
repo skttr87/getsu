@@ -20,6 +20,7 @@ from src.devices import (
     DeviceKind,
 )
 from src.gui_common import clean_device_label
+from src.ui_queue import ui_only
 from src.gui_theme import (
     COL_ACCENT,
     COL_ERROR,
@@ -378,6 +379,7 @@ class DevicesMixin:
         finally:
             self._release_state_lock()
 
+    @ui_only
     def _update_selection_hint(self, selected_label: Optional[str] = None):
         """Updates the dynamic advisory hint beneath the microphone dropdown."""
         if not self._ui_built or not dpg.does_item_exist("input_selection_hint"):
@@ -413,6 +415,7 @@ class DevicesMixin:
             })
         return entries
 
+    @ui_only
     def _refresh_mic_widgets(self):
         """Updates the microphone row of the card, the hidden earbud hint, and the list if it is open."""
         if not self._ui_built or not dpg.does_item_exist("mic_row_title"):

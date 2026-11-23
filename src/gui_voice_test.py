@@ -20,6 +20,7 @@ from src.gui_theme import COL_ACCENT, COL_ERROR, COL_WARNING
 from src.host_api_resolver import resolve_single
 from src.rnnoise import RNNoise, FRAME_SIZE, SAMPLE_RATE
 from src.stream import refresh_input_index
+from src.ui_queue import ui_only
 
 
 class VoiceTestMixin:
@@ -44,7 +45,7 @@ class VoiceTestMixin:
         self._set_button_enabled("btn_voice_test", False)
         self._set_button_label("btn_voice_test", "Testing...")
 
-        threading.Thread(target=self._run_voice_test_worker, daemon=True).start()
+        self._start_thread(self._run_voice_test_worker)
 
     def _run_voice_test_worker(self):
         """
@@ -246,6 +247,7 @@ class VoiceTestMixin:
             self._vt_progress = 0.0
             self._release_state_lock()
 
+    @ui_only
     def _set_voice_test_button_state(self, enabled: bool):
         """Enables or disables Hear myself. Disabled while the cable is missing or during a voice test."""
         if not self._ui_built or not dpg.does_item_exist("btn_voice_test"):

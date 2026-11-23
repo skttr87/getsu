@@ -124,9 +124,17 @@ class InstallLaunchTests(unittest.TestCase):
                 patch.object(devices.subprocess, "run"), \
                 patch.object(devices.time, "sleep"), \
                 patch.object(devices, "close_setup_message_boxes", return_value=0) as closer, \
+                patch("src.cable_format.ensure_cable_48k", return_value={}) as fmt, \
                 patch.object(devices.sys, "platform", "win32"):
             result = devices.install_vbcable_driver()
+        self.format_call = fmt
         return result, shell, kernel, closer
+
+    def test_new_cable_is_set_to_48k_after_the_install(self):
+        result, _shell, _kernel, _closer = self._install()
+        self.assertTrue(result)
+        self.format_call.assert_called_once()
+        self.assertGreater(self.format_call.call_args.kwargs.get("wait_s", 0), 0)  # waits for the new endpoints
 
     def test_setup_is_launched_with_sw_hide_and_the_runas_verb(self):
         result, shell, _kernel, _closer = self._install()

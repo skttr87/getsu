@@ -248,6 +248,17 @@ def kind_for_endpoint(name: str, bus: str, form_factor: Optional[int]) -> str:
     return DeviceKind.OTHER
 
 
+# The cable Getsu installs (basic VB-CABLE). Its driver name is the part of the endpoint name in parentheses,
+# e.g. "CABLE Output (VB-Audio Virtual Cable)". Users can rename the first part in Sound settings, but not this
+# part, and Windows does not translate it. VB-CABLE A+B / C+D ("VB-Audio Cable A") and VoiceMeeter do not match.
+GETSU_CABLE_DRIVER_NAME = "(vb-audio virtual cable)"
+
+
+def is_getsu_cable_endpoint(name: str) -> bool:
+    """True only for the endpoints of the VB-CABLE that Getsu installs (CABLE Input / CABLE Output)."""
+    return GETSU_CABLE_DRIVER_NAME in (name or "").lower()
+
+
 def is_virtual_endpoint(name: str, bus: str) -> bool:
     """Virtual cable or virtual software device, from the friendly name and bus type of an endpoint (see _is_virtual)."""
     if not name:

@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from src.config import save_config
-from src.devices import DeviceKind, kind_for_endpoint, is_virtual_endpoint
+from src.devices import DeviceKind, kind_for_endpoint, is_getsu_cable_endpoint, is_virtual_endpoint
 from src.gui_common import clean_device_label
 from src.win_audio import (
     native_get_current_default_mic,
@@ -43,6 +43,7 @@ class Endpoint:
     name: str
     is_virtual: bool
     kind: str = DeviceKind.OTHER
+    is_getsu_cable: bool = False  # the VB-CABLE Getsu installs; only this one triggers the guard (owner decision)
 
 
 @dataclass(frozen=True)
@@ -157,6 +158,7 @@ def _endpoints(entries: List[Dict], is_input: bool) -> List[Endpoint]:
             name=name,
             is_virtual=is_virtual_endpoint(name, bus),
             kind=kind_for_endpoint(name, bus, entry.get("form_factor")),
+            is_getsu_cable=is_getsu_cable_endpoint(name),
         ))
     return result
 
@@ -189,9 +191,11 @@ def gather_state(config: Dict, selected_mic_name: Optional[str], nc_running: boo
 
     return GuardState(
         default_mic_id=mic_id,
-        default_mic_is_cable=bool(mic_ep is not None and mic_ep.is_virtual),
+        # Only the VB-CABLE Getsu installs counts as "the cable"; other virtual devices (VoiceMeeter and so on)
+        # chosen by the user are left alone. Targets still exclude every virtual device (see _mic_target).
+        default_mic_is_cable=bool(mic_ep is not None and mic_ep.is_getsu_cable),
         default_playback_id=play_id,
-        default_playback_is_cable=bool(play_ep is not None and play_ep.is_virtual),
+        default_playback_is_cable=bool(play_ep is not None and play_ep.is_getsu_cable),
         nc_running=bool(nc_running),
         voice_test_running=bool(voice_test_running),
         swap_in_progress=bool(swap_in_progress),

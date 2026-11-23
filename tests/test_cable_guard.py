@@ -324,6 +324,33 @@ class TestGatherState(unittest.TestCase):
         self.assertTrue(state.default_playback_is_cable)
         self.assertEqual(state.last_physical_playback_id, SPEAKERS.id)
 
+    def test_only_getsus_vb_cable_counts_as_the_cable(self):
+        """Owner decision: another virtual device the user chose as default (VoiceMeeter, VB-CABLE A) is left alone."""
+        config = {"original_mic_id": REALTEK_MIC.id, "last_physical_playback_id": SPEAKERS.id}
+        others = [
+            ("{0.0.1.00000000}.{eeeeeeee-0000-4000-8000-000000000001}", "VoiceMeeter Output (VB-Audio VoiceMeeter VAIO)"),
+            ("{0.0.1.00000000}.{eeeeeeee-0000-4000-8000-000000000002}", "CABLE-A Output (VB-Audio Cable A)"),
+        ]
+        for vid, vname in others:
+            virt = {"id": vid, "name": vname, "bus": "SWD", "form_factor": None}
+            virt_play = {"id": vid.replace("{0.0.1.", "{0.0.0."), "name": vname, "bus": "SWD", "form_factor": None}
+            p = self._patches((vid, vname), (virt_play["id"], vname),
+                              [virt, self._entry(REALTEK_MIC)], [virt_play, self._entry(SPEAKERS)])
+            with p[0], p[1], p[2], p[3]:
+                state = gather_state(config, None, False, False, False)
+            self.assertFalse(state.default_mic_is_cable, vname)
+            self.assertFalse(state.default_playback_is_cable, vname)
+            self.assertEqual(decide(state), [], vname)
+
+    def test_renamed_getsu_cable_still_counts(self):
+        config = {"original_mic_id": REALTEK_MIC.id, "last_physical_playback_id": SPEAKERS.id}
+        renamed = {"id": CABLE_OUT.id, "name": "My clean mic (VB-Audio Virtual Cable)", "bus": "ROOT", "form_factor": None}
+        p = self._patches((CABLE_OUT.id, renamed["name"]), (SPEAKERS.id, SPEAKERS.name),
+                          [renamed, self._entry(REALTEK_MIC)], [self._entry(SPEAKERS)])
+        with p[0], p[1], p[2], p[3]:
+            state = gather_state(config, None, False, False, False)
+        self.assertTrue(state.default_mic_is_cable)
+
     def test_selected_mic_is_resolved_by_unique_name(self):
         config = {"original_mic_id": REALTEK_MIC.id, "last_physical_playback_id": None}
         p = self._patches((CABLE_OUT.id, CABLE_OUT.name), (SPEAKERS.id, SPEAKERS.name),

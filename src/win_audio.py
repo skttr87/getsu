@@ -905,7 +905,7 @@ def set_default_playback_away_from_cable(target_id: str) -> bool:
     Refuses, logs a warning and returns False unless all of these hold:
     - target_id is a render endpoint ID (prefix {0.0.0.);
     - the target is an active render endpoint and is not virtual;
-    - the current default playback (console role) is a virtual cable.
+    - the current default playback (console role) is the VB-CABLE Getsu installs (CABLE Input).
     """
     if sys.platform != 'win32' or not ole32:
         return False
@@ -914,7 +914,7 @@ def set_default_playback_away_from_cable(target_id: str) -> bool:
         return False
     target_id = target_id.strip()
 
-    from src.devices import is_virtual_endpoint
+    from src.devices import is_getsu_cable_endpoint, is_virtual_endpoint
 
     render = native_list_active_endpoints(is_input=False)
     target = next((e for e in render if e["id"] == target_id), None)
@@ -927,8 +927,8 @@ def set_default_playback_away_from_cable(target_id: str) -> bool:
 
     current_id, _ = native_get_current_default_playback()
     current = next((e for e in render if current_id and e["id"] == current_id), None)
-    if current is None or not is_virtual_endpoint(current["name"], current["bus"]):
-        logger.warning("Playback default not changed: the current default playback is not a virtual cable.")
+    if current is None or not is_getsu_cable_endpoint(current["name"]):
+        logger.warning("Playback default not changed: the current default playback is not Getsu's VB-CABLE.")
         return False
 
     ok = native_set_default_endpoint(target_id)

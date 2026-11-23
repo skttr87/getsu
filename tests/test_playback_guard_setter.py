@@ -66,6 +66,18 @@ class TestSetDefaultPlaybackAwayFromCable(unittest.TestCase):
         self.assertFalse(result)
         set_mock.assert_not_called()
 
+    def test_refuses_when_the_default_is_another_virtual_device(self):
+        """Only Getsu's VB-CABLE counts: a VoiceMeeter default chosen by the user is left alone (owner decision)."""
+        result, set_mock = self._run(SPEAKERS["id"], [OTHER_VIRTUAL, SPEAKERS], OTHER_VIRTUAL["id"])
+        self.assertFalse(result)
+        set_mock.assert_not_called()
+
+    def test_moves_off_the_cable_even_when_the_user_renamed_it(self):
+        renamed = dict(CABLE, name="Getsu clean voice (VB-Audio Virtual Cable)")
+        result, set_mock = self._run(SPEAKERS["id"], [renamed, SPEAKERS], renamed["id"])
+        self.assertTrue(result)
+        set_mock.assert_called_once_with(SPEAKERS["id"])
+
     def test_refuses_when_there_is_no_default_playback(self):
         with patch.object(win_audio, "native_list_active_endpoints", return_value=[CABLE, SPEAKERS]), \
              patch.object(win_audio, "native_get_current_default_playback", return_value=(None, "Unknown")), \

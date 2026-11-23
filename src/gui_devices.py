@@ -47,6 +47,9 @@ from src.cable_guard import (
     apply_decision,
     gather_state,
 )
+from src import win_audio
+
+DEFAULT_POLL_EVERY_S = 5  # watchdog ticks (seconds) between reads of the Windows default mic and playback ids
 
 
 # Icon shape for each device kind: bt = earbuds, headset, builtin = laptop, mic = microphone.
@@ -92,8 +95,12 @@ class DevicesMixin:
 
     def _watchdog_loop(self):
         """Monitors stream health every 1.0s and triggers emergency mic restoration and debounced hotplug recovery if audio stalls."""
+        ticks = 0
         while self._app_running:
             time.sleep(1.0)
+            ticks += 1
+            if ticks % DEFAULT_POLL_EVERY_S == 0:
+                self._poll_default_change()
             if self.is_running and self.engine and not self._is_rescanning:
                 if not self.engine.is_stream_alive():
                     # Emergency Restore Vector (Watchdog): If stream dead while swapped, restore physical mic immediately
@@ -172,6 +179,21 @@ class DevicesMixin:
             voice_test_running=self._is_testing_voice,
             swap_in_progress=(self._busy is not None or self._is_rescanning or self._resume_pending),
         )
+
+    def _poll_default_change(self):
+        """
+        Reads the Windows default mic and playback ids (read-only) and runs the cable guard when either changed.
+        A default changed in Windows Sound settings, or picked by Windows itself, sends no WM_DEVICECHANGE, so the
+        device-change trigger alone misses it. The first poll only records the ids.
+        """
+        try:
+            ids = (win_audio.native_get_current_default_mic()[0], win_audio.native_get_current_default_playback()[0])
+        except Exception:
+            return
+        previous = getattr(self, "_last_default_ids", None)
+        self._last_default_ids = ids
+        if previous is not None and ids != previous:
+            self._cable_guard.request("default change", delay=0.5)
 
     def _cable_guard_apply(self, decision) -> bool:
         return apply_decision(self.router, decision)

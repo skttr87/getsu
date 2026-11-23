@@ -412,6 +412,32 @@ class TestGuiWiring(unittest.TestCase):
         fake.set_status_pill.assert_called_once()
         self.assertEqual(fake.set_status_pill.call_args.args[0], PLAYBACK_NO_TARGET_STATUS)
 
+    def test_default_poll_runs_the_guard_only_when_a_default_changed(self):
+        """A default changed in Windows Sound settings sends no device event; the watchdog poll catches it."""
+        from types import SimpleNamespace
+        from src.gui_devices import DevicesMixin
+        fake = SimpleNamespace(_cable_guard=MagicMock())
+        mic = ["{0.0.1.00000000}.{a}"]
+        play = ["{0.0.0.00000000}.{speakers}"]
+        with patch("src.win_audio.native_get_current_default_mic", side_effect=lambda: (mic[0], "m")), \
+                patch("src.win_audio.native_get_current_default_playback", side_effect=lambda: (play[0], "p")):
+            DevicesMixin._poll_default_change(fake)  # first poll only records
+            DevicesMixin._poll_default_change(fake)  # nothing changed
+            fake._cable_guard.request.assert_not_called()
+            play[0] = "{0.0.0.00000000}.{cable}"
+            DevicesMixin._poll_default_change(fake)
+            fake._cable_guard.request.assert_called_once_with("default change", delay=0.5)
+            DevicesMixin._poll_default_change(fake)  # same again: no second run
+            self.assertEqual(fake._cable_guard.request.call_count, 1)
+
+    def test_default_poll_ignores_read_errors(self):
+        from types import SimpleNamespace
+        from src.gui_devices import DevicesMixin
+        fake = SimpleNamespace(_cable_guard=MagicMock())
+        with patch("src.win_audio.native_get_current_default_mic", side_effect=OSError("COM")):
+            DevicesMixin._poll_default_change(fake)
+        fake._cable_guard.request.assert_not_called()
+
     def test_teardown_cancels_the_guard(self):
         from src.gui import GetsuGUI
         fake = MagicMock()

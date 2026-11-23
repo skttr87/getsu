@@ -38,6 +38,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "vad_floor_tilt_hz": 0.0,       # 0 = off. Above 0: closed-gate path is low-passed at this frequency (more HF cut)
     "rnnoise_dry_mix_db": None,     # null = off. A number (e.g. -24) mixes the delayed pre-RNNoise signal back while the gate is open
     "was_running_on_exit": False,   # True when noise cancellation was on at the last exit; a Start with Windows launch resumes it
+    "last_physical_playback_id": None,  # Endpoint ID of the last physical default playback device; the cable guard switches back to it
 }
 
 import sys
@@ -172,6 +173,9 @@ def load_config() -> Dict[str, Any]:
             migrated = True
         if "was_running_on_exit" not in data:
             merged["was_running_on_exit"] = False
+            migrated = True
+        if "last_physical_playback_id" not in data:
+            merged["last_physical_playback_id"] = None
             migrated = True
 
         # Repair values the app cannot use instead of failing at start-up (older builds could save

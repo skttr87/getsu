@@ -25,6 +25,8 @@
 >
 > Ihsan, creator of Getsu
 
+This project was made possible, and its early development supported, by [Kopi Reman](https://www.instagram.com/kopireman/).
+
 ## What Getsu does
 
 Getsu sits between your microphone and your apps. It removes keyboard and mouse clicks, fan roar, air conditioning, desk bumps and voices in the next room, so the people you talk to hear mostly you.
@@ -163,8 +165,6 @@ getsu-cli --clean quiet_mic.wav --auto-level
 * **[DearPyGui](https://github.com/hoffstadt/DearPyGui)**: the GUI engine.
 * **[Inter](https://rsms.me/inter/)** by Rasmus Andersson, SIL Open Font License 1.1 ([license](docs/assets/fonts/OFL.txt)): the interface font.
 * **[VB-CABLE](https://www.vb-cable.com)** by VB-Audio (Vincent Burel): the virtual audio cable that carries your clean voice to other apps. The Getsu installer includes the official, unmodified VB-CABLE package. VB-CABLE is donationware, all participations are welcome: if you find it useful, please support VB-Audio at [www.vb-cable.com](https://www.vb-cable.com).
-
-Sponsored by [Kopi Reman](https://www.instagram.com/kopireman/).
 
 This project is open source under the [MIT License](LICENSE).
 

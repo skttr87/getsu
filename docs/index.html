@@ -178,8 +178,9 @@
       padding-right: 24px;
     }
 
-    section { padding-block: 96px; }
-    .section-head { text-align: center; margin-bottom: 48px; }
+    /* One rhythm for every section: 64 px above and below (48 px on phones), 32 px under each section title. */
+    section { padding-block: 64px; }
+    .section-head { text-align: center; margin-bottom: 32px; }
     h2 {
       font-size: 28px;
       font-weight: 600;
@@ -248,34 +249,31 @@
 
     /* Hero */
     .hero {
-      padding-top: 72px;
-      padding-bottom: 72px;
+      padding-top: 64px;
+      padding-bottom: 64px;
     }
-    /* Desktop: explanation and download on the left, screenshot on the right. Stacked and centred below 880 px. */
+    /* Desktop: explanation and download on the left, screenshot on the right, the screenshot as tall as the text
+       block (the image is laid over its stretched grid cell; its transparent shadow margin may overlap the edges).
+       Stacked and centred below 880 px. */
     .hero-grid {
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       gap: 48px;
-      align-items: center;
+      align-items: stretch;
     }
-    .hero-text { text-align: left; }
+    .hero-text { text-align: left; align-self: center; }
     .hero-lead {
       font-size: 17px;
       color: var(--text-2);
-      margin-bottom: 24px;
+      margin-bottom: 20px;
     }
-    .hero-logo {
-      width: 64px;
-      height: 64px;
-      display: block;
-      margin: 0 0 20px;
-    }
-    .section-tight { padding-block: 48px; }
+    .hero .tagline-badge { margin-bottom: 20px; }
+    .hero .meta-note { margin-top: 12px; margin-bottom: 0; }
     .name-note {
       text-align: center;
       font-size: 19px;
       color: var(--text-2);
-      margin: 0;
+      margin: 0 0 48px;
     }
     .name-note strong { color: var(--text); }
     .story-card {
@@ -293,11 +291,11 @@
     }
     .story-card figcaption { font-size: 15px; color: var(--text-2); }
     .hero h1 {
-      font-size: 48px;
+      font-size: 36px;
       font-weight: 600;
       letter-spacing: -0.025em;
-      line-height: 1.1;
-      margin-bottom: 12px;
+      line-height: 1.15;
+      margin-bottom: 16px;
     }
     .hero .tagline {
       font-size: 21px;
@@ -341,15 +339,21 @@
     }
     /* The image already carries its own window frame and shadow, so no extra box around it. */
     .screenshot {
-      margin: 0 auto;
-      max-width: 520px;
-      width: 100%;
+      position: relative;
+      min-height: 0;
     }
     .screenshot img {
-      display: block;
-      width: 100%;
-      height: auto;
-      max-width: 100%;
+      position: absolute;
+      /* The PNG has about 6 % transparent shadow margin on every side. The box is the text block height plus that
+         margin, and wide enough that the height decides the size: the visible window is exactly as tall as the
+         text and download block. */
+      top: -6%;
+      left: -6%;
+      width: 125%;
+      height: 112.1%;  /* PNG 650 px tall, window 580 px: 35 px shadow margin above and below */
+      object-fit: contain;
+      object-position: left center;
+      max-width: none;
     }
 
     /* Feature cards */
@@ -405,41 +409,6 @@
     }
     .steps h3 { margin-bottom: 8px; }
     .steps p { color: var(--text-2); font-size: 15px; margin-bottom: 0; }
-
-    /* Pipeline */
-    .pipeline {
-      margin-top: 32px;
-      background: var(--card);
-      border-radius: var(--radius-card);
-      padding: 24px;
-      font-size: 15px;
-      color: var(--text-2);
-      overflow-x: auto;
-    }
-    .pipeline ol {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px 12px;
-      list-style: none;
-      align-items: center;
-    }
-    .pipeline li {
-      background: var(--card-hi);
-      color: var(--text);
-      border-radius: var(--radius-sm);
-      padding: 8px 12px;
-    }
-    /* Flow marker between steps: a small chevron drawn with borders (no arrow character, rules.md 7). */
-    .pipeline li + li::before {
-      content: "";
-      display: inline-block;
-      width: 6px;
-      height: 6px;
-      border-top: 1.5px solid var(--text-3);
-      border-right: 1.5px solid var(--text-3);
-      transform: translateY(-2px) rotate(45deg);
-      margin-right: 12px;
-    }
 
     /* Details / troubleshooting */
     .stack { display: flex; flex-direction: column; gap: 12px; max-width: 760px; margin: 0 auto; }
@@ -624,18 +593,22 @@
     footer a:hover { color: var(--text); }
 
     /* Responsive */
-    @media (max-width: 880px) {
-      .hero-grid { grid-template-columns: 1fr; gap: 40px; }
+    /* Below 980 px the text column wraps taller and the window would run past the page edge: stack instead. */
+    @media (max-width: 980px) {
+      .hero-grid { grid-template-columns: 1fr; gap: 32px; }
       .hero-text { text-align: center; }
-      .hero-logo { margin: 0 auto 20px; }
       .cta-row { flex-direction: column; }
+      .screenshot { position: static; }
+      .screenshot img { position: static; width: 100%; height: auto; max-width: 440px; display: block; margin: 0 auto; }
+    }
+    @media (max-width: 880px) {
       .grid-3, .perf-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .steps { grid-template-columns: 1fr; }
     }
     @media (max-width: 720px) {
-      section { padding-block: 64px; }
-      .hero { padding-top: 48px; padding-bottom: 48px; }
-      .hero h1 { font-size: 36px; }
+      section { padding-block: 48px; }
+      .hero { padding-top: 40px; padding-bottom: 48px; }
+      .hero h1 { font-size: 32px; }
       .hero .tagline { font-size: 18px; }
       h2 { font-size: 24px; }
       .topbar nav a.nav-optional { display: inline; }
@@ -678,9 +651,7 @@
     <section class="hero">
       <div class="wrap hero-grid">
         <div class="hero-text">
-          <img class="hero-logo" src="assets/getsu-logo.svg" alt="Getsu logo" width="64" height="64">
-          <h1>Getsu</h1>
-          <p class="tagline">Clean voice for every app. Free, offline, light on your CPU.</p>
+          <h1>Clean voice for every app. Free, offline, light on your CPU.</h1>
           <p class="hero-lead">Real-time noise cancellation for Windows. Getsu removes keyboard clicks, fan hum, room noise and background voices from your microphone, for Discord, Steam, Zoom, OBS and your games at once.</p>
           <div class="tagline-badge" id="release-badge">v1.4.0 • Windows 10 & 11 • Free & Open Source</div>
 
@@ -700,16 +671,10 @@
       </div>
     </section>
 
-    <!-- Name -->
-    <section id="name" class="section-tight">
+    <!-- Name and story -->
+    <section id="story">
       <div class="wrap">
         <p class="name-note"><strong>Getsu</strong> comes from two Acehnese words: <strong>gèt</strong> (<em>"good"</em>) and <strong>su</strong> (<em>"sound"</em>).</p>
-      </div>
-    </section>
-
-    <!-- Story -->
-    <section id="story" class="section-tight">
-      <div class="wrap">
         <div class="section-head">
           <h2>Why I built Getsu</h2>
         </div>
@@ -717,7 +682,7 @@
           <blockquote>
             <p>I built Getsu because I play Dota 2 with friends who are too broke for RTX graphics cards, studio mics, or Krisp subscriptions. Our calls were full of fan roar, mechanical keyboard clatter, and the occasional family drama in the background. I wanted a simple tool that runs locally on any normal CPU, costs nothing, has zero tracking, and gets out of the way.</p>
           </blockquote>
-          <figcaption>Ihsan, creator of Getsu. "I built this because RTX Voice wouldn't run on my laptop."</figcaption>
+          <figcaption>Ihsan, creator of Getsu</figcaption>
         </figure>
       </div>
     </section>
@@ -787,17 +752,6 @@
             <p>Getsu starts cleaning your voice. Apps on the Default microphone use it automatically. Click again to stop.</p>
           </li>
         </ol>
-
-        <div class="pipeline" aria-label="Audio path">
-          <ol>
-            <li>Microphone</li>
-            <li>80 Hz rumble filter</li>
-            <li>RNNoise (CPU)</li>
-            <li>Noise gate</li>
-            <li>CABLE Output</li>
-            <li>Discord, Steam, games</li>
-          </ol>
-        </div>
       </div>
     </section>
 

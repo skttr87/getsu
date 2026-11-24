@@ -23,7 +23,7 @@
 
 > I built Getsu because I play Dota 2 with friends who are too broke for RTX graphics cards, studio mics, or Krisp subscriptions. Our calls were full of fan roar, mechanical keyboard clatter, and the occasional family drama in the background. I wanted a simple tool that runs locally on any normal CPU, costs nothing, has zero tracking, and gets out of the way.
 >
-> Ihsan, creator of Getsu. "I built this because RTX Voice wouldn't run on my laptop."
+> Ihsan, creator of Getsu
 
 ## What Getsu does
 

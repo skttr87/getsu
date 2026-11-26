@@ -480,7 +480,12 @@ def main() -> int:
 
     if args.install_driver:
         from src.devices import install_vbcable_driver
-        return 0 if install_vbcable_driver() else 1
+        from src.cable_visibility import mark_cable_installed_by_getsu
+        from src.config import load_config
+        installed = install_vbcable_driver()
+        if installed:
+            mark_cable_installed_by_getsu(load_config())
+        return 0 if installed else 1
 
     if args.probe_mic is not None:
         from src.mic_probe import run_probe

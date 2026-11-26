@@ -27,5 +27,6 @@
     "rnnoise_dry_mix_db": null,
     "was_running_on_exit": false,
     "last_physical_playback_id": null,
-    "mic_level_raised": []
+    "mic_level_raised": [],
+    "cable_installed_by_getsu": false
 }

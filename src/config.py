@@ -40,6 +40,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "was_running_on_exit": False,   # True when noise cancellation was on at the last exit; a Start with Windows launch resumes it
     "last_physical_playback_id": None,  # Endpoint ID of the last physical default playback device; the cable guard switches back to it
     "mic_level_raised": [],  # Endpoint IDs of microphones whose low level Getsu raised once (mic_level.py); never again after
+    "cable_installed_by_getsu": False,  # True when Getsu installed VB-CABLE: its endpoints are hidden while Getsu is closed
 }
 
 import sys
@@ -186,6 +187,9 @@ def load_config() -> Dict[str, Any]:
             migrated = True
         if "mic_level_raised" not in data:
             merged["mic_level_raised"] = []
+            migrated = True
+        if "cable_installed_by_getsu" not in data:
+            merged["cable_installed_by_getsu"] = False
             migrated = True
 
         # Repair values the app cannot use instead of failing at start-up (older builds could save

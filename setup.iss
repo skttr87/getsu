@@ -368,6 +368,12 @@ begin
     Exec('taskkill.exe', '/F /T /IM getsu.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Sleep(300);
 
+    // Show Getsu's own cable again (only when Getsu installed it), then forget the marker. This runs after taskkill,
+    // so a running Getsu cannot hide the cable again.
+    Exec(ExpandConstant('{app}\{#MyAppExeName}'), '--cable-visibility show-always', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    RegDeleteValue(HKLM64, 'SOFTWARE\Getsu', 'CableInstalledByGetsu');
+    RegDeleteKeyIfEmpty(HKLM64, 'SOFTWARE\Getsu');
+
     if RemoveVBCableRequested then
     begin
       DriverSetupExe := AddBackslash(AppDir) + 'drivers\vbcable\VBCABLE_Setup_x64.exe';
@@ -454,6 +460,18 @@ begin
 
       // 4. Set the new cable to 2 ch, 16 bit, 48 kHz (Getsu's processing rate). Exits without a window.
       Exec(ExpandConstant('{app}\{#MyAppExeName}'), '--set-cable-format', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+      // 5. Getsu installed the cable: record it (the marker is what lets Getsu hide the cable while it is closed) and
+      // hide the cable now, so Windows cannot pick it as default before Getsu starts. Only when the cable is really there.
+      if FileExists(AudioRestoreExe) then
+      begin
+        Exec(AudioRestoreExe, '--check-vbcable', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+        if ResultCode = 0 then
+        begin
+          RegWriteDWordValue(HKLM64, 'SOFTWARE\Getsu', 'CableInstalledByGetsu', 1);
+          Exec(ExpandConstant('{app}\{#MyAppExeName}'), '--cable-visibility hide', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+        end;
+      end;
     end
     else
     begin

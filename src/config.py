@@ -7,7 +7,7 @@ import json
 import copy
 from typing import Dict, Any
 
-APP_VERSION: str = "1.3.1"
+APP_VERSION: str = "1.4.0"
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "version": APP_VERSION,

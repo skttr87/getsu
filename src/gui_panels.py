@@ -123,10 +123,6 @@ class PanelsMixin:
         if tag is not None:
             self._click_targets[tag]()
 
-    def show_how_to_use_modal(self, sender=None, app_data=None):
-        """Opens the How to use panel over the window."""
-        self._open_panel("help")
-
     # --- panels -----------------------------------------------------------
 
     def _build_panel_shell(self, name: str):

@@ -1,256 +1,205 @@
-# Getsu — Real-Time AI Noise Cancellation
+# Getsu
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/skttr87/getsu/main/assets/getsu-ui.png" alt="Getsu Interface" width="460" />
+  <img src="https://raw.githubusercontent.com/skttr87/getsu/main/assets/getsu-ui.png" alt="Getsu main window" width="460" />
 </p>
 
 <p align="center">
-  <strong>Real-time AI noise cancellation for Windows.</strong><br>
-  Filters out fan roar, mechanical keyboards, room noise, and distant chatter directly on your CPU — free, offline, and lightweight.<br>
-  <em>Works with Discord, Zoom, Steam, OBS, and all PC games.</em>
+  <strong>Clean voice for every app. Free, offline, light on your CPU.</strong><br>
+  Getsu removes keyboard clicks, fan hum, room noise and background voices from your microphone, for Discord, Steam, Zoom, games and OBS at once.
 </p>
 
 <p align="center">
-  <a href="https://github.com/skttr87/getsu/releases/latest"><img src="https://img.shields.io/badge/Release-v1.3.1-28a745?style=for-the-badge&logo=windows" alt="Latest Release" /></a>
+  <a href="https://github.com/skttr87/getsu/releases/latest"><img src="https://img.shields.io/badge/Release-v1.4.0-blue?style=for-the-badge&logo=windows" alt="Latest Release" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License" /></a>
   <img src="https://img.shields.io/badge/Platform-Windows_10%2F11-0078D6?style=for-the-badge&logo=windows" alt="Platform" />
-  <img src="https://img.shields.io/badge/100%25-Free%20%26%20Offline-brightgreen?style=for-the-badge" alt="Privacy" />
+  <img src="https://img.shields.io/badge/Free%20%26%20Offline-blue?style=for-the-badge" alt="Free and offline" />
 </p>
-
----
 
 > [!NOTE]
 > **Getsu** comes from two Acehnese words: **gèt** (*"good"*) and **su** (*"sound"*).
 
----
+## Why I built Getsu
 
-## ⚡ Why Getsu?
+> I built Getsu because I play Dota 2 with friends who are too broke for RTX graphics cards, studio mics, or Krisp subscriptions. Our calls were full of fan roar, mechanical keyboard clatter, and the occasional family drama in the background. I wanted a simple tool that runs locally on any normal CPU, costs nothing, has zero tracking, and gets out of the way.
+>
+> Ihsan, creator of Getsu
 
-Commercial noise cancellation tools often charge monthly subscriptions, drain your graphics card (GPU), or track your data:
+This project was made possible, and its early development supported, by [Kopi Reman](https://www.instagram.com/kopireman/).
 
-| Feature | **Getsu** | **Krisp** | **NVIDIA Broadcast** |
-|---|:---:|:---:|:---:|
-| **Price** | **100% Free Forever** | $96 / year (or 60 min limit) | Free (Requires RTX GPU) |
-| **Requirements** | **Any PC or Laptop** | Any PC | Expensive RTX Graphics Card |
-| **Privacy** | **100% Offline (Zero accounts/tracking)** | Online accounts required | Telemetry bundled |
-| **Download Size** | **~35 MB** | >150 MB | >1,000 MB (1 GB+) |
-| **Gaming Friendly** | **Near-zero latency (won't drop game FPS)** | High memory usage | Heavy GPU VRAM usage |
+## What Getsu does
 
----
+Getsu sits between your microphone and your apps. It removes keyboard and mouse clicks, fan roar, air conditioning, desk bumps and voices in the next room, so the people you talk to hear mostly you.
 
-## 🛡️ What Getsu Blocks
+It works for every app at once: Discord, Steam, Zoom, Google Meet, OBS and games. No per-app plugin is needed.
 
-Getsu combines an **80Hz Butterworth rumble filter**, the **Mozilla RNNoise neural network**, and an **Adaptive S-Curve Noise Gate** with lookahead to silence domestic and gaming noise directly on your CPU:
+## Quick start
 
-| Noise Type | Real-World Examples | How Getsu Eliminates It |
-|---|---|---|
-| **Stationary Background Noise** | Laptop cooling pads, GPU/CPU fan roar, air conditioning | **RNNoise Neural Spectral Subtraction** (100% suppressed on CPU) |
-| **Low-End Physical Rumble** | Desk typing vibrations, floor footsteps, 50/60Hz AC hum | **80Hz High-Pass Filter** (eradicates sub-audible energy before AI) |
-| **Sharp Transient Clicks** | Mechanical keyboards (Blue/Brown/Red switches), mouse clicks | **S-Curve Noise Gate + 10ms Pre-Roll** (smooth zero-jerk ramping) |
-| **Far-Field Domestic Chatter** | Family talking in next room, background living room TV | **10 dB Onset SNR Bar** (requires near-field proximity energy to open) |
-| **Sentence-Ending Chatter** | Voices trailing off while background noise continues | **150ms Re-Arm Cooldown Holdoff** (blocks decay-abort clicks) |
+1. **Install.** [![Download Latest Installer](https://img.shields.io/badge/Download%20Latest%20Installer-v1.4.0-blue?style=flat-square&logo=windows)](https://github.com/skttr87/getsu/releases/latest)  
+   Download and run the [latest Getsu setup installer](https://github.com/skttr87/getsu/releases/latest). The installer sets up the free VB-CABLE virtual audio cable in the background.
+2. **Pick your microphone.** Open Getsu from the Desktop or Start Menu and choose your microphone in the microphone card.
+3. **Click the power button.** Getsu starts cleaning your voice. Apps set to the **Default** microphone use the clean voice automatically. Click the button again to stop.
 
----
+To hear how you sound, click **Hear Myself (11s Voice Test)** while Getsu is stopped. Speak for 11 seconds and Getsu plays back your cleaned voice.
 
-## 🚀 Quick Start (3 Steps)
+## New in v1.4.0
 
-### 1. Download & Install
-[![Download Latest Release](https://img.shields.io/badge/Download%20Latest%20Installer-v1.3.1-28a745?style=flat-square&logo=windows)](https://github.com/skttr87/getsu/releases/latest)  
-Download and run the latest **[Getsu Setup Installer (Releases)](https://github.com/skttr87/getsu/releases/latest)**.  
-*(The installer automatically sets up the required virtual audio driver in the background).*
+- A new interface.
+- **Start with Windows:** tick it in the tray menu. Getsu then starts hidden in the tray at sign-in, turns noise cancellation back on if it was on when you closed it, and waits up to 20 seconds for USB or Bluetooth microphones that appear late. Untick it to turn it off. Uninstalling removes the startup entry.
+- More microphones work, including microphone names in other languages and headset microphones that run at 16 kHz (issues #1 and #3).
+- The noise filter runs about 4 times faster than in v1.3.1.
+- Getsu switches to a USB or wired headset when you plug it in.
+- Windows can no longer leave the virtual cable as your default microphone or speakers.
+- Better handling of Bluetooth headsets. The virtual cable is set to 48 kHz, and a too-low microphone level is fixed once when you turn noise cancellation on.
+- Tray menu: **Check for updates** (opens the GitHub releases page) and **Save diagnostics**.
 
-### 2. Choose Your Microphone
-Open Getsu from your Desktop or Start Menu and select your microphone from the dropdown list.
+## Performance
 
-### 3. Click START
-Click the large green **START** button. That's it!  
-Getsu will automatically route your clean, noise-free microphone to Discord, Steam, Zoom, and your games.
+Measured on a Ryzen 7 5800H laptop:
 
-> [!TIP]
-> **Want to test how you sound?**  
-> Click **"Hear Myself (11s Voice Test)"** while stopped. Speak into your mic, and Getsu will play back 11 seconds of your clean, noise-filtered voice!
+| Measure | Result |
+|---|---|
+| Processing time | about 0.2 ms for every 10 ms of audio |
+| CPU while cleaning your voice | about 2 % of one CPU core |
+| CPU with the window open and idle | about 2 % |
+| CPU while hidden in the tray | under 1 % |
+| GPU | not used |
+| Delay from your microphone to your apps | about 110 ms, including the virtual cable |
+| Installer size | about 29 MB (v1.4.0) |
 
-### 💡 What if an app is still hearing noise? (e.g. Steam or Discord)
-Getsu automatically routes clean audio to any app set to your **"Default"** microphone. If an app still hears background noise, it is usually because that app was previously locked to your raw physical mic:
+Results on other PCs will differ.
 
-* **Steam**: Go to **Settings** ➔ **Voice** ➔ Set **Voice Input Device** to **`Default`** (or **`CABLE Output (VB-Audio Virtual Cable)`**). *(Tip: Turn off Steam's built-in "Noise Cancellation" to avoid double-processing).*
-* **Discord**: Go to **User Settings** (⚙️) ➔ **Voice & Video** ➔ Set **Input Device** to **`Default`** (or **`CABLE Output (VB-Audio Virtual Cable)`**). *(Tip: Turn off Discord's Krisp filter).*
-* **PC Games (CS2, Valorant, Apex, CoD)**: Ensure in-game audio settings use **`Default System Device`** or **`CABLE Output`**.
+## Troubleshooting
 
----
+### An app still hears background noise
 
-## ✨ Key Features
+Getsu sends clean audio to apps set to the **Default** microphone. An app that was locked to your physical microphone needs a change:
 
-- 🧠 **AI Voice Isolation**: Silences noisy mechanical keyboards, desk fans, air conditioners, and background chatter.
-- 🎯 **Smart Auto-Routing**: Automatically connects to your voice apps when you click START, and safely restores your normal mic when you click STOP or close the app.
-- 💨 **Ultra-Low Latency**: Lightning-fast processing (<1.2ms) so your voice never lags behind your gameplay.
-- 🎧 **"Hear Myself" Preview**: Test your voice in 11 seconds without creating screeching feedback loops or annoying your friends in a live call.
-- 🎚️ **Sensitivity Slider**: Easily adjust how sensitive Getsu is to quiet voices vs. background noise.
-- 🔌 **Plug & Play Recovery**: Unplugged your USB headset by accident? Getsu automatically switches to your backup mic without dropping your call.
-- 🖥️ **Looks Crisp Everywhere**: Automatically scales and sharpens on laptops, standard monitors, and 4K screens.
+* **Steam:** Settings > Voice > set **Voice Input Device** to `Default` (or `CABLE Output (VB-Audio Virtual Cable)`). Turn off Steam's own Noise Cancellation to avoid double processing.
+* **Discord:** User Settings > Voice & Video > set **Input Device** to `Default` (or `CABLE Output (VB-Audio Virtual Cable)`). Turn off Discord's Krisp noise suppression.
+* **Games (CS2, Valorant, Apex, Call of Duty):** in the in-game audio or voice settings, use `Default System Device` or `CABLE Output`.
+* Turn off the app's own voice activation threshold.
 
----
+### Bluetooth earbuds sound bad
 
-## 💻 Headless Audio Batch Cleaner (`getsu-cli`)
+When a Bluetooth headset uses its microphone, Windows switches it to call quality (mono, narrow band). That comes from Bluetooth, not from Getsu. A separate microphone keeps game audio in full quality.
 
-Getsu includes a dedicated console companion tool, **`getsu-cli.exe`**, designed for synchronous command-line processing, audio batch cleaning, podcast post-production, and automated CI pipelines.
+### Reporting a problem
 
-> [!TIP]
-> **Independent Execution**: `getsu-cli` runs synchronously in any terminal (PowerShell, Command Prompt, Windows Terminal) and can process files in the background even while the Getsu desktop application (`getsu.exe`) is actively running.  
-> *(If you selected "Add Getsu CLI to system PATH" during installation, you can run `getsu-cli` from any directory).*
+1. Right-click the Getsu icon in the tray and choose **Save diagnostics**.
+2. Attach the file it saves to a [GitHub issue](https://github.com/skttr87/getsu/issues). The file holds the log and the device list. It does not contain audio.
+3. Optional: run `getsu-cli --probe-mic` in a Command Prompt and paste the output into the issue. It tries several ways to open the microphone and reports which works. It changes no settings.
 
-### Common CLI Commands
+### Windows SmartScreen says "Unknown publisher"
 
-#### 1. Clean a Single Audio File
+Getsu is open-source software and is not signed with a paid code-signing certificate. Click **More info**, then **Run anyway**. The SHA-256 checksum of each installer is listed on the [releases page](https://github.com/skttr87/getsu/releases).
+
+## Privacy
+
+* Getsu makes no network connections. A test in the source code checks this.
+* **Check for updates** only opens the GitHub releases page in your browser.
+* Audio never leaves your PC and is never saved to disk.
+* No account or login is needed. The full source code is in this repository.
+
+## How Getsu compares
+
+Krisp and NVIDIA Broadcast are different products. Check each vendor for current prices and requirements.
+
+| | **Getsu** | Krisp | NVIDIA Broadcast |
+|---|---|---|---|
+| Price model | Free, open source | Subscription, with a free tier | Free |
+| Hardware | Any PC, no GPU needed | Any PC | NVIDIA RTX graphics card |
+| Works in | Every app that uses the microphone | Any app that uses its virtual microphone | Any app that uses its virtual microphone |
+
+## Command line: getsu-cli
+
+`getsu-cli.exe` cleans audio files from a terminal or a script. It runs on its own, so it works while the Getsu window is open. If you chose "Add Getsu CLI to system PATH" during installation, you can run it from any folder.
+
 ```powershell
-# Automatically outputs to recording_cleaned.wav
+# Clean one file (writes recording_cleaned.wav)
 getsu-cli --clean recording.wav
 
-# Or specify a custom output path
+# Clean one file to a chosen path
 getsu-cli --clean recording.wav D:\audio\cleaned.wav
-```
 
-#### 2. Clean an Entire Folder / Directory
-Processes all audio files (`.wav`, `.mp3`, `.flac`, `.ogg`) inside the directory:
-```powershell
+# Clean every WAV, MP3, FLAC and OGG file in a folder
 getsu-cli --clean D:\recordings\podcast\
-```
 
-#### 3. Linked-Stereo Gating (`--stereo`)
-For multi-channel podcasts and stereo recordings. Tracks a synchronized master energy envelope across Left and Right channels, eliminating stereo panning image wobble:
-```powershell
+# Linked-stereo gating for stereo and multi-channel files
 getsu-cli --clean interview_stereo.wav --stereo
-```
 
-#### 4. Music & Performance Mode (`--music-mode`)
-Bypasses the neural model and extends gate sustain to 800ms with a gentle 250ms decay, preserving natural room decay and instrument/singing vibrato:
-```powershell
+# Music and singing: skips the neural model, keeps room decay and vibrato
 getsu-cli --clean vocal_take.wav --music-mode
-```
 
-#### 5. Makeup Gain & Voiced Speech Leveling
-```powershell
-# Add +4.0 dB of clean makeup gain
+# Makeup gain, or normalise quiet speech toward -24 dBFS
 getsu-cli --clean quiet_mic.wav --gain 4.0
-
-# Automatically normalize quiet speaker levels toward -24 dBFS
 getsu-cli --clean quiet_mic.wav --auto-level
 ```
 
-### CLI Options & Flags Reference
+| Option | Description |
+|---|---|
+| `--clean <path>` | File or folder to clean (required). |
+| `[output_path]` | Output WAV file or folder (optional, defaults to `<name>_cleaned.wav`). |
+| `--stereo` | Linked-stereo gating for stereo and multi-channel files. |
+| `--music-mode` | Skips RNNoise and uses an 800 ms sustain with a 250 ms decay, for music and singing. |
+| `--auto-level` | Raises quiet speech toward -24 dBFS. |
+| `--gain <dB>` | Makeup gain in decibels (for example `--gain 3.0`). |
+| `--no-rnnoise` | Turns off RNNoise (rumble filter and noise gate only). |
+| `--no-gate` | Turns off the noise gate (RNNoise only). |
+| `--report-json <file>` | Writes a frame-by-frame JSON log. |
+| `--no-progress` | Hides the progress bar, useful in scripts. |
+| `--no-stats` | Hides the summary table. |
+| `--check-devices` | Prints the audio devices and a diagnostics report. |
+| `--probe-mic` | Tries to open a microphone several ways and reports which works. Changes no settings. |
 
-| Option / Flag | Description |
-| :--- | :--- |
-| `--clean <path>` | Path to input audio file or folder to clean (*required*). |
-| `[output_path]` | Destination WAV path or directory (*optional, defaults to `[name]_cleaned.wav`*). |
-| `--stereo` | Coupled linked-stereo gating for multi-channel audio files. |
-| `--music-mode` | Bypasses RNNoise and extends hangover to 800ms for music/singing. |
-| `--auto-level` | Dynamically normalizes quiet speech levels toward $-24\text{ dBFS}$. |
-| `--gain <dB>` | Post-processing makeup gain boost in decibels (e.g. `--gain 3.0`). |
-| `--no-rnnoise` | Bypass neural noise reduction (uses 80Hz rumble filter and noise gate only). |
-| `--no-gate` | Bypass noise gate (uses neural noise reduction only). |
-| `--report-json <file>` | Exports frame-by-frame telemetry JSON log for automated acoustic profiling. |
-| `--no-progress` | Suppresses the dynamic console progress bar (ideal for headless CI/CD scripts). |
-| `--no-stats` | Suppresses the terminal summary statistics table. |
-| `--check-devices` | Prints system audio endpoints and diagnostics report. |
+## Limits
 
----
+* **Windows only:** Windows 10 and Windows 11 (64-bit). There is no macOS or Linux build.
+* **Virtual audio cable:** Getsu uses VB-CABLE to pass clean audio to other apps. The official installer sets it up for you.
+* **Unsigned installer:** see the SmartScreen answer in Troubleshooting.
 
-## ⚠️ Limits & Transparency Notes
+## Credits and license
 
-Every software has engineering trade-offs. Here is what to expect upfront:
+* **[RNNoise](https://github.com/xiph/rnnoise)** by Jean-Marc Valin (Xiph.Org, Mozilla): the neural network that suppresses noise. Built from source for Getsu, with CPU-specific speed-ups.
+* **[SpeexDSP](https://github.com/xiph/speexdsp)** by Jean-Marc Valin and contributors (Xiph.Org), BSD-3-Clause ([license](licenses/SpeexDSP-COPYING)).
+* **[DearPyGui](https://github.com/hoffstadt/DearPyGui)**: the GUI engine.
+* **[Inter](https://rsms.me/inter/)** by Rasmus Andersson, SIL Open Font License 1.1 ([license](docs/assets/fonts/OFL.txt)): the interface font.
+* **[VB-CABLE](https://www.vb-cable.com)** by VB-Audio (Vincent Burel): the virtual audio cable that carries your clean voice to other apps. The Getsu installer includes the official, unmodified VB-CABLE package. VB-CABLE is donationware, all participations are welcome: if you find it useful, please support VB-Audio at [www.vb-cable.com](https://www.vb-cable.com).
 
-- **Windows Only**: Designed for Windows 10 and Windows 11 (64-bit). There are currently no macOS or Linux builds.
-- **Virtual Audio Driver Required**: Relies on VB-Audio Virtual Cable to bridge the clean audio output to your games and chat applications (the official installer installs this for you automatically).
-- **Resource Footprint**: Adds <1.2ms processing latency and consumes ~1.5% CPU on a standard quad-core CPU. **0% GPU usage** (no CUDA/RTX requirements).
-- **Unsigned SmartScreen Warning**: Getsu is independent open-source software and does not carry an expensive commercial code-signing certificate ($300+/year). Windows SmartScreen may show an *"Unknown Publisher"* warning. Click **More info** ➔ **Run anyway**. All source code is completely public and SHA-256 installer hashes are posted on every [GitHub Release](https://github.com/skttr87/getsu/releases).
-
----
-
-## ❓ Frequently Asked Questions
-
-<details>
-<summary><strong>How is this different from Discord's Krisp?</strong></summary>
-
-> Krisp only cleans your microphone *inside* Discord voice channels. Getsu cleans your microphone at the operating system level, protecting **Discord, Steam, Zoom, Google Meet, OBS Studio, and games (CS2, Valorant, Dota 2, Apex)** simultaneously with zero time limits and zero subscriptions.
-</details>
-
-<details>
-<summary><strong>Do I need an NVIDIA RTX graphics card?</strong></summary>
-
-> No. Getsu's DSP pipeline runs 100% on standard x86 CPU instructions. It works smoothly on Intel, AMD, and budget integrated-GPU laptops without hogging graphics VRAM or compute cores.
-</details>
-
-<details>
-<summary><strong>Will Getsu affect my in-game FPS?</strong></summary>
-
-> Virtually not at all. Because Getsu does not touch your GPU and only uses ~1.5% CPU time, your graphics card remains 100% dedicated to rendering game frames.
-</details>
-
-<details>
-<summary><strong>Does it really block mechanical keyboard switches and clicks?</strong></summary>
-
-> Yes! While standalone RNNoise models struggle with sharp mechanical clatter, Getsu pairs RNNoise with an adaptive S-curve noise gate and a 10ms lookahead pre-roll buffer. Keystrokes, mouse clicks, and desk bumps are silenced without chopping off the first syllable of your words.
-</details>
-
-<details>
-<summary><strong>Is Getsu private and offline?</strong></summary>
-
-> 100% yes. All audio processing runs locally on your machine. Getsu never saves your voice to disk, transmits zero audio over the network, has no analytics tracking, and requires no account. You can audit the entire source code in this repository.
-</details>
-
----
-
-## ☕ Sponsored
-
-<p align="center">
-  <a href="https://www.instagram.com/kopireman/" target="_blank">
-    <img src="https://raw.githubusercontent.com/skttr87/getsu/main/assets/kopi-reman.png" alt="Kopi Reman" width="150" />
-  </a>
-  <br>
-  <strong><a href="https://www.instagram.com/kopireman/" target="_blank">Kopi Reman</a></strong>
-</p>
+This project is open source under the [MIT License](LICENSE).
 
 ---
 
 <details>
-<summary><strong>🛠️ For Developers & Advanced Users (Click to expand)</strong></summary>
+<summary><strong>For developers</strong></summary>
 
-### Audio Processing Pipeline
+### Audio processing path
+
 ```
-[ Microphone ] ──► [ 80Hz Fan Rumble Filter ] ──► [ RNNoise AI Engine ] ──► [ Noise Gate ] ──► [ CABLE Output ]
+Microphone > 80 Hz rumble filter > RNNoise (CPU) > noise gate > CABLE Output
 ```
 
-### Building from Source
+### Building from source
+
 ```powershell
-# 1. Clone repository
+# 1. Clone the repository
 git clone https://github.com/skttr87/getsu.git
 cd getsu
 
-# 2. Set up virtual environment
+# 2. Set up a virtual environment
 python -m venv venv
 .\venv\Scripts\activate
 pip install -r requirements.txt
 
-# 3. Launch or test
+# 3. Run the app or the tests
 python -m src.main
 python -m unittest discover tests
 ```
 
-### Compiling Standalone Executable
+### Building the standalone executable
+
 ```powershell
 python -m PyInstaller --clean --noconfirm build/getsu.spec
 ```
+
 </details>
-
----
-
-## 📜 Credits & License
-
-- **[RNNoise](https://github.com/xiph/rnnoise)**: Recurrent neural network architecture for audio noise reduction by Jean-Marc Valin (Xiph.Org / Mozilla).
-- **[pyrnnoise](https://github.com/pengzhendong/pyrnnoise)**: Precompiled Windows x64 native binary distribution by Zhendong Peng.
-- **[VB-CABLE](https://www.vb-cable.com)** by VB-Audio (Vincent Burel): the virtual audio cable that carries your clean voice to other apps. The Getsu installer includes the official, unmodified VB-CABLE package. VB-CABLE is donationware, all participations are welcome: if you find it useful, please support VB-Audio at [www.vb-cable.com](https://www.vb-cable.com).
-- **[DearPyGui](https://github.com/hoffstadt/DearPyGui)**: Fast GPU-accelerated immediate-mode GUI engine.
-- **[SpeexDSP](https://github.com/xiph/speexdsp)**: Resampler and noise preprocessor library by Jean-Marc Valin and contributors (Xiph.Org), BSD-3-Clause ([license](licenses/SpeexDSP-COPYING)).
-
-This project is open-source under the **[MIT License](LICENSE)**.

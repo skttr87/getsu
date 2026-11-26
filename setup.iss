@@ -2,7 +2,7 @@
 ; ==============================================================
 
 #define MyAppName "Getsu"
-#define MyAppVersion "1.3.1"
+#define MyAppVersion "1.4.0"
 #define MyAppPublisher "skttr87"
 
 #define MyAppURL "https://github.com/skttr87/getsu"
@@ -47,6 +47,8 @@ VersionInfoOriginalFileName=Getsu-v{#MyAppVersion}-Setup.exe
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Messages]
+SetupAppRunningError=Getsu is running.%n%nPlease close Getsu from the system tray: right-click the Getsu icon next to the clock and choose Exit. Then click OK to continue, or Cancel to exit Setup.
+UninstallAppRunningError=Getsu is running.%n%nPlease close Getsu from the system tray: right-click the Getsu icon next to the clock and choose Exit. Then click OK to continue, or Cancel to stop uninstalling.
 UninstallAppTitle=Getsu Uninstaller
 UninstallAppFullTitle=Getsu Uninstaller
 FinishedLabel=Setup has finished installing [name] on your computer.%n%nNotice: Keep your normal Speakers or Headphones selected for your Windows sound (taskbar volume icon). Getsu will automatically route your clean microphone to your games and voice apps.
@@ -83,6 +85,9 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilen
 
 [InstallDelete]
 Type: files; Name: "{autoprograms}\Getsu Uninstaller.lnk"
+; Clean upgrade: remove the previous version's bundled runtime so no stale library or module is left beside the new one.
+; User settings live in %APPDATA%\Getsu and are not touched.
+Type: filesandordirs; Name: "{app}\_internal"
 
 [UninstallDelete]
 Type: files; Name: "{app}\config.json"
@@ -365,6 +370,12 @@ begin
     Exec('taskkill.exe', '/F /T /IM getsu.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Sleep(300);
 
+    // Show Getsu's own cable again (only when Getsu installed it), then forget the marker. This runs after taskkill,
+    // so a running Getsu cannot hide the cable again.
+    Exec(ExpandConstant('{app}\{#MyAppExeName}'), '--cable-visibility show-always', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    RegDeleteValue(HKLM64, 'SOFTWARE\Getsu', 'CableInstalledByGetsu');
+    RegDeleteKeyIfEmpty(HKLM64, 'SOFTWARE\Getsu');
+
     if RemoveVBCableRequested then
     begin
       DriverSetupExe := AddBackslash(AppDir) + 'drivers\vbcable\VBCABLE_Setup_x64.exe';
@@ -384,6 +395,8 @@ begin
     // Clean up %APPDATA%\Getsu\config.json and folder
     if FileExists(ExpandConstant('{userappdata}\Getsu\config.json')) then
       DeleteFile(ExpandConstant('{userappdata}\Getsu\config.json'));
+    // The rotating log (getsu.log, getsu.log.1 ...) lives in the same folder; without this the folder stays behind
+    DelTree(ExpandConstant('{userappdata}\Getsu\getsu.log*'), False, True, False);
     RemoveDir(ExpandConstant('{userappdata}\Getsu'));
 
     // Safely remove folders ONLY if completely empty (Win32 RemoveDirectory)
@@ -449,6 +462,18 @@ begin
 
       // 4. Set the new cable to 2 ch, 16 bit, 48 kHz (Getsu's processing rate). Exits without a window.
       Exec(ExpandConstant('{app}\{#MyAppExeName}'), '--set-cable-format', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+      // 5. Getsu installed the cable: record it (the marker is what lets Getsu hide the cable while it is closed) and
+      // hide the cable now, so Windows cannot pick it as default before Getsu starts. Only when the cable is really there.
+      if FileExists(AudioRestoreExe) then
+      begin
+        Exec(AudioRestoreExe, '--check-vbcable', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+        if ResultCode = 0 then
+        begin
+          RegWriteDWordValue(HKLM64, 'SOFTWARE\Getsu', 'CableInstalledByGetsu', 1);
+          Exec(ExpandConstant('{app}\{#MyAppExeName}'), '--cable-visibility hide', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+        end;
+      end;
     end
     else
     begin
@@ -457,6 +482,9 @@ begin
       begin
         Exec(AudioRestoreExe, '--ensure-physical-capture', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
       end;
+      // Upgrade: PrepareToInstall force-closed Getsu, so it could not hide its cable on exit. Hide it now; this acts
+      // only when Getsu installed the cable (registry marker or in-app flag) and does nothing otherwise.
+      Exec(ExpandConstant('{app}\{#MyAppExeName}'), '--cable-visibility hide', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     end;
   end;
 end;

@@ -20,7 +20,7 @@ except ImportError:
 
 # CoreAudio helpers and the routing logger live in win_audio; the names other modules import from here
 # (device kinds, bus cache helpers, PROPVARIANT and the endpoint readers) are re-exported so those imports keep working.
-from src.win_audio import (
+from src.win_audio import (  # noqa: F401  re-exports, see the comment above
     logger, PROPVARIANT, EndpointFormFactor, DeviceBusType, native_get_current_default_mic,
     native_get_current_default_playback, _is_endpoint_id, native_get_device_bus_type,
     _bus_type_cache, clear_device_bus_type_cache, native_get_device_bus_type_cached,

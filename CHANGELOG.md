@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.4.0] - 2026-11-26
+
+### New
+- **A new interface.** One round power button, your microphone below it, and everything else in Settings.
+- **Start with Windows** (issue #1). Tick it in the tray menu. Getsu then starts hidden in the tray when you sign in, turns noise cancellation back on if it was on when you closed Getsu, and waits up to 20 seconds for USB or Bluetooth microphones that appear late. Off by default. Uninstalling removes it.
+- **Automatic headset switching.** Plug in a USB or wired headset while Getsu is running and it switches to that microphone.
+- **Tray menu:** "Check for updates" (opens the GitHub releases page in your browser; Getsu itself makes no network connection) and "Save diagnostics" (saves a report with the log and device list to your Desktop, no audio). The tray also shows the installed version.
+- **`getsu-cli --probe-mic`** tries several ways to open a microphone and reports which one works, for bug reports. It changes no settings.
+
+### Improved
+- **The noise filter runs about 4 times faster than in v1.3.1.** RNNoise is now built from source with CPU-specific speed-ups, and the library is much smaller (3.8 MB instead of 14.8 MB).
+- **More microphones work** (issue #3): device names in other languages, and headset microphones that only run at 16 kHz.
+- **Windows can no longer leave the virtual cable as your default speakers or microphone.** While Getsu is open it switches your defaults back to your real devices within a few seconds. While Getsu is closed, the virtual cable that Getsu installed is hidden, so Windows uses your real speakers and microphone. A VB-CABLE you installed yourself is never hidden.
+- **Better Bluetooth headsets:** the larger audio buffer meant for Bluetooth headsets is now actually used.
+- **The virtual cable is set to 48 kHz,** the rate Getsu works at, when it is installed and before noise cancellation starts.
+- **A too-quiet microphone is fixed once.** When you turn noise cancellation on and your microphone's Windows recording level is below 65 %, Getsu raises it to 95 % one time. If you lower it again later, Getsu leaves it alone.
+- **Quieter cable install** from inside Getsu: only the Windows permission prompt appears.
+
+### Fixed
+- Window updates from background threads now run on the window's own thread. This was the likely cause of the occasional crash when closing Getsu.
+- Microphone names no longer show the "2-" that Windows adds to repeated devices.
+- Upgrading removes the previous version's files, and uninstalling also removes Getsu's log file.
+
+### Removed
+- The old tray-only mode (`getsu.exe --tray`). The option still works and opens the normal window.
+
+---
+
 ## [1.3.1] - 2026-10-15
 
 - **Windows CoreAudio PnP Hardware Bus Auto-Detection (`PKEY_Device_EnumeratorName`)**:

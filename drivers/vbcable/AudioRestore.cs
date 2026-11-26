@@ -8,8 +8,8 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyCompany("Getsu AI")]
 [assembly: AssemblyProduct("Getsu AI Noise Cancellation")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 Ihsan (@skttr87)")]
-[assembly: AssemblyVersion("1.2.0.0")]
-[assembly: AssemblyFileVersion("1.2.0.0")]
+[assembly: AssemblyVersion("1.4.0.0")]
+[assembly: AssemblyFileVersion("1.4.0.0")]
 
 namespace AudioRestoreTool
 {
@@ -263,9 +263,10 @@ namespace AudioRestoreTool
             }
             else if (args[0] == "--check-vbcable")
             {
-                // Returns 0 if active CABLE endpoint is found, 1 if not found
+                // Returns 0 if a CABLE endpoint is found, 1 if not found. Hidden (disabled) endpoints count as installed:
+                // Getsu hides its own cable while it is closed, and the driver is still there.
                 IMMDeviceCollection col;
-                if (enumerator.EnumAudioEndpoints(EDataFlow.eRender, 1 /* DEVICE_STATE_ACTIVE */, out col) == 0 && col != null)
+                if (enumerator.EnumAudioEndpoints(EDataFlow.eRender, 1 | 2 /* DEVICE_STATE_ACTIVE | DEVICE_STATE_DISABLED */, out col) == 0 && col != null)
                 {
                     int count;
                     col.GetCount(out count);
@@ -277,7 +278,7 @@ namespace AudioRestoreTool
                             string name = GetFriendlyName(dev).ToLower();
                             if (name.Contains("cable input") || (name.Contains("cable") && name.Contains("vb-audio")))
                             {
-                                Console.WriteLine("VB-Cable is installed and active: " + name);
+                                Console.WriteLine("VB-Cable is installed: " + name);
                                 return 0; // Found
                             }
                         }
@@ -409,7 +410,7 @@ namespace AudioRestoreTool
                 {
                     int count;
                     col.GetCount(out count);
-                    // Pass 1: Prioritize external USB / Wireless Headsets & Microphones
+                    // Pass 1: prefer an external headset or microphone (generic words only, no brand names)
                     for (int i = 0; i < count; i++)
                     {
                         IMMDevice dev;
@@ -419,11 +420,7 @@ namespace AudioRestoreTool
                             string nameLower = name.ToLower();
                             if (!nameLower.Contains("cable") && !nameLower.Contains("vb-audio"))
                             {
-                                if (nameLower.Contains("headset") || nameLower.Contains("usb") || nameLower.Contains("wireless") ||
-                                    nameLower.Contains("mpow") || nameLower.Contains("hyperx") || nameLower.Contains("razer") ||
-                                    nameLower.Contains("logitech") || nameLower.Contains("corsair") || nameLower.Contains("steelseries") ||
-                                    nameLower.Contains("yeti") || nameLower.Contains("fifine") || nameLower.Contains("elgato") ||
-                                    nameLower.Contains("rode") || nameLower.Contains("sennheiser") || nameLower.Contains("audio-technica"))
+                                if (nameLower.Contains("headset") || nameLower.Contains("usb") || nameLower.Contains("wireless"))
                                 {
                                     string id;
                                     dev.GetId(out id);

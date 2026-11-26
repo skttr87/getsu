@@ -1,6 +1,5 @@
 """First-run card for the virtual cable: states, install thread and the cable banner."""
 
-import threading
 import time
 
 import dearpygui.dearpygui as dpg
@@ -38,6 +37,10 @@ class SetupMixin:
 
         def worker():
             success = install_vbcable_driver()
+            if success:
+                # Getsu installed the cable: its endpoints are hidden while Getsu is closed (cable_visibility.py).
+                from src.cable_visibility import mark_cable_installed_by_getsu
+                mark_cable_installed_by_getsu(self.config)
 
             # Wait for Windows AudioEndpointBuilder and Audiosrv to register the endpoints: poll every second, up to 10 s.
             for _ in range(10):
@@ -59,10 +62,6 @@ class SetupMixin:
                 self._install_state = "failed"
 
         self._start_thread(worker)
-
-    def show_setup_card_for_install(self):
-        """Brings the first-run card back (used by the power button while the cable is missing)."""
-        self.show_setup_card()
 
     @ui_only
     def _update_cable_banner(self):

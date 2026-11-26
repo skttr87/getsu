@@ -18,13 +18,13 @@ import numpy as np
 
 # Names the tests and the live engine import through this module are re-exported here (see tests/test_dsp.py,
 # tests/test_m12_hotpath.py, tests/test_m2_sound.py); the rest are imported from their own modules.
-from src.dsp_filters import HighPassFilter, _design_tilt_fir
-from src.dsp_gate import (_S_CURVE_TABLE_480, AdaptiveNoiseGate)
-from src.dsp_dynamics import (
+from src.dsp_filters import HighPassFilter, _design_tilt_fir  # noqa: F401  re-export
+from src.dsp_gate import (_S_CURVE_TABLE_480, AdaptiveNoiseGate)  # noqa: F401  re-export
+from src.dsp_dynamics import (  # noqa: F401  re-exports
     calculate_levels, PRECLIP_KNEE_DEFAULT, soft_preclip, soft_limit, TS_RADIUS,
     TS_SKIP_SPEECH_PROB, _TS_BELL, TransientSuppressor, SpeechLeveler
 )
-from src.dsp_input import (InputDownmixer, DryBlend)
+from src.dsp_input import (InputDownmixer, DryBlend)  # noqa: F401  re-export
 
 
 _tls = threading.local()

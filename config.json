@@ -1,5 +1,5 @@
 {
-    "version": "1.3.1",
+    "version": "1.4.0",
     "input_device_id": null,
     "input_device_name": null,
     "output_device_id": null,
@@ -24,5 +24,9 @@
     "preclip_knee": 0.95,
     "stereo_downmix": "auto",
     "vad_floor_tilt_hz": 0.0,
-    "rnnoise_dry_mix_db": null
+    "rnnoise_dry_mix_db": null,
+    "was_running_on_exit": false,
+    "last_physical_playback_id": null,
+    "mic_level_raised": [],
+    "cable_installed_by_getsu": false
 }

@@ -12,8 +12,8 @@ import argparse
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # Fast Single-Instance Micro-Checker (exits in <5ms if Getsu is already running)
-if not any(arg in sys.argv for arg in ("--check-devices", "--install-driver", "--set-cable-format", "-h", "--help",
-                                       "--cli", "--clean", "--batch")):
+if not any(arg in sys.argv for arg in ("--check-devices", "--install-driver", "--set-cable-format", "--cable-visibility",
+                                       "-h", "--help", "--cli", "--clean", "--batch")):
     from src.single_instance import activate_existing_instance
     # A --minimized launch (Start with Windows) still exits when Getsu is running, but must not raise its window.
     if activate_existing_instance(restore="--minimized" not in sys.argv):
@@ -24,6 +24,11 @@ if "--set-cable-format" in sys.argv:
     from src.cable_format import main_cli as cable_format_main
     sys.exit(cable_format_main())
 
+# Run by the installer and uninstaller: show or hide Getsu's own VB-CABLE and exit (no window, no tray).
+if "--cable-visibility" in sys.argv:
+    from src.cable_visibility import main_cli as cable_visibility_main
+    sys.exit(cable_visibility_main(sys.argv))
+
 # Direct delegate to Headless CLI Cleaner if invoked with --clean or --batch
 if any(arg in sys.argv for arg in ("--clean", "--batch")):
     from src.cli_cleaner import main as cli_cleaner_main
@@ -31,46 +36,23 @@ if any(arg in sys.argv for arg in ("--clean", "--batch")):
 
 from src.devices import (
     print_device_report,
-    auto_select_input_device,
-    auto_select_output_device,
-    check_vbcable_status,
     install_vbcable_driver,
 )
-from src.config import load_config, save_config
-from src.stream import AudioEngine, create_engine_from_config
+from src.config import load_config
+from src.stream import create_engine_from_config
 from src.gui import launch_gui
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Getsu - Real-Time AI Noise Filter")
     parser.add_argument("--cli", action="store_true", help="Run in interactive CLI mode without GUI")
-    parser.add_argument("--tray", action="store_true", help="Run in background system tray mode")
+    # Old tray-only mode, removed: still accepted so old shortcuts open the normal window instead of failing.
+    parser.add_argument("--tray", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--check-devices", action="store_true", help="Print audio device diagnostics and exit")
     parser.add_argument("--install-driver", action="store_true", help="Install bundled VB-Audio Virtual Cable driver")
     parser.add_argument("--minimized", action="store_true", help="Start hidden in the system tray (used by Start with Windows)")
     parser.add_argument("--set-cable-format", action="store_true", help="Set Getsu's VB-CABLE to 48 kHz and exit (used by the installer)")
     return parser.parse_args()
-
-
-def run_tray_mode():
-    from src.tray import TrayApp
-    from src.router import SmartMicRouter
-    config = load_config()
-    _, def_in, def_out = print_device_report()
-    input_device_id = config.get("input_device_id", def_in['index'] if def_in else None)
-    output_device_id = config.get("output_device_id", def_out['index'] if def_out else None)
-
-    if input_device_id is None:
-        print("[ERROR] No audio input device (microphone) detected. Exiting tray mode.")
-        return
-
-    router = SmartMicRouter(config)
-    engine = create_engine_from_config(config, input_device_id, output_device_id, router=router)
-    engine.start()
-
-    print("\n[GETSU] Starting Windows System Tray...")
-    tray = TrayApp(engine, config)
-    tray.run()
 
 
 def run_cli_mode():
@@ -91,6 +73,7 @@ def run_cli_mode():
     def shutdown(sig=None, frame=None):
         print("\n[GETSU] Stopping audio engine...")
         engine.prepare_for_stop()
+        # No hide here: --cli skips the single-instance check, so the window may be running and still need the cable.
         sys.exit(0)
 
     signal.signal(signal.SIGINT, shutdown)
@@ -110,8 +93,26 @@ def run_cli_mode():
         shutdown()
 
 
+def _show_cable_at_start():
+    """Shows Getsu's own hidden VB-CABLE before any device is listed. PortAudio caches its device list, so it is
+    re-initialised when a cable endpoint was shown. Never raises."""
+    try:
+        from src.cable_visibility import show_cable
+        results = show_cable(load_config())
+        if any(state == "shown" for state in results.values()):
+            import sounddevice as sd
+            sd._terminate()
+            sd._initialize()
+    except Exception as e:
+        print(f"[CABLE VISIBILITY] Could not show the cable: {e}")
+
+
 def main():
     args = parse_args()
+
+    # Show Getsu's cable while Getsu runs. This is after the single-instance check (a second instance exits before this).
+    if not (args.check_devices or args.install_driver):
+        _show_cable_at_start()
 
     # Startup Audit: Auto-recover Windows default mic if previous session ended in unclean shutdown
     try:
@@ -130,6 +131,8 @@ def main():
         print("[SETUP] Installing VB-Audio Virtual Cable driver...")
         success = install_vbcable_driver()
         if success:
+            from src.cable_visibility import mark_cable_installed_by_getsu
+            mark_cable_installed_by_getsu(load_config())
             print("[SETUP] Success! Please restart your computer or reload devices.")
         else:
             print("[SETUP] Installation cancelled or failed.")
@@ -137,8 +140,6 @@ def main():
 
     if args.cli:
         run_cli_mode()
-    elif args.tray:
-        run_tray_mode()
     else:
         # Default: Launch the sleek GUI with Start/Stop & Input Selector
         launch_gui(minimized=args.minimized)

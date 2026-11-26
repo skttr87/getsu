@@ -5,7 +5,7 @@ import os
 import sys
 import time
 import subprocess
-from typing import List, Dict, Optional, Tuple, Any, Union
+from typing import List, Dict, Optional, Tuple, Any
 import sounddevice as sd
 
 
@@ -698,7 +698,7 @@ def install_vbcable_driver() -> bool:
         except Exception:
             pass
 
-    print(f"[INSTALL] Requesting UAC elevation to install VB-Audio Virtual Cable...")
+    print("[INSTALL] Requesting UAC elevation to install VB-Audio Virtual Cable...")
     try:
         if sys.platform == 'win32':
             import ctypes

@@ -4,7 +4,7 @@ import os
 import subprocess
 import threading
 
-import dearpygui.dearpygui as dpg
+import dearpygui.dearpygui as dpg  # noqa: F401  tests/test_ui_thread_guard.py watches gui_tray.dpg
 from PIL import Image, ImageDraw
 import pystray
 from pystray import MenuItem as item, Menu

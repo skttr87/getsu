@@ -11,7 +11,7 @@ Features:
 
 import os
 import sys
-import math
+import math  # noqa: F401  re-export (tests reach gui.math)
 import threading
 import time
 import signal
@@ -27,13 +27,14 @@ from src import autostart, ui_type
 
 from src.config import load_config, save_config
 from src.frame_pacing import frame_sleep_s
-from src.gui_common import APP_DIR, ICON_ICO_PATH, ICON_PNG_PATH, clean_device_label
-from src.gui_devices import DevicesMixin, _GLYPH_FOR_KIND
+# Names marked "re-export" are not used here; tests and opt/tools reach them through this module.
+from src.gui_common import APP_DIR, ICON_ICO_PATH, ICON_PNG_PATH  # noqa: F401  ICON_PNG_PATH: re-export
+from src.gui_devices import DevicesMixin, _GLYPH_FOR_KIND  # noqa: F401  _GLYPH_FOR_KIND: re-export
 from src.gui_hero import HeroMixin
 from src.gui_panels import PanelsMixin
 from src.gui_settings import SettingsMixin
 from src.gui_setup import SetupMixin
-from src.gui_theme import (
+from src.gui_theme import (  # noqa: F401  BOOST_DBS, FEATURE_*, MIC_ROW_H, POWER_D, TITLE_*, VAD_*: re-export
     ACTION_H,
     BOOST_DBS,
     COL_ACCENT,
@@ -58,20 +59,9 @@ from src.gui_theme import (
     CONTENT_W,
     FEATURE_EARBUD_HINT,
     FEATURE_LEARN_ROOM,
-    HELP_BODY_H,
-    HELP_STEP_H,
     HERO_H,
-    HERO_TOP,
-    MIC_LIST_TEXT_W,
     MIC_ROW_H,
-    MIC_TEXT_W,
     POWER_D,
-    SETTINGS_ROW_H,
-    SETUP_BODY_INSTALLING,
-    SETUP_BODY_OFFER,
-    SET_CTRL_W,
-    SET_LABEL_W,
-    SHEET_HEAD_H,
     TITLE_BORDER_COLOR,
     TITLE_CAPTION_COLOR,
     TITLE_TEXT_COLOR,
@@ -92,28 +82,15 @@ from src.gui_theme import (
     VAD_MIN,
     WINDOW_W,
 )
-from src.gui_tray import TRAY_BARS, TrayMixin, create_tray_icon_image, ensure_app_icon_ico
+from src.gui_tray import TrayMixin, create_tray_icon_image, ensure_app_icon_ico  # noqa: F401  create_tray_icon_image: re-export
 from src.gui_voice_test import VoiceTestMixin
 from src.gui_widgets import WidgetsMixin, _Switch
 from src.gui_win32 import (
-    GWLP_WNDPROC,
-    GWL_STYLE,
-    SC_MAXIMIZE,
-    SC_MINIMIZE,
-    SWP_FRAMECHANGED,
-    SWP_NOMOVE,
     SWP_NOSIZE,
     SWP_NOZORDER,
     SW_HIDE,
-    SW_RESTORE,
-    WM_CLOSE,
-    WM_SYSCOMMAND,
-    WNDPROC,
-    WS_MAXIMIZEBOX,
-    WS_THICKFRAME,
     Win32Mixin,
     apply_dwm_title_bar,
-    force_foreground_window,
     init_dpi_awareness,
     user32,
 )
@@ -309,6 +286,12 @@ class GetsuGUI(
                 self.router.restore_original()
             except Exception:
                 pass
+        # Last audio step: the microphone is restored, so Getsu's own cable can be hidden (cable_visibility.py).
+        try:
+            from src.cable_visibility import hide_cable
+            hide_cable(self.config)
+        except Exception:
+            pass
 
     def _persist_was_running(self, running: bool):
         """Stores whether noise cancellation is on, for the next Start with Windows launch. Never raises."""

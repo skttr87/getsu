@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <!-- Small-size app icon (16-24 px): 3 bars on whole pixels so they stay sharp. -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2f97ff"/>
+      <stop offset="1" stop-color="#0a74e8"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="16" height="16" rx="3.6" fill="url(#g)"/>
+  <g fill="#ffffff">
+    <rect x="4"  y="5" width="2" height="6"  rx="1"/>
+    <rect x="7"  y="3" width="2" height="10" rx="1"/>
+    <rect x="10" y="4" width="2" height="8"  rx="1"/>
+  </g>
+</svg>

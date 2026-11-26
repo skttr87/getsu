@@ -1,4 +1,4 @@
-# Getsu
+# Getsu - Real-Time AI Noise Cancellation
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/skttr87/getsu/main/assets/getsu-ui.png" alt="Getsu main window" width="460" />

@@ -46,33 +46,13 @@ from src.gui import launch_gui
 def parse_args():
     parser = argparse.ArgumentParser(description="Getsu - Real-Time AI Noise Filter")
     parser.add_argument("--cli", action="store_true", help="Run in interactive CLI mode without GUI")
-    parser.add_argument("--tray", action="store_true", help="Run in background system tray mode")
+    # Old tray-only mode, removed: still accepted so old shortcuts open the normal window instead of failing.
+    parser.add_argument("--tray", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--check-devices", action="store_true", help="Print audio device diagnostics and exit")
     parser.add_argument("--install-driver", action="store_true", help="Install bundled VB-Audio Virtual Cable driver")
     parser.add_argument("--minimized", action="store_true", help="Start hidden in the system tray (used by Start with Windows)")
     parser.add_argument("--set-cable-format", action="store_true", help="Set Getsu's VB-CABLE to 48 kHz and exit (used by the installer)")
     return parser.parse_args()
-
-
-def run_tray_mode():
-    from src.tray import TrayApp
-    from src.router import SmartMicRouter
-    config = load_config()
-    _, def_in, def_out = print_device_report()
-    input_device_id = config.get("input_device_id", def_in['index'] if def_in else None)
-    output_device_id = config.get("output_device_id", def_out['index'] if def_out else None)
-
-    if input_device_id is None:
-        print("[ERROR] No audio input device (microphone) detected. Exiting tray mode.")
-        return
-
-    router = SmartMicRouter(config)
-    engine = create_engine_from_config(config, input_device_id, output_device_id, router=router)
-    engine.start()
-
-    print("\n[GETSU] Starting Windows System Tray...")
-    tray = TrayApp(engine, config)
-    tray.run()
 
 
 def run_cli_mode():
@@ -160,8 +140,6 @@ def main():
 
     if args.cli:
         run_cli_mode()
-    elif args.tray:
-        run_tray_mode()
     else:
         # Default: Launch the sleek GUI with Start/Stop & Input Selector
         launch_gui(minimized=args.minimized)

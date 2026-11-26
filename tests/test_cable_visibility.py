@@ -322,16 +322,14 @@ class GuiTeardownOrderTests(unittest.TestCase):
             GetsuGUI._teardown_engine_and_timers(fake)
         self.assertEqual(order, ["restore", "hide"])
 
-    def test_tray_exit_hides_after_the_engine_stops(self):
-        from src.tray import TrayApp
-
-        order = []
-        engine = SimpleNamespace(prepare_for_stop=lambda: order.append("restore"))
-        tray = SimpleNamespace(engine=engine, config={})
-        icon = SimpleNamespace(stop=lambda: order.append("icon"))
-        with patch("src.cable_visibility.hide_cable", side_effect=lambda cfg: order.append("hide") or {}):
-            TrayApp._on_exit(tray, icon, None)
-        self.assertEqual(order, ["restore", "hide", "icon"])
+    def test_old_tray_flag_opens_the_normal_window(self):
+        """The tray-only mode (src/tray.py) is removed; --tray is still accepted and launches the GUI."""
+        self.assertFalse(os.path.exists(os.path.join(ROOT, "src", "tray.py")))
+        with open(os.path.join(ROOT, "src", "main.py"), encoding="utf-8") as f:
+            src = f.read()
+        self.assertNotIn("run_tray_mode", src)
+        self.assertNotIn("from src.tray", src)
+        self.assertIn('parser.add_argument("--tray", action="store_true", help=argparse.SUPPRESS)', src)
 
 
 class InstallerTests(unittest.TestCase):

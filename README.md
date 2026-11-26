@@ -13,7 +13,6 @@
   <a href="https://github.com/skttr87/getsu/releases/latest"><img src="https://img.shields.io/badge/Release-v1.4.0-blue?style=for-the-badge&logo=windows" alt="Latest Release" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License" /></a>
   <img src="https://img.shields.io/badge/Platform-Windows_10%2F11-0078D6?style=for-the-badge&logo=windows" alt="Platform" />
-  <img src="https://img.shields.io/badge/Free%20%26%20Offline-blue?style=for-the-badge" alt="Free and offline" />
   <a href="https://www.virustotal.com/gui/file/14ee58d1ecdafba85efec4897fd00c0f6e63a3945f26ed63df7a29505f0d1957"><img src="https://img.shields.io/badge/VirusTotal-scan%20report-blue?style=for-the-badge" alt="VirusTotal scan report of the v1.4.0 installer" /></a>
 </p>
 
@@ -36,18 +35,17 @@ It works for every app at once: Discord, Steam, Zoom, Google Meet, OBS and games
 
 ## Quick start
 
-1. **Install.** [![Download Latest Installer](https://img.shields.io/badge/Download%20Latest%20Installer-v1.4.0-blue?style=flat-square&logo=windows)](https://github.com/skttr87/getsu/releases/latest)  
-   Download and run the [latest Getsu setup installer](https://github.com/skttr87/getsu/releases/latest). The installer sets up the free VB-CABLE virtual audio cable in the background.
+1. **Install.** Download and run the [latest Getsu setup installer](https://github.com/skttr87/getsu/releases/latest). The installer sets up the free VB-CABLE virtual audio cable in the background.
 2. **Pick your microphone.** Open Getsu from the Desktop or Start Menu and choose your microphone in the microphone card.
 3. **Click the power button.** Getsu starts cleaning your voice. Apps set to the **Default** microphone use the clean voice automatically. Click the button again to stop.
 
-To hear how you sound, click **Hear Myself (11s Voice Test)** while Getsu is stopped. Speak for 11 seconds and Getsu plays back your cleaned voice.
+To hear how you sound, click **Hear myself** while noise cancellation is off. Speak for 11 seconds and Getsu plays back your cleaned voice.
 
 ## New in v1.4.0
 
 - A new interface.
-- **Start with Windows:** tick it in the tray menu. Getsu then starts hidden in the tray at sign-in, turns noise cancellation back on if it was on when you closed it, and waits up to 20 seconds for USB or Bluetooth microphones that appear late. Untick it to turn it off. Uninstalling removes the startup entry.
-- More microphones work, including microphone names in other languages and headset microphones that run at 16 kHz (issues #1 and #3).
+- **Start with Windows** (issue #1)**:** tick it in the tray menu. Getsu then starts hidden in the tray at sign-in, turns noise cancellation back on if it was on when you closed it, and waits up to 20 seconds for USB or Bluetooth microphones that appear late. Untick it to turn it off. Uninstalling removes the startup entry.
+- More microphones work, including microphone names in other languages and headset microphones that run at 16 kHz (issue #3).
 - The noise filter runs about 4 times faster than in v1.3.1.
 - Getsu switches to a USB or wired headset when you plug it in.
 - Windows can no longer leave the virtual cable as your default microphone or speakers. While Getsu is closed, the cable it installed is hidden.
@@ -76,8 +74,8 @@ Results on other PCs will differ.
 
 Getsu sends clean audio to apps set to the **Default** microphone. An app that was locked to your physical microphone needs a change:
 
-* **Steam:** Settings > Voice > set **Voice Input Device** to `Default` (or `CABLE Output (VB-Audio Virtual Cable)`). Turn off Steam's own Noise Cancellation to avoid double processing.
-* **Discord:** User Settings > Voice & Video > set **Input Device** to `Default` (or `CABLE Output (VB-Audio Virtual Cable)`). Turn off Discord's Krisp noise suppression.
+* **Steam:** Settings > Voice > set **Voice Input Device** to `Default` (or `CABLE Output`). Turn off Steam's own Noise Cancellation to avoid double processing.
+* **Discord:** User Settings > Voice & Video > set **Input Device** to `Default` (or `CABLE Output`). Turn off Discord's Krisp noise suppression.
 * **Games (CS2, Valorant, Apex, Call of Duty):** in the in-game audio or voice settings, use `Default System Device` or `CABLE Output`.
 * Turn off the app's own voice activation threshold.
 

@@ -186,7 +186,9 @@ class PublishRegexTests(unittest.TestCase):
         self.publish.sync_codebase_versions(self.VERSION)
         text = _read(os.path.join(self.tmp, "README.md"))
         self.assertEqual(text.count(f"https://img.shields.io/badge/Release-v{self.VERSION}-"), 1)
-        self.assertEqual(text.count(f"https://img.shields.io/badge/Download%20Latest%20Installer-v{self.VERSION}-"), 1)
+        # The Download Latest Installer badge was removed (2026-11-27, it sat misaligned in Quick start); the release
+        # badge is the only versioned badge.
+        self.assertNotIn("Download%20Latest%20Installer", text)
 
     def test_sitemap_lastmod_is_rewritten(self):
         self.publish.sync_codebase_versions(self.VERSION)

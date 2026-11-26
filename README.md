@@ -14,6 +14,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License" /></a>
   <img src="https://img.shields.io/badge/Platform-Windows_10%2F11-0078D6?style=for-the-badge&logo=windows" alt="Platform" />
   <img src="https://img.shields.io/badge/Free%20%26%20Offline-blue?style=for-the-badge" alt="Free and offline" />
+  <a href="https://www.virustotal.com/gui/file/14ee58d1ecdafba85efec4897fd00c0f6e63a3945f26ed63df7a29505f0d1957"><img src="https://img.shields.io/badge/VirusTotal-scan%20report-blue?style=for-the-badge" alt="VirusTotal scan report of the v1.4.0 installer" /></a>
 </p>
 
 > [!NOTE]
@@ -49,7 +50,7 @@ To hear how you sound, click **Hear Myself (11s Voice Test)** while Getsu is sto
 - More microphones work, including microphone names in other languages and headset microphones that run at 16 kHz (issues #1 and #3).
 - The noise filter runs about 4 times faster than in v1.3.1.
 - Getsu switches to a USB or wired headset when you plug it in.
-- Windows can no longer leave the virtual cable as your default microphone or speakers.
+- Windows can no longer leave the virtual cable as your default microphone or speakers. While Getsu is closed, the cable it installed is hidden.
 - Better handling of Bluetooth headsets. The virtual cable is set to 48 kHz, and a too-low microphone level is fixed once when you turn noise cancellation on.
 - Tray menu: **Check for updates** (opens the GitHub releases page) and **Save diagnostics**.
 
@@ -92,7 +93,11 @@ When a Bluetooth headset uses its microphone, Windows switches it to call qualit
 
 ### Windows SmartScreen says "Unknown publisher"
 
-Getsu is open-source software and is not signed with a paid code-signing certificate. Click **More info**, then **Run anyway**. The SHA-256 checksum of each installer is listed on the [releases page](https://github.com/skttr87/getsu/releases).
+Getsu is open-source software and is not signed with a paid code-signing certificate. Click **More info**, then **Run anyway**. The SHA-256 checksum of each installer is listed on the [releases page](https://github.com/skttr87/getsu/releases), and you can see the [VirusTotal scan of the v1.4.0 installer](https://www.virustotal.com/gui/file/14ee58d1ecdafba85efec4897fd00c0f6e63a3945f26ed63df7a29505f0d1957).
+
+### CABLE Input and CABLE Output are missing from the Sound settings
+
+That is on purpose. While Getsu is closed, it hides the virtual cable it installed, so Windows can never pick the cable as your speakers or microphone. The cable comes back when you open Getsu. A VB-CABLE you installed yourself is never hidden.
 
 ## Privacy
 
@@ -100,6 +105,15 @@ Getsu is open-source software and is not signed with a paid code-signing certifi
 * **Check for updates** only opens the GitHub releases page in your browser.
 * Audio never leaves your PC and is never saved to disk.
 * No account or login is needed. The full source code is in this repository.
+
+## What Getsu changes on your PC
+
+* **Default microphone:** while noise cancellation is on, CABLE Output is your default microphone, so apps get the clean voice. When you turn it off or close Getsu, your own microphone is set back.
+* **Speakers:** Getsu never picks your speakers. It only moves them away from the virtual cable if Windows chose the cable.
+* **Its own virtual cable:** set to 48 kHz and full level, and hidden while Getsu is closed. Only the cable Getsu installed; a VB-CABLE you installed yourself is left alone.
+* **Microphone level:** if your microphone's recording level is below 65 % when you turn noise cancellation on, Getsu raises it to 95 % once. If you lower it again, Getsu leaves it alone.
+* **Start with Windows:** only when you tick it in the tray menu.
+* **Files:** settings and a size-limited log in `%APPDATA%\Getsu`. Uninstalling removes them.
 
 ## How Getsu compares
 

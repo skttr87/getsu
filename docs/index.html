@@ -565,6 +565,8 @@
       color: var(--text-2);
       font-size: 15px;
     }
+    .list-title { text-align: center; margin: 48px 0 24px; }
+    .credits li code { background: var(--bg); }
     .credits li strong { color: var(--text); font-weight: 600; }
     .sponsor {
       display: flex;
@@ -791,7 +793,7 @@
           </article>
           <article class="card">
             <h3>Safer Windows defaults</h3>
-            <p>Windows can no longer leave the virtual cable as your default microphone or speakers.</p>
+            <p>Windows can no longer leave the virtual cable as your default microphone or speakers. While Getsu is closed, its cable is hidden.</p>
           </article>
           <article class="card">
             <h3>Better Bluetooth headsets</h3>
@@ -873,7 +875,12 @@
 
           <details>
             <summary>Windows SmartScreen says "Unknown publisher"</summary>
-            <p>Getsu is open-source software and is not signed with a paid code-signing certificate. Click <strong>More info</strong>, then <strong>Run anyway</strong>. The SHA-256 checksum of each installer is listed on the <a href="https://github.com/skttr87/getsu/releases/latest" target="_blank" rel="noopener">release page</a>.</p>
+            <p>Getsu is open-source software and is not signed with a paid code-signing certificate. Click <strong>More info</strong>, then <strong>Run anyway</strong>. The SHA-256 checksum of each installer is listed on the <a href="https://github.com/skttr87/getsu/releases/latest" target="_blank" rel="noopener">release page</a>, and you can see the <a href="https://www.virustotal.com/gui/file/14ee58d1ecdafba85efec4897fd00c0f6e63a3945f26ed63df7a29505f0d1957" target="_blank" rel="noopener">VirusTotal scan of the v1.4.0 installer</a>.</p>
+          </details>
+
+          <details>
+            <summary>CABLE Input and CABLE Output are missing from the Sound settings</summary>
+            <p>That is on purpose. While Getsu is closed, it hides the virtual cable it installed, so Windows can never pick the cable as your speakers or microphone. The cable comes back when you open Getsu. A VB-CABLE you installed yourself is never hidden.</p>
           </details>
         </div>
       </div>
@@ -900,6 +907,15 @@
             <p>Audio is never written to disk and no account is needed. The source code is public on GitHub.</p>
           </article>
         </div>
+        <h3 class="list-title">What Getsu changes on your PC</h3>
+        <ul class="credits">
+          <li><strong>Default microphone:</strong> while noise cancellation is on, CABLE Output is your default microphone, so apps get the clean voice. When you turn it off or close Getsu, your own microphone is set back.</li>
+          <li><strong>Speakers:</strong> Getsu never picks your speakers. It only moves them away from the virtual cable if Windows chose the cable.</li>
+          <li><strong>Its own virtual cable:</strong> set to 48 kHz and full level, and hidden while Getsu is closed. Only the cable Getsu installed; a VB-CABLE you installed yourself is left alone.</li>
+          <li><strong>Microphone level:</strong> if your microphone's recording level is below 65 % when you turn noise cancellation on, Getsu raises it to 95 % once. If you lower it again, Getsu leaves it alone.</li>
+          <li><strong>Start with Windows:</strong> only when you tick it in the tray menu.</li>
+          <li><strong>Files:</strong> settings and a size-limited log in <code>%APPDATA%\Getsu</code>. Uninstalling removes them.</li>
+        </ul>
       </div>
     </section>
 

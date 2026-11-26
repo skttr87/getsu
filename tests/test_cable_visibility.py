@@ -210,11 +210,23 @@ class ShowHideTests(unittest.TestCase):
         setter.assert_called_once_with(REN_ID, False)
         self.assertEqual(results, {CABLE_OUT["name"]: "ok", CABLE_IN["name"]: "hidden"})
 
-    def test_show_always_uses_only_the_registry_marker(self):
+    def test_show_always_needs_a_marker_or_the_in_app_flag(self):
         with patch.object(cable_visibility, "_registry_marker", return_value=False), \
+                patch("src.config.load_config", return_value={"cable_installed_by_getsu": False}), \
                 patch.object(win_audio, "set_getsu_cable_visibility") as setter:
             self.assertEqual(cable_visibility.show_always(), {})
         setter.assert_not_called()
+
+    def test_show_always_shows_a_cable_installed_in_the_app(self):
+        """An in-app install only sets the config flag; the uninstaller must still show the cable again."""
+        hidden = dict(CABLE_IN, state="disabled")
+        with patch.object(cable_visibility, "_registry_marker", return_value=False), \
+                patch("src.config.load_config", return_value={"cable_installed_by_getsu": True}), \
+                patch.object(win_audio, "native_list_getsu_cable_endpoints", return_value=[hidden]), \
+                patch.object(cable_visibility, "_wait_active", return_value=True), \
+                patch.object(win_audio, "set_getsu_cable_visibility", return_value=True) as setter:
+            self.assertEqual(cable_visibility.show_always(), {CABLE_IN["name"]: "shown"})
+        setter.assert_called_once_with(CABLE_IN["id"], True)
 
     def test_failures_never_raise(self):
         with patch.object(cable_visibility, "_registry_marker", return_value=True), \
@@ -278,12 +290,10 @@ class MainWiringTests(unittest.TestCase):
         main_def = self.src.index("def main():")
         self.assertIn("if not (args.check_devices or args.install_driver):", self.src[main_def:main_def + 400])
 
-    def test_cli_shutdown_hides_after_the_engine_stops(self):
+    def test_cli_shutdown_never_hides(self):
+        """--cli skips the single-instance check: hiding on its exit could cut off a running window's cable."""
         shut = self.src.index("def shutdown(")
-        stop = self.src.index("engine.prepare_for_stop()", shut)
-        hide = self.src.index("hide_cable(config)", shut)
-        self.assertLess(stop, hide)
-        self.assertLess(hide, self.src.index("sys.exit(0)", shut))
+        self.assertNotIn("hide_cable", self.src[shut:self.src.index("sys.exit(0)", shut)])
 
     def test_install_driver_marks_the_cable(self):
         install = self.src.index("success = install_vbcable_driver()")

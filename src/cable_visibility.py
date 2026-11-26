@@ -138,10 +138,17 @@ def hide_cable(config: Optional[Dict]) -> Dict[str, str]:
 
 
 def show_always(timeout_s: float = SHOW_TIMEOUT_S, poll_s: float = POLL_S) -> Dict[str, str]:
-    """Uninstaller path: shows the cable when the installer's registry marker exists, whatever the config says."""
+    """Uninstaller path: shows the cable when Getsu installed it, by the installer's registry marker or by an in-app
+    install (config flag), so no cable Getsu hid stays hidden after Getsu is removed."""
     try:
         if not _registry_marker():
-            return {}
+            try:
+                from src.config import load_config
+                config = load_config()
+            except Exception:
+                config = None
+            if not cable_installed_by_getsu(config):
+                return {}
         return _show_all(timeout_s, poll_s)
     except Exception as e:
         logger.warning(f"[CABLE VISIBILITY] show-always failed: {e}")

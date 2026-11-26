@@ -96,9 +96,7 @@ def run_cli_mode():
     def shutdown(sig=None, frame=None):
         print("\n[GETSU] Stopping audio engine...")
         engine.prepare_for_stop()
-        # Last audio step: the microphone is restored, so the cable can be hidden (cable visibility, rules.md section 3).
-        from src.cable_visibility import hide_cable
-        hide_cable(config)
+        # No hide here: --cli skips the single-instance check, so the window may be running and still need the cable.
         sys.exit(0)
 
     signal.signal(signal.SIGINT, shutdown)

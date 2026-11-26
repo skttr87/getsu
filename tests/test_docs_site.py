@@ -82,10 +82,14 @@ class TextRulesTests(unittest.TestCase):
             for item in banned:
                 self.assertNotIn(item, text, f"{item!r} still in {os.path.basename(path)}")
 
-    def test_release_time_placeholder_is_an_html_comment(self):
+    def test_release_measurements_are_filled_in(self):
+        """v1.4.0: delay and installer size were measured (2026-11-26), so no placeholder may remain."""
         for path in (INDEX, README):
             text = _read(path)
-            self.assertRegex(text, r"<!--[^>]*measured at release", os.path.basename(path))
+            name = os.path.basename(path)
+            self.assertNotIn("measured at release", text, name)
+            self.assertIn("110 ms", text, name)
+            self.assertIn("29 MB", text, name)
 
 
 class ThirdPartyRequestTests(unittest.TestCase):

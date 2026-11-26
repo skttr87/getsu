@@ -47,6 +47,8 @@ VersionInfoOriginalFileName=Getsu-v{#MyAppVersion}-Setup.exe
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Messages]
+SetupAppRunningError=Getsu is running.%n%nPlease close Getsu from the system tray: right-click the Getsu icon next to the clock and choose Exit. Then click OK to continue, or Cancel to exit Setup.
+UninstallAppRunningError=Getsu is running.%n%nPlease close Getsu from the system tray: right-click the Getsu icon next to the clock and choose Exit. Then click OK to continue, or Cancel to stop uninstalling.
 UninstallAppTitle=Getsu Uninstaller
 UninstallAppFullTitle=Getsu Uninstaller
 FinishedLabel=Setup has finished installing [name] on your computer.%n%nNotice: Keep your normal Speakers or Headphones selected for your Windows sound (taskbar volume icon). Getsu will automatically route your clean microphone to your games and voice apps.

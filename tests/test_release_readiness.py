@@ -40,6 +40,12 @@ class InstallerCleanup(unittest.TestCase):
     def test_installer_sets_the_cable_format_after_installing_vb_cable(self):
         self.assertIn("'--set-cable-format'", self.iss)
 
+    def test_app_running_message_says_how_to_close_getsu(self):
+        for key in ("SetupAppRunningError=", "UninstallAppRunningError="):
+            line = next(l for l in self.iss.splitlines() if l.startswith(key))
+            self.assertIn("close Getsu from the system tray", line)
+            self.assertIn("choose Exit", line)
+
     def test_upgrade_hides_the_cable_again(self):
         """PrepareToInstall force-closes Getsu, so the upgrade path hides the cable itself."""
         upgrade = self.iss[self.iss.index("If already installed, ensure physical microphone remains default"):]

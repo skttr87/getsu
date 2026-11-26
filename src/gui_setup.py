@@ -38,6 +38,10 @@ class SetupMixin:
 
         def worker():
             success = install_vbcable_driver()
+            if success:
+                # Getsu installed the cable: its endpoints are hidden while Getsu is closed (cable_visibility.py).
+                from src.cable_visibility import mark_cable_installed_by_getsu
+                mark_cable_installed_by_getsu(self.config)
 
             # Wait for Windows AudioEndpointBuilder and Audiosrv to register the endpoints: poll every second, up to 10 s.
             for _ in range(10):

@@ -141,6 +141,8 @@ class TrayApp:
         print("[UI] Launching VB-Audio Virtual Cable installer...")
         success = install_vbcable_driver()
         if success:
+            from src.cable_visibility import mark_cable_installed_by_getsu
+            mark_cable_installed_by_getsu(self.config)
             print("[UI] VB-Cable installed! Please reboot or reload devices.")
         self._icon.update_menu()
 
@@ -148,6 +150,9 @@ class TrayApp:
         print("[UI] Exiting Getsu...")
         try:
             self.engine.prepare_for_stop()
+            # Last audio step: the microphone is restored, so Getsu's cable can be hidden (cable_visibility.py).
+            from src.cable_visibility import hide_cable
+            hide_cable(self.config)
         finally:
             icon.stop()
 

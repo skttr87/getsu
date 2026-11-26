@@ -309,6 +309,12 @@ class GetsuGUI(
                 self.router.restore_original()
             except Exception:
                 pass
+        # Last audio step: the microphone is restored, so Getsu's own cable can be hidden (cable_visibility.py).
+        try:
+            from src.cable_visibility import hide_cable
+            hide_cable(self.config)
+        except Exception:
+            pass
 
     def _persist_was_running(self, running: bool):
         """Stores whether noise cancellation is on, for the next Start with Windows launch. Never raises."""

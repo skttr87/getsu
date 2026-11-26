@@ -778,11 +778,12 @@ def _describe_endpoint(pDev) -> Optional[Dict[str, Any]]:
     return {"id": endpoint_id, "name": name, "bus": bus, "form_factor": form_factor}
 
 
-def native_list_active_endpoints(is_input: bool) -> List[Dict[str, Any]]:
+def _enumerate_endpoints(is_input: bool, state_mask: int) -> List[Dict[str, Any]]:
     """
-    Lists the active capture (is_input) or render endpoints in one COM pass.
-    Each entry is {"id", "name", "bus", "form_factor"}; bus is a DeviceBusType string and form_factor an
-    EndpointFormFactor value or None. Read-only. Returns an empty list when COM is not available.
+    Lists the capture (is_input) or render endpoints whose state is in state_mask (DEVICE_STATE_* bits) in one COM pass.
+    Each entry is {"id", "name", "bus", "form_factor", "state"}; bus is a DeviceBusType string, form_factor an
+    EndpointFormFactor value or None, state "active", "disabled" or "unknown". Read-only.
+    Returns an empty list when COM is not available.
     """
     if sys.platform != 'win32' or not ole32:
         return []
@@ -799,8 +800,7 @@ def native_list_active_endpoints(is_input: bool) -> List[Dict[str, Any]]:
         EnumAudioEndpoints = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_int, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p))(enum_vtable[3])
         dataflow = 1 if is_input else 0  # eCapture = 1, eRender = 0
         pCol = ctypes.c_void_p()
-        # DEVICE_STATE_ACTIVE = 1
-        if EnumAudioEndpoints(pEnum, dataflow, 1, ctypes.byref(pCol)) != 0 or not pCol:
+        if EnumAudioEndpoints(pEnum, dataflow, state_mask, ctypes.byref(pCol)) != 0 or not pCol:
             return []
 
         col_vtable = ctypes.cast(ctypes.cast(pCol, ctypes.POINTER(ctypes.c_void_p)).contents, ctypes.POINTER(ctypes.c_void_p))
@@ -817,16 +817,48 @@ def native_list_active_endpoints(is_input: bool) -> List[Dict[str, Any]]:
             try:
                 entry = _describe_endpoint(pDev)
                 if entry is not None:
+                    entry["state"] = _device_state_name(pDev)
                     result.append(entry)
             finally:
                 _release_com_ptr(pDev)
         return result
     except Exception as e:
-        logger.debug(f"native_list_active_endpoints exception: {e}")
+        logger.debug(f"_enumerate_endpoints exception: {e}")
         return []
     finally:
         _release_com_ptr(pCol)
         _release_com_ptr(pEnum)
+
+
+# Endpoint state bits (DEVICE_STATE_* in mmdeviceapi.h).
+DEVICE_STATE_ACTIVE = 1
+DEVICE_STATE_DISABLED = 2
+
+
+def _device_state_name(pDev) -> str:
+    """Returns "active", "disabled" or "unknown" for one IMMDevice (IMMDevice::GetState, vtable slot 6). Read-only."""
+    try:
+        dev_vtable = ctypes.cast(ctypes.cast(pDev, ctypes.POINTER(ctypes.c_void_p)).contents, ctypes.POINTER(ctypes.c_void_p))
+        GetState = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(wintypes.DWORD))(dev_vtable[6])
+        state = wintypes.DWORD()
+        if GetState(pDev, ctypes.byref(state)) != 0:
+            return "unknown"
+        if state.value == DEVICE_STATE_ACTIVE:
+            return "active"
+        if state.value == DEVICE_STATE_DISABLED:
+            return "disabled"
+        return "unknown"
+    except Exception:
+        return "unknown"
+
+
+def native_list_active_endpoints(is_input: bool) -> List[Dict[str, Any]]:
+    """
+    Lists the active capture (is_input) or render endpoints in one COM pass.
+    Each entry is {"id", "name", "bus", "form_factor", "state"}; bus is a DeviceBusType string and form_factor an
+    EndpointFormFactor value or None. Read-only. Returns an empty list when COM is not available.
+    """
+    return _enumerate_endpoints(is_input, DEVICE_STATE_ACTIVE)
 
 
 import re
@@ -1071,6 +1103,64 @@ def set_getsu_cable_format(endpoint_id: str, rate: int = 48000) -> bool:
         hr_text = "none" if hr is None else hex(hr & 0xffffffff)
         logger.warning(f"[CABLE FORMAT] '{target['name']}' not changed (hr {hr_text}, now {after}).")
     return ok
+
+
+# --- Cable visibility (owner decision 2026-11-26): the only code that hides or shows a device ----------------------
+# IPolicyConfig vtable: 13 SetDefaultEndpoint (above), 14 SetEndpointVisibility(LPCWSTR deviceId, INT visible).
+_VT_SET_ENDPOINT_VISIBILITY = 14
+
+
+def native_list_getsu_cable_endpoints() -> List[Dict[str, Any]]:
+    """
+    Getsu's VB-CABLE endpoints, active and hidden (disabled) ones, both directions:
+    [{"id", "name", "is_input", "state"}] with state "active", "disabled" or "unknown". Read-only.
+    """
+    from src.devices import is_getsu_cable_endpoint
+
+    found: List[Dict[str, Any]] = []
+    for is_input in (True, False):
+        for e in _enumerate_endpoints(is_input, DEVICE_STATE_ACTIVE | DEVICE_STATE_DISABLED):
+            if is_getsu_cable_endpoint(e.get("name", "")):
+                found.append({"id": e["id"], "name": e["name"], "is_input": is_input, "state": e["state"]})
+    return found
+
+
+def set_getsu_cable_visibility(endpoint_id: str, visible: bool) -> bool:
+    """
+    The only function in src that hides or shows a device. It sets Windows' endpoint visibility on one endpoint of the
+    VB-CABLE that Getsu installs (CABLE Input or CABLE Output): visible=False disables (hides) it, visible=True enables
+    (shows) it. Any other device is refused, as is an ID that is not an active or hidden Getsu cable endpoint.
+    Returns True when Windows accepted the call. Never raises.
+    """
+    from src.devices import is_getsu_cable_endpoint
+
+    try:
+        if not endpoint_id or not ENDPOINT_GUID_PATTERN.match(endpoint_id.strip()):
+            logger.warning(f"Cable visibility not changed: '{endpoint_id}' is not an endpoint ID.")
+            return False
+        endpoint_id = endpoint_id.strip()
+        endpoints = native_list_getsu_cable_endpoints()
+        target = next((e for e in endpoints if e["id"] == endpoint_id), None)
+        if target is None or not is_getsu_cable_endpoint(target["name"]):
+            logger.warning(f"Cable visibility not changed: {endpoint_id} is not a VB-CABLE endpoint of Getsu.")
+            return False
+
+        def action(pPolicy, vtable):
+            set_visibility = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, wintypes.LPCWSTR, ctypes.c_int)(
+                vtable[_VT_SET_ENDPOINT_VISIBILITY])
+            return set_visibility(pPolicy, endpoint_id, 1 if visible else 0)
+
+        hr = _with_policy_config(action)
+        ok = hr == 0
+        if ok:
+            logger.info(f"[CABLE VISIBILITY] '{target['name']}' {'shown' if visible else 'hidden'}.")
+        else:
+            hr_text = "none" if hr is None else hex(hr & 0xffffffff)
+            logger.warning(f"[CABLE VISIBILITY] '{target['name']}' not changed (hr {hr_text}).")
+        return ok
+    except (Exception, OSError) as e:
+        logger.warning(f"[CABLE VISIBILITY] changing {endpoint_id} failed: {e}")
+        return False
 
 
 # --- Endpoint levels (owner decision 2026-11-24): the only code that sets a device level -----------------------------

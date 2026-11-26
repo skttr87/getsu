@@ -12,8 +12,8 @@ import argparse
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # Fast Single-Instance Micro-Checker (exits in <5ms if Getsu is already running)
-if not any(arg in sys.argv for arg in ("--check-devices", "--install-driver", "--set-cable-format", "-h", "--help",
-                                       "--cli", "--clean", "--batch")):
+if not any(arg in sys.argv for arg in ("--check-devices", "--install-driver", "--set-cable-format", "--cable-visibility",
+                                       "-h", "--help", "--cli", "--clean", "--batch")):
     from src.single_instance import activate_existing_instance
     # A --minimized launch (Start with Windows) still exits when Getsu is running, but must not raise its window.
     if activate_existing_instance(restore="--minimized" not in sys.argv):
@@ -23,6 +23,11 @@ if not any(arg in sys.argv for arg in ("--check-devices", "--install-driver", "-
 if "--set-cable-format" in sys.argv:
     from src.cable_format import main_cli as cable_format_main
     sys.exit(cable_format_main())
+
+# Run by the installer and uninstaller: show or hide Getsu's own VB-CABLE and exit (no window, no tray).
+if "--cable-visibility" in sys.argv:
+    from src.cable_visibility import main_cli as cable_visibility_main
+    sys.exit(cable_visibility_main(sys.argv))
 
 # Direct delegate to Headless CLI Cleaner if invoked with --clean or --batch
 if any(arg in sys.argv for arg in ("--clean", "--batch")):
@@ -91,6 +96,9 @@ def run_cli_mode():
     def shutdown(sig=None, frame=None):
         print("\n[GETSU] Stopping audio engine...")
         engine.prepare_for_stop()
+        # Last audio step: the microphone is restored, so the cable can be hidden (cable visibility, rules.md section 3).
+        from src.cable_visibility import hide_cable
+        hide_cable(config)
         sys.exit(0)
 
     signal.signal(signal.SIGINT, shutdown)
@@ -110,8 +118,26 @@ def run_cli_mode():
         shutdown()
 
 
+def _show_cable_at_start():
+    """Shows Getsu's own hidden VB-CABLE before any device is listed. PortAudio caches its device list, so it is
+    re-initialised when a cable endpoint was shown. Never raises."""
+    try:
+        from src.cable_visibility import show_cable
+        results = show_cable(load_config())
+        if any(state == "shown" for state in results.values()):
+            import sounddevice as sd
+            sd._terminate()
+            sd._initialize()
+    except Exception as e:
+        print(f"[CABLE VISIBILITY] Could not show the cable: {e}")
+
+
 def main():
     args = parse_args()
+
+    # Show Getsu's cable while Getsu runs. This is after the single-instance check (a second instance exits before this).
+    if not (args.check_devices or args.install_driver):
+        _show_cable_at_start()
 
     # Startup Audit: Auto-recover Windows default mic if previous session ended in unclean shutdown
     try:
@@ -130,6 +156,8 @@ def main():
         print("[SETUP] Installing VB-Audio Virtual Cable driver...")
         success = install_vbcable_driver()
         if success:
+            from src.cable_visibility import mark_cable_installed_by_getsu
+            mark_cable_installed_by_getsu(load_config())
             print("[SETUP] Success! Please restart your computer or reload devices.")
         else:
             print("[SETUP] Installation cancelled or failed.")

@@ -24,5 +24,8 @@
     "preclip_knee": 0.95,
     "stereo_downmix": "auto",
     "vad_floor_tilt_hz": 0.0,
-    "rnnoise_dry_mix_db": null
+    "rnnoise_dry_mix_db": null,
+    "was_running_on_exit": false,
+    "last_physical_playback_id": null,
+    "mic_level_raised": []
 }

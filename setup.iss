@@ -83,6 +83,9 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilen
 
 [InstallDelete]
 Type: files; Name: "{autoprograms}\Getsu Uninstaller.lnk"
+; Clean upgrade: remove the previous version's bundled runtime so no stale library or module is left beside the new one.
+; User settings live in %APPDATA%\Getsu and are not touched.
+Type: filesandordirs; Name: "{app}\_internal"
 
 [UninstallDelete]
 Type: files; Name: "{app}\config.json"
@@ -384,6 +387,8 @@ begin
     // Clean up %APPDATA%\Getsu\config.json and folder
     if FileExists(ExpandConstant('{userappdata}\Getsu\config.json')) then
       DeleteFile(ExpandConstant('{userappdata}\Getsu\config.json'));
+    // The rotating log (getsu.log, getsu.log.1 ...) lives in the same folder; without this the folder stays behind
+    DelTree(ExpandConstant('{userappdata}\Getsu\getsu.log*'), False, True, False);
     RemoveDir(ExpandConstant('{userappdata}\Getsu'));
 
     // Safely remove folders ONLY if completely empty (Win32 RemoveDirectory)

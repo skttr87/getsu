@@ -47,7 +47,7 @@ To hear how you sound, click **Hear Myself (11s Voice Test)** while Getsu is sto
 - A new interface.
 - **Start with Windows:** tick it in the tray menu. Getsu then starts hidden in the tray at sign-in, turns noise cancellation back on if it was on when you closed it, and waits up to 20 seconds for USB or Bluetooth microphones that appear late. Untick it to turn it off. Uninstalling removes the startup entry.
 - More microphones work, including microphone names in other languages and headset microphones that run at 16 kHz (issues #1 and #3).
-- The noise filter runs about 5 times faster.
+- The noise filter runs about 4 times faster than in v1.3.1.
 - Getsu switches to a USB or wired headset when you plug it in.
 - Windows can no longer leave the virtual cable as your default microphone or speakers.
 - Better handling of Bluetooth headsets. The virtual cable is set to 48 kHz, and a too-low microphone level is fixed once when you turn noise cancellation on.

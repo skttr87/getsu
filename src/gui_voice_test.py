@@ -1,6 +1,5 @@
 """The 11-second voice test (record, play back, purge) and the state of its button."""
 
-import threading
 import time
 
 import dearpygui.dearpygui as dpg

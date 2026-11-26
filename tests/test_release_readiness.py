@@ -40,6 +40,32 @@ class InstallerCleanup(unittest.TestCase):
     def test_installer_sets_the_cable_format_after_installing_vb_cable(self):
         self.assertIn("'--set-cable-format'", self.iss)
 
+    def test_upgrade_hides_the_cable_again(self):
+        """PrepareToInstall force-closes Getsu, so the upgrade path hides the cable itself."""
+        upgrade = self.iss[self.iss.index("If already installed, ensure physical microphone remains default"):]
+        self.assertIn("'--cable-visibility hide'", upgrade[:upgrade.index("[Run]")])
+
+
+class AudioRestoreHelper(unittest.TestCase):
+    def setUp(self):
+        with open(os.path.join(ROOT, "drivers", "vbcable", "AudioRestore.cs"), encoding="utf-8") as f:
+            self.cs = f.read()
+
+    def test_check_vbcable_counts_a_hidden_cable_as_installed(self):
+        """Getsu hides its cable while closed; the installer and uninstaller must still see the driver."""
+        check = self.cs[self.cs.index('"--check-vbcable"'):self.cs.index('"--backup"')]
+        self.assertIn("1 | 2 /* DEVICE_STATE_ACTIVE | DEVICE_STATE_DISABLED */", check)
+
+    def test_no_brand_names_in_device_choice(self):
+        for brand in ("mpow", "hyperx", "razer", "logitech", "corsair", "steelseries", "yeti", "fifine", "elgato",
+                      "rode", "sennheiser", "audio-technica"):
+            self.assertNotIn(f'"{brand}"', self.cs.lower(), brand)
+
+    def test_exe_is_newer_than_source(self):
+        folder = os.path.join(ROOT, "drivers", "vbcable")
+        self.assertGreaterEqual(os.path.getmtime(os.path.join(folder, "AudioRestore.exe")),
+                                os.path.getmtime(os.path.join(folder, "AudioRestore.cs")))
+
 
 if __name__ == "__main__":
     unittest.main()

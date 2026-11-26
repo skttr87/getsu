@@ -36,13 +36,10 @@ if any(arg in sys.argv for arg in ("--clean", "--batch")):
 
 from src.devices import (
     print_device_report,
-    auto_select_input_device,
-    auto_select_output_device,
-    check_vbcable_status,
     install_vbcable_driver,
 )
-from src.config import load_config, save_config
-from src.stream import AudioEngine, create_engine_from_config
+from src.config import load_config
+from src.stream import create_engine_from_config
 from src.gui import launch_gui
 
 

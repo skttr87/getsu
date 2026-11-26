@@ -1,6 +1,5 @@
 """First-run card for the virtual cable: states, install thread and the cable banner."""
 
-import threading
 import time
 
 import dearpygui.dearpygui as dpg
@@ -63,10 +62,6 @@ class SetupMixin:
                 self._install_state = "failed"
 
         self._start_thread(worker)
-
-    def show_setup_card_for_install(self):
-        """Brings the first-run card back (used by the power button while the cable is missing)."""
-        self.show_setup_card()
 
     @ui_only
     def _update_cable_banner(self):

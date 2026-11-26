@@ -480,6 +480,9 @@ begin
       begin
         Exec(AudioRestoreExe, '--ensure-physical-capture', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
       end;
+      // Upgrade: PrepareToInstall force-closed Getsu, so it could not hide its cable on exit. Hide it now; this acts
+      // only when Getsu installed the cable (registry marker or in-app flag) and does nothing otherwise.
+      Exec(ExpandConstant('{app}\{#MyAppExeName}'), '--cable-visibility hide', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     end;
   end;
 end;

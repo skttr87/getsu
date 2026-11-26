@@ -614,20 +614,20 @@ class AudioEngine:
 
             latency_setting = 0.035 if is_bluetooth else 'low'
 
-            log_info(f"[STREAM] Starting low-latency stream...")
+            log_info("[STREAM] Starting low-latency stream...")
             log_info(f"         Input  : [{self.input_device}] {in_dev_info['name']} ({self.in_channels} ch)")
             log_info(f"         Output : [{self.output_device}] {out_dev_info['name']} ({self.out_channels} ch)")
             if is_bluetooth:
-                log_info(f"         Latency: Bluetooth Jitter Buffer (35ms RF smoothing)")
+                log_info("         Latency: Bluetooth Jitter Buffer (35ms RF smoothing)")
             else:
-                log_info(f"         Blocksize: 10ms (480 samples @ 48kHz) | Est. Latency: ~45ms round-trip")
+                log_info("         Blocksize: 10ms (480 samples @ 48kHz)")
             
             self._open_with_ladder(extra_settings, latency_setting, is_wasapi)
 
 
             self._running = True
             self._last_callback_time = time.monotonic()
-            log_info(f"[STREAM] Active! DSP + RNNoise running in background.")
+            log_info("[STREAM] Active! DSP + RNNoise running in background.")
             if self.router and getattr(self.router, 'config', {}).get("auto_route", True):
                 try:
                     self.router_swap_success = bool(self.router.swap_to_cable())
